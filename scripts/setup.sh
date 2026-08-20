@@ -65,6 +65,7 @@ FS_ESL_PASSWORD="$(gen 32)"
 FS_XML_SECRET="$(gen 43)"
 AUTH_SECRET="$(gen 43)"
 POSTGRES_PASSWORD="$(gen 24)"
+POSTGRES_APP_PASSWORD="$(gen 32)"
 TURN_SECRET="$(gen 43)"
 
 # El host va SOLO como nombre, sin esquema ni barra ni ruta: se inserta
@@ -98,6 +99,10 @@ cat > .env <<EOF
 POSTGRES_USER=nspbx
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=nspbx
+
+# Rol restringido con el que la app atiende: es lo que hace que el
+# aislamiento por empresa se aplique de verdad. Ver .env.example.
+POSTGRES_APP_PASSWORD=${POSTGRES_APP_PASSWORD}
 
 FS_ESL_PASSWORD=${FS_ESL_PASSWORD}
 FS_XML_SECRET=${FS_XML_SECRET}

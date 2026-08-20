@@ -76,15 +76,33 @@ partir de ahí, un `SELECT * FROM extensions` sin `WHERE` devuelve solo lo
 del tenant activo. El día que alguien agregue un endpoint y olvide el
 filtro —que va a pasar— no hay fuga.
 
-Dos detalles que hacen que RLS funcione de verdad y que es fácil pasar
-por alto:
+Tres detalles que hacen que RLS funcione de verdad y que es fácil pasar
+por alto. Los tres están implementados; se dejan escritos porque cada uno
+falla **en silencio**:
 
-- `FORCE ROW LEVEL SECURITY`, porque el dueño de la tabla se saltea las
-  políticas por omisión.
-- La app **no** debe conectarse con el rol dueño ni con superusuario.
-  Hace falta un rol propio sin `BYPASSRLS`.
+- **La app no puede conectarse con el rol dueño.** El usuario que crea la
+  imagen de Postgres es superusuario, y un superusuario se saltea las
+  políticas siempre — ni siquiera `FORCE ROW LEVEL SECURITY` lo detiene.
+  Por eso hay un rol `nspbx_app` aparte, y el arranque **verifica** que no
+  sea superusuario ni tenga `BYPASSRLS` en vez de darlo por hecho.
 
-Sin esas dos cosas, RLS queda activo, no da error, y no filtra nada.
+- **`WITH CHECK` además de `USING`.** `USING` filtra lo que se lee;
+  sin `WITH CHECK` se puede escribir con el `tenant_id` de otra empresa
+  — insertar en la central ajena, que es peor que leerla.
+
+- **`SET LOCAL` no sobrevive a un `commit`.** Dura lo que dura la
+  transacción, y hay endpoints que hacen varios. La consulta siguiente
+  abriría una transacción sin empresa fijada y las políticas no
+  devolverían nada: listados vacíos, sin error, solo después del primer
+  commit. Se resuelve con un enganche `after_begin` que reaplica el valor
+  en cada transacción (`core/database.py`).
+
+Y una consecuencia que hay que aceptar: el **login** no puede pasar por
+RLS. Para saber de qué empresa es alguien hay que leer su fila en
+`users`, que es justamente lo que está protegido. Se resuelve con la
+sesión del dueño solo para esa consulta, y desde ahí la empresa viaja
+firmada dentro del token — así el resto de las peticiones la conocen sin
+volver a preguntar.
 
 ## Capa de FreeSWITCH
 

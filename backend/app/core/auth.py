@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import permissions
 from app.core.config import settings
-from app.core.database import get_session
+from app.core.database import fijar_tenant, get_session
 from app.core.security import leer_token
 from app.models import User
 
@@ -104,6 +104,19 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
         user_id = int(datos.get("sub", ""))
     except (TypeError, ValueError):
         raise _NO_AUTENTICADO
+
+    # La empresa se ata a la sesión ANTES de la primera consulta. Las
+    # tablas están protegidas por Row-Level Security, así que sin esto la
+    # consulta de acá abajo no devolvería ni al propio usuario y todo
+    # respondería 401 — un fallo desconcertante, porque el token sería
+    # perfectamente válido.
+    #
+    # El valor sale del token firmado y no de la base, que es lo que
+    # evita el círculo (ver security.crear_token). Un token sin `tid` es
+    # de la plataforma: queda sin empresa, y entonces las políticas no
+    # devuelven filas de ninguna. Eso es lo correcto — quien administra
+    # la plataforma entra por las rutas que usan la sesión del dueño.
+    fijar_tenant(session, datos.get("tid"))
 
     usuario = (await session.execute(select(User).where(User.id == user_id))).unique().scalar_one_or_none()
     # Se relee el usuario en cada petición en vez de confiar en el rol que

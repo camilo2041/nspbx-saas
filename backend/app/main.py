@@ -18,7 +18,7 @@ from app.api import ai_usage, appointments as appointments_api, auth as auth_api
 from app.core import permissions
 from app.core.auth import escribir_requiere, requiere, sesion_obligatoria
 from app.core.config import settings
-from app.core.database import Base, async_session, engine
+from app.core.database import Base, async_session, engine, verificar_rol_sin_privilegios
 from app.core.security import hash_password
 from app.models import CampaignNumber, Queue, Trunk, User
 
@@ -250,6 +250,92 @@ def _parches_multiempresa() -> list[str]:
 _COLUMN_PATCHES += _parches_multiempresa()
 
 
+# --- Multiempresa: paso 1b, Row-Level Security ----------------------
+# Hasta acá el aislamiento dependía de que cada consulta recordara filtrar
+# por tenant_id. Estas políticas lo mueven al motor: aunque el filtro
+# falte, Postgres no devuelve filas de otra empresa.
+#
+# `users` también entra: guarda correos y hashes de contraseña, así que
+# una consulta sin filtrar ahí es peor que una de negocio.
+_TABLAS_CON_RLS = _TABLAS_CON_TENANT + ["users"]
+
+# La empresa activa sale de una variable de sesión que fija la aplicación
+# en cada transacción (ver core/database.py).
+#
+# El segundo argumento `true` de current_setting es "missing_ok": sin él,
+# una conexión que todavía no la fijó revienta con un error de Postgres
+# en vez de simplemente no ver nada. Con NULLIF, si no está fijada la
+# comparación da NULL, que no es verdadero, y no se devuelve ninguna
+# fila. Es decir: el modo de falla por omisión es NO MOSTRAR NADA, nunca
+# mostrarlo todo — que es la propiedad que hace que esto valga la pena.
+_EMPRESA_ACTIVA = "NULLIF(current_setting('app.tenant_id', true), '')::int"
+
+
+def _parches_rls() -> list[str]:
+    """Rol de aplicación, permisos y políticas por tabla."""
+    from urllib.parse import urlsplit, unquote
+
+    stmts: list[str] = []
+
+    # El rol y su contraseña se deducen de DATABASE_URL_APP en vez de
+    # configurarse aparte: un tercer lugar donde repetir el mismo secreto
+    # es un tercer lugar donde puede quedar desincronizado, y el síntoma
+    # sería un backend que no arranca por credenciales inválidas.
+    if settings.database_url_app:
+        partes = urlsplit(settings.database_url_app)
+        rol = unquote(partes.username or "")
+        clave = unquote(partes.password or "")
+        if rol and clave:
+            # Comillas dobladas: la contraseña va como literal SQL y no
+            # hay forma de parametrizar un CREATE ROLE.
+            lit = clave.replace("'", "''")
+            stmts += [
+                f"""
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{rol}') THEN
+                    CREATE ROLE {rol} LOGIN PASSWORD '{lit}';
+                  ELSE
+                    ALTER ROLE {rol} LOGIN PASSWORD '{lit}';
+                  END IF;
+                END $$;
+                """,
+                # Sin NOSUPERUSER/NOBYPASSRLS explícitos no hay riesgo
+                # —CREATE ROLE no los da— pero sí lo hay si alguien los
+                # concedió a mano alguna vez para destrabar un permiso.
+                f"ALTER ROLE {rol} NOSUPERUSER NOBYPASSRLS",
+                f"GRANT USAGE ON SCHEMA public TO {rol}",
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {rol}",
+                f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {rol}",
+                # Para las tablas que se creen DESPUÉS de esta migración:
+                # sin esto, agregar una tabla nueva rompe la aplicación
+                # con un "permission denied" que no menciona que el
+                # problema es un permiso por omisión que nadie otorgó.
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {rol}",
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                f"GRANT USAGE, SELECT ON SEQUENCES TO {rol}",
+            ]
+
+    for tabla in _TABLAS_CON_RLS:
+        stmts += [
+            f"ALTER TABLE {tabla} ENABLE ROW LEVEL SECURITY",
+            # DROP + CREATE porque Postgres no tiene CREATE POLICY IF NOT
+            # EXISTS, y esto tiene que poder correrse en cada arranque.
+            f"DROP POLICY IF EXISTS p_tenant ON {tabla}",
+            f"CREATE POLICY p_tenant ON {tabla} "
+            f"USING (tenant_id = {_EMPRESA_ACTIVA}) "
+            # WITH CHECK además de USING: sin él se puede LEER solo lo
+            # propio pero ESCRIBIR con el tenant_id de otra empresa —
+            # insertar en la central ajena, que es peor que leerla.
+            f"WITH CHECK (tenant_id = {_EMPRESA_ACTIVA})",
+        ]
+    return stmts
+
+
+_COLUMN_PATCHES += _parches_rls()
+
+
 async def _asegurar_admin(session) -> None:
     """Crea el primer administrador si la tabla está vacía.
 
@@ -286,10 +372,18 @@ async def _asegurar_admin(session) -> None:
 
 
 async def lifespan(app: FastAPI):
+    # Las migraciones van con el motor del DUEÑO, no con el de la
+    # aplicación: el rol restringido está sujeto a las políticas que
+    # estas mismas sentencias crean, así que un UPDATE de relleno vería
+    # cero filas y la migración "terminaría bien" sin haber hecho nada.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         for stmt in _COLUMN_PATCHES:
             await conn.execute(text(stmt))
+    # Después de crear el rol y las políticas, comprobar que el rol con
+    # el que se va a atender NO puede saltárselas. Va acá y no antes
+    # porque el rol se crea recién en la migración de arriba.
+    await verificar_rol_sin_privilegios()
     async with async_session() as session:
         row = await settings_api.get_or_create_settings(session)
         settings_api.apply_to_runtime(row)

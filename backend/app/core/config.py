@@ -5,7 +5,26 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "NSPBX"
+
+    # Conexión del DUEÑO de las tablas. Se usa para migrar al arrancar y
+    # para las dos operaciones que por definición no pueden estar
+    # limitadas a una empresa: el login —todavía no se sabe de quién es
+    # el usuario que se escribió— y el alta de empresas.
     database_url: str = "postgresql+asyncpg://nspbx:nspbx_secret@localhost:5432/nspbx"
+
+    # Conexión con la que se atiende TODA la operación normal. Es un rol
+    # distinto, sin privilegios de dueño y sin BYPASSRLS, para que las
+    # políticas de Row-Level Security se le apliquen de verdad: un
+    # superusuario —y el usuario por omisión de la imagen de Postgres lo
+    # es— se las saltea siempre, incluso con FORCE ROW LEVEL SECURITY.
+    #
+    # Con RLS activo y esta conexión mal puesta, el aislamiento sería
+    # decorativo y nada lo delataría. Por eso el arranque lo comprueba en
+    # vez de confiar (ver app/core/database.py).
+    #
+    # Vacía = se usa la de arriba y NO hay aislamiento por base. Solo
+    # tiene sentido en desarrollo.
+    database_url_app: str = ""
 
     fs_esl_host: str = "localhost"
     fs_esl_port: int = 8021

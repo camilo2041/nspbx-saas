@@ -71,11 +71,21 @@ def verificar_password(password: str, almacenado: str) -> bool:
     return hmac.compare_digest(dk, base64.b64decode(hash_b64))
 
 
-def crear_token(user_id: int, rol: str) -> tuple[str, int]:
-    """Token de sesión. Devuelve `(token, segundos_de_vida)`."""
+def crear_token(user_id: int, rol: str, tenant_id: int | None = None) -> tuple[str, int]:
+    """Token de sesión. Devuelve `(token, segundos_de_vida)`.
+
+    La empresa (`tid`) viaja FIRMADA dentro del token en vez de buscarse
+    en la base en cada petición, y eso rompe un círculo: las tablas están
+    protegidas por empresa, así que para consultarlas hay que declarar
+    primero cuál es — pero averiguarlo leyendo `users` sería otra
+    consulta protegida. Viniendo del token, se sabe antes de tocar la
+    base.
+
+    `None` = usuario de la plataforma, sin empresa propia.
+    """
     vence = datetime.now(timezone.utc) + timedelta(hours=HORAS_DE_SESION)
     token = jwt.encode(
-        {"sub": str(user_id), "rol": rol, "exp": vence},
+        {"sub": str(user_id), "rol": rol, "tid": tenant_id, "exp": vence},
         _clave(),
         algorithm=ALGORITMO,
     )

@@ -121,6 +121,12 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:-nspbx_secret}@postgres:5432/${POSTGRES_DB:-nspbx}
+      # Rol restringido con el que se atiende la operación normal. Es lo
+      # que hace que el aislamiento por empresa (RLS) se aplique de
+      # verdad: el usuario de arriba es dueño de las tablas y se saltea
+      # las políticas. Sin esta variable el backend arranca igual, avisa
+      # por log y NO aísla nada — ver app/core/database.py.
+      DATABASE_URL_APP: postgresql+asyncpg://nspbx_app:${POSTGRES_APP_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-nspbx}
       FS_ESL_HOST: freeswitch
       FS_ESL_PORT: "8021"
       # Sin valor de respaldo a propósito: `:?` hace que falle el arranque
@@ -221,6 +227,12 @@ services:
     command: ["uvicorn", "app.voicebot_server:app", "--host", "0.0.0.0", "--port", "8090"]
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:-nspbx_secret}@postgres:5432/${POSTGRES_DB:-nspbx}
+      # Rol restringido con el que se atiende la operación normal. Es lo
+      # que hace que el aislamiento por empresa (RLS) se aplique de
+      # verdad: el usuario de arriba es dueño de las tablas y se saltea
+      # las políticas. Sin esta variable el backend arranca igual, avisa
+      # por log y NO aísla nada — ver app/core/database.py.
+      DATABASE_URL_APP: postgresql+asyncpg://nspbx_app:${POSTGRES_APP_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-nspbx}
       FS_SOUNDS_DIR: /freeswitch-sounds
     volumes:
       # Solo el de sonidos: acá se escribe el audio de "tecleo" y las

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app.core import permissions
 from app.core.auth import usuario_actual
-from app.core.database import get_session
+from app.core.database import get_admin_session, get_session
 from app.core.security import crear_token, hash_password, verificar_password
 from app.models import SystemSettings, User
 from app.schemas import CambiarPasswordRequest, LoginRequest, SesionOut, UserOut
@@ -30,7 +30,10 @@ def usuario_out(u: User) -> UserOut:
 
 
 def _sesion(u: User) -> SesionOut:
-    token, vida = crear_token(u.id, u.role)
+    # La empresa viaja dentro del token: es lo que permite atar cada
+    # petición a su aislamiento sin consultar la base primero (ver
+    # security.crear_token y core/auth.sesion_obligatoria).
+    token, vida = crear_token(u.id, u.role, u.tenant_id)
     return SesionOut(
         token=token,
         expira_en=vida,
@@ -40,7 +43,19 @@ def _sesion(u: User) -> SesionOut:
 
 
 @router.post("/login", response_model=SesionOut)
-async def login(payload: LoginRequest, session: AsyncSession = Depends(get_session)):
+async def login(payload: LoginRequest, session: AsyncSession = Depends(get_admin_session)):
+    """Única puerta que consulta `users` sin estar atada a una empresa.
+
+    Usa la sesión del DUEÑO, que no pasa por Row-Level Security, porque
+    acá todavía no se sabe a qué empresa pertenece quien escribió el
+    usuario: esa misma fila es la que lo dice. Con la sesión normal, la
+    política no encontraría empresa, la consulta devolvería vacío y
+    cualquier intento de entrar terminaría en "usuario o contraseña
+    incorrectos" — aun con la contraseña bien.
+
+    Es una excepción deliberada y acotada: busca por `username`, que es
+    único en toda la plataforma, y no expone ningún dato de negocio.
+    """
     usuario = (
         (await session.execute(select(User).where(User.username == payload.username.strip().lower())))
         .unique()
