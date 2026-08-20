@@ -129,6 +129,126 @@ _COLUMN_PATCHES = [
     "ALTER TABLE ai_call_usage ADD COLUMN IF NOT EXISTS action_patient_name VARCHAR(150)",
 ]
 
+# --- Multiempresa: paso 1 -------------------------------------------
+# Ver docs/arquitectura-multitenant.md.
+#
+# Tablas que pasan a pertenecer a una empresa. `users` NO está acá: su
+# tenant_id admite NULL para el usuario de la plataforma (ver el modelo),
+# así que se trata aparte, sin SET NOT NULL.
+_TABLAS_CON_TENANT = [
+    "trunks",
+    "extensions",
+    "voicebots",
+    "campaigns",
+    "campaign_numbers",
+    "system_settings",
+    "call_logs",
+    "ai_call_usage",
+    "queues",
+    "inbound_routes",
+    "appointments",
+]
+
+# Restricciones que Postgres creó con nombre automático cuando la columna
+# era `unique=True`. Hay que soltarlas ANTES de crear las compuestas: si
+# quedaran, la vieja seguiría prohibiendo que dos empresas usen el mismo
+# número de extensión o el mismo nombre de troncal — justo lo que este
+# paso viene a habilitar. Y el error que daría ("duplicate key") no
+# menciona en ningún momento que la culpa es de una restricción heredada
+# del modelo de una sola empresa.
+_UNIQUES_VIEJOS = [
+    ("trunks", "trunks_name_key"),
+    ("extensions", "extensions_number_key"),
+    ("voicebots", "voicebots_name_key"),
+    ("campaigns", "campaigns_name_key"),
+    ("queues", "queues_name_key"),
+    ("queues", "queues_extension_key"),
+]
+
+_UNIQUES_NUEVOS = [
+    ("ux_trunks_tenant_name", "trunks (tenant_id, name)"),
+    ("ux_extensions_tenant_number", "extensions (tenant_id, number)"),
+    ("ux_voicebots_tenant_name", "voicebots (tenant_id, name)"),
+    ("ux_campaigns_tenant_name", "campaigns (tenant_id, name)"),
+    ("ux_queues_tenant_name", "queues (tenant_id, name)"),
+    ("ux_queues_tenant_extension", "queues (tenant_id, extension)"),
+    ("ux_system_settings_tenant", "system_settings (tenant_id)"),
+    # El DID sí es único en TODA la plataforma: una llamada entrante solo
+    # trae el número marcado para decidir a qué empresa pertenece.
+    ("ux_inbound_routes_did", "inbound_routes (did_pattern)"),
+]
+
+
+def _parches_multiempresa() -> list[str]:
+    """SQL del paso 1, en un orden que no es negociable.
+
+    Primero la empresa inicial, después la columna admitiendo NULL,
+    después el relleno, y recién entonces el NOT NULL. Crear la columna
+    como NOT NULL de una vez falla en cualquier base que ya tenga datos,
+    porque no habría con qué llenar las filas existentes.
+    """
+    stmts: list[str] = [
+        # La empresa que hereda todo lo que ya existía. Con id fijo en 1
+        # para que el relleno de abajo no dependa de ninguna consulta.
+        "INSERT INTO tenants (id, name, slug, sip_domain, enabled, created_at) "
+        "VALUES (1, 'Empresa inicial', 'empresa1', 'empresa1.pbx.local', true, NOW()) "
+        "ON CONFLICT (id) DO NOTHING",
+        # Sin esto, la próxima empresa creada desde el panel pediría el id
+        # 1 y chocaría con la de arriba.
+        "SELECT setval('tenants_id_seq', (SELECT COALESCE(MAX(id), 1) FROM tenants), true)",
+    ]
+
+    for tabla in _TABLAS_CON_TENANT:
+        stmts += [
+            f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS tenant_id INTEGER "
+            "REFERENCES tenants(id) ON DELETE CASCADE",
+            f"UPDATE {tabla} SET tenant_id = 1 WHERE tenant_id IS NULL",
+            f"ALTER TABLE {tabla} ALTER COLUMN tenant_id SET NOT NULL",
+            f"CREATE INDEX IF NOT EXISTS ix_{tabla}_tenant_id ON {tabla} (tenant_id)",
+        ]
+
+    # users aparte: admite NULL, así que no lleva SET NOT NULL. Los
+    # usuarios que ya existían son de la empresa inicial.
+    stmts += [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER "
+        "REFERENCES tenants(id) ON DELETE CASCADE",
+        "UPDATE users SET tenant_id = 1 WHERE tenant_id IS NULL",
+        "CREATE INDEX IF NOT EXISTS ix_users_tenant_id ON users (tenant_id)",
+    ]
+
+    for tabla, viejo in _UNIQUES_VIEJOS:
+        stmts.append(f"ALTER TABLE {tabla} DROP CONSTRAINT IF EXISTS {viejo}")
+
+    # extensions.number va aparte y NO se resuelve con DROP CONSTRAINT.
+    # Declaraba `unique=True, index=True` a la vez, y con esa combinación
+    # SQLAlchemy no crea una constraint `extensions_number_key` sino un
+    # ÍNDICE ÚNICO llamado `ix_extensions_number`. El DROP CONSTRAINT de
+    # arriba no lo encuentra, se ejecuta sin error, y el índice sobrevive
+    # prohibiendo que dos empresas usen el mismo número. El fallo aparece
+    # recién al dar de alta la segunda empresa, con un "duplicate key"
+    # que no menciona nada de todo esto.
+    # Se recrea sin UNIQUE: buscar por número sigue siendo útil.
+    stmts += [
+        "DROP INDEX IF EXISTS ix_extensions_number",
+        "CREATE INDEX IF NOT EXISTS ix_extensions_number ON extensions (number)",
+    ]
+    for nombre, destino in _UNIQUES_NUEVOS:
+        stmts.append(f"CREATE UNIQUE INDEX IF NOT EXISTS {nombre} ON {destino}")
+
+    # La última defensa contra la doble reserva también era global: sin
+    # tenant_id, una cita a las 9:00 de una empresa impediría que
+    # cualquier OTRA agendara a esa misma hora. El síntoma sería un
+    # "horario ocupado" en un consultorio con la agenda vacía.
+    stmts += [
+        "DROP INDEX IF EXISTS ux_appointments_slot",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_appointments_tenant_slot "
+        "ON appointments (tenant_id, appointment_date) WHERE status = 'confirmed'",
+    ]
+    return stmts
+
+
+_COLUMN_PATCHES += _parches_multiempresa()
+
 
 async def _asegurar_admin(session) -> None:
     """Crea el primer administrador si la tabla está vacía.

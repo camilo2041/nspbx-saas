@@ -1,16 +1,84 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
 
-class Trunk(Base):
-    __tablename__ = "trunks"
+def _tenant_fk() -> Mapped[int]:
+    """Columna `tenant_id` común a todas las tablas de negocio.
+
+    Va en TODAS y no solo en las "de arriba" —aunque campaign_numbers ya
+    llegue a su empresa a través de campaigns— porque las políticas de
+    Row-Level Security se evalúan tabla por tabla: una tabla sin la
+    columna no puede tener política y queda fuera del aislamiento. Sale
+    más barato repetir la columna que razonar cada vez si el JOIN
+    protege o no.
+    """
+    return mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+
+
+class Tenant(Base):
+    """Una empresa dentro de la plataforma.
+
+    El aislamiento se apoya en dos identificadores, y conviene entender
+    por qué son dos:
+
+    - `slug` es el nombre corto interno. De él salen el contexto del
+      dialplan (`ctx_<slug>`) y el prefijo de los gateways
+      (`<slug>_troncal`), que son espacios de nombres GLOBALES dentro de
+      FreeSWITCH: sin prefijo, dos empresas con una troncal del mismo
+      proveedor se pisan el nombre y la segunda no registra.
+
+    - `sip_domain` es lo que ven los teléfonos y lo que FreeSWITCH usa
+      para resolver a qué empresa pertenece quien se registra. Se guarda
+      explícito en vez de derivarlo del slug para poder darle a un
+      cliente su propio dominio más adelante sin migrar nada.
+    """
+
+    __tablename__ = "tenants"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
+    name: Mapped[str] = mapped_column(String(150))
+    slug: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    sip_domain: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    @property
+    def dialplan_context(self) -> str:
+        """Contexto del dialplan de esta empresa.
+
+        Existe como propiedad y no como columna para que haya UNA sola
+        definición: el generador de configuración y el ruteo de entrantes
+        tienen que coincidir carácter por carácter, y dos lugares
+        calculándolo por separado es la clase de desajuste que no falla
+        —el dialplan simplemente no encuentra el destino— y cuesta horas.
+        """
+        return f"ctx_{self.slug}"
+
+
+class Trunk(Base):
+    __tablename__ = "trunks"
+    # El nombre pasa a ser único POR EMPRESA, no global: dos clientes
+    # pueden tener su troncal "principal" sin pisarse.
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="ux_trunks_tenant_name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    name: Mapped[str] = mapped_column(String(100))
     gateway_host: Mapped[str] = mapped_column(String(255))
     gateway_port: Mapped[int] = mapped_column(Integer, default=5060)
     username: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -29,9 +97,19 @@ class Trunk(Base):
 
 class Extension(Base):
     __tablename__ = "extensions"
+    # LA restricción que define todo el modelo multiempresa: el número es
+    # único por empresa, no en la plataforma. Casi todas van a tener su
+    # 1000. Si esto quedara único global, la segunda empresa que lo
+    # intente recibe un error de duplicado sin explicación posible para
+    # el usuario, y si además el dialplan no separa contextos, sus
+    # llamadas terminan en la extensión de la otra.
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "number", name="ux_extensions_tenant_number"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    number: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    number: Mapped[str] = mapped_column(String(20), index=True)
     password: Mapped[str] = mapped_column(String(255))
     caller_id_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     voicemail: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -41,9 +119,13 @@ class Extension(Base):
 
 class VoiceBot(Base):
     __tablename__ = "voicebots"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="ux_voicebots_tenant_name"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    name: Mapped[str] = mapped_column(String(100))
     bot_type: Mapped[str] = mapped_column(String(20), default="ivr")  # "ivr" | "ai"
     welcome_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     config: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: {"menu": {"1": "1000"}}
@@ -57,9 +139,13 @@ class VoiceBot(Base):
 
 class Campaign(Base):
     __tablename__ = "campaigns"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="ux_campaigns_tenant_name"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    name: Mapped[str] = mapped_column(String(100))
     trunk_id: Mapped[int | None] = mapped_column(ForeignKey("trunks.id"), nullable=True)
     voicebot_id: Mapped[int | None] = mapped_column(ForeignKey("voicebots.id"), nullable=True)
     max_concurrency: Mapped[int] = mapped_column(Integer, default=5)
@@ -88,6 +174,7 @@ class CampaignNumber(Base):
     __tablename__ = "campaign_numbers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"))
     phone: Mapped[str] = mapped_column(String(30), index=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|dialing|answered|busy|noanswer|failed|done
@@ -111,9 +198,23 @@ class CampaignNumber(Base):
 
 
 class SystemSettings(Base):
+    """Ajustes de UNA empresa.
+
+    Deja de ser la fila única `id=1` que se leía en 16 lugares del código
+    con `session.get(SystemSettings, 1)`. Ahora hay una fila por empresa y
+    el `UNIQUE` de abajo es lo que lo garantiza: sin él, un alta a medias
+    puede dejar dos filas para el mismo tenant y el sistema tomaría
+    cualquiera de las dos según el orden del índice — un fallo
+    intermitente y prácticamente imposible de reproducir.
+    """
+
     __tablename__ = "system_settings"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="ux_system_settings_tenant"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
     app_name: Mapped[str] = mapped_column(String(100), default="NSPBX")
     fs_domain: Mapped[str] = mapped_column(String(255), default="nspbx.local")
     fs_esl_host: Mapped[str] = mapped_column(String(255), default="localhost")
@@ -216,8 +317,14 @@ class CallLog(Base):
     __tablename__ = "call_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
     campaign_id: Mapped[int | None] = mapped_column(ForeignKey("campaigns.id"), nullable=True)
     extension_id: Mapped[int | None] = mapped_column(ForeignKey("extensions.id"), nullable=True)
+    # El uuid sigue siendo único GLOBAL, no por empresa: lo genera
+    # FreeSWITCH y ya es único en toda la instalación. Además el CDR
+    # llega por webhook sin contexto de empresa y se busca solo por uuid,
+    # así que hacerlo único por tenant no aportaría nada y abriría la
+    # puerta a dos llamadas distintas con el mismo identificador.
     uuid: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     caller_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
     caller_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -251,6 +358,10 @@ class AiCallUsage(Base):
     __tablename__ = "ai_call_usage"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    # Único global por el mismo motivo que CallLog.uuid: lo genera
+    # FreeSWITCH y el consumo se registra desde el voizbot, que conoce la
+    # llamada pero no necesariamente la empresa.
     call_uuid: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
@@ -296,10 +407,15 @@ class Queue(Base):
     sobre mod_callcenter de FreeSWITCH."""
 
     __tablename__ = "queues"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="ux_queues_tenant_name"),
+        UniqueConstraint("tenant_id", "extension", name="ux_queues_tenant_extension"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
-    extension: Mapped[str] = mapped_column(String(30), unique=True)  # número que marcan para entrar a la cola
+    tenant_id: Mapped[int] = _tenant_fk()
+    name: Mapped[str] = mapped_column(String(100))
+    extension: Mapped[str] = mapped_column(String(30))  # número que marcan para entrar a la cola
     strategy: Mapped[str] = mapped_column(String(40), default="ring-all")
     moh_sound: Mapped[str] = mapped_column(String(255), default="$${hold_music}")
     agents: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: ["1000", "1001"]
@@ -320,8 +436,24 @@ class InboundRoute(Base):
     a dónde se enruta (extensión, cola o voizbot) — estilo Issabel."""
 
     __tablename__ = "inbound_routes"
+    # El DID es único en TODA la plataforma, no por empresa — la única
+    # tabla donde la restricción cruza tenants, y a propósito.
+    #
+    # Una llamada entrante llega al contexto `public` sin ninguna pista
+    # de a qué empresa pertenece: lo único que trae es el número marcado.
+    # Ese número es la clave que decide a qué contexto se transfiere. Si
+    # dos empresas pudieran declarar el mismo DID, el ruteo dependería
+    # del orden de las filas y las llamadas de un cliente entrarían a la
+    # central de otro — sin error, atendidas por gente equivocada.
+    #
+    # Vale también para el comodín "any": solo una empresa puede quedarse
+    # con lo que no coincida con nada.
+    __table_args__ = (
+        UniqueConstraint("did_pattern", name="ux_inbound_routes_did"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
     name: Mapped[str] = mapped_column(String(100))
     did_pattern: Mapped[str] = mapped_column(String(100))  # dígitos exactos, o "any" para comodín
     destination_type: Mapped[str] = mapped_column(String(20))  # extension|queue|voicebot|hangup
@@ -339,6 +471,7 @@ class Appointment(Base):
     __tablename__ = "appointments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
     patient_name: Mapped[str] = mapped_column(String(150))
     phone: Mapped[str] = mapped_column(String(30))
     appointment_date: Mapped[datetime] = mapped_column(DateTime)  # fecha+hora de inicio
@@ -365,6 +498,19 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Nullable, a diferencia del resto de las tablas: NULL identifica a un
+    # usuario DE LA PLATAFORMA, el que da de alta empresas y puede entrar
+    # a cualquiera. Si se lo obligara a pertenecer a un tenant, borrar esa
+    # empresa dejaría a la plataforma sin administrador.
+    tenant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), index=True, nullable=True
+    )
+    # Único GLOBAL y no por empresa, por una razón concreta: al iniciar
+    # sesión todavía no se sabe a qué empresa pertenece quien escribe el
+    # usuario — precisamente esa fila es la que lo dice. Con usuarios
+    # repetidos entre empresas habría que pedir además la empresa en el
+    # login. Es una decisión de producto que conviene tomar aparte; hasta
+    # entonces, un usuario pertenece a una sola.
     username: Mapped[str] = mapped_column(String(60), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(150))
     email: Mapped[str | None] = mapped_column(String(150), nullable=True)
