@@ -155,6 +155,16 @@ services:
       # PBX_HOST porque en el DNS tienen que ser distintos: este NO puede
       # estar detrás del proxy de Cloudflare (ver .env.example).
       TURN_HOST: ${TURN_HOST:-}
+      # Push de voz a la app móvil (ver mobile/SETUP.md). Vacío = push
+      # desactivado: la app sigue sirviendo con ella abierta, solo no
+      # despierta en segundo plano (app/services/push.py).
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      APNS_AUTH_KEY: ${APNS_AUTH_KEY:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-}
+      APNS_USE_SANDBOX: ${APNS_USE_SANDBOX:-false}
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
+      FCM_SERVICE_ACCOUNT_JSON: ${FCM_SERVICE_ACCOUNT_JSON:-}
     volumes:
       - ./freeswitch/conf:/freeswitch-conf
       - ./freeswitch/sounds:/freeswitch-sounds

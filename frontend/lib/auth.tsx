@@ -109,6 +109,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (cargando) return;
+    // /webcall es la página del widget "hablar con un agente": la abre un
+    // visitante ANÓNIMO en un <iframe> embebido en el sitio de un cliente
+    // (ver app/webcall/page.tsx y components/layout.tsx). Nunca hay sesión
+    // de panel ahí, así que no debe rebotar a /login.
+    if (pathname === "/webcall") return;
     if (!usuario && pathname !== "/login") router.replace("/login");
     if (usuario && pathname === "/login") router.replace("/");
   }, [cargando, usuario, pathname, router]);

@@ -2,10 +2,10 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
@@ -13,9 +13,23 @@ from pydantic import BaseModel
 from app.core import permissions
 from app.core.auth import usuario_actual
 from app.core.database import get_admin_session, get_session
-from app.core.security import crear_token, hash_password, verificar_password
-from app.models import Tenant, User
-from app.schemas import CambiarPasswordRequest, LoginRequest, SesionOut, UserOut
+from app.core.security import (
+    crear_token,
+    generar_refresh_token,
+    hash_password,
+    hash_refresh_token,
+    verificar_password,
+)
+from app.models import DeviceToken, RefreshToken, Tenant, User
+from app.schemas import (
+    CambiarPasswordRequest,
+    DeviceTokenIn,
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    SesionOut,
+    UserOut,
+)
 from app.services import esl, turn
 from app.services.ajustes import ajustes_de
 
@@ -39,7 +53,7 @@ async def _modulos_de(session: AsyncSession, u: User) -> list[str]:
     return ten.modules_list if ten else []
 
 
-def _sesion(u: User, modulos: list[str] | None = None) -> SesionOut:
+def _sesion(u: User, modulos: list[str] | None = None, refresh_token: str | None = None) -> SesionOut:
     # La empresa viaja dentro del token: es lo que permite atar cada
     # petición a su aislamiento sin consultar la base primero (ver
     # security.crear_token y core/auth.sesion_obligatoria).
@@ -50,7 +64,26 @@ def _sesion(u: User, modulos: list[str] | None = None) -> SesionOut:
         usuario=usuario_out(u),
         permisos=sorted(permissions.permisos_de(u.role)),
         modulos=modulos or [],
+        refresh_token=refresh_token,
     )
+
+
+async def _nuevo_refresh_token(
+    session: AsyncSession, user_id: int, platform: str | None = None
+) -> str:
+    """Crea y guarda un refresh token nuevo para `user_id`, devuelve el
+    texto plano (lo único que ve el cliente)."""
+    token, token_hash, vence = generar_refresh_token()
+    session.add(
+        RefreshToken(
+            user_id=user_id,
+            token_hash=token_hash,
+            platform=platform,
+            expires_at=vence.replace(tzinfo=None),
+        )
+    )
+    await session.commit()
+    return token
 
 
 @router.post("/login", response_model=SesionOut)
@@ -115,7 +148,53 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_admin
             )
 
     logger.info("Sesión iniciada: %s (%s)", usuario.username, usuario.role)
-    return _sesion(usuario, await _modulos_de(session, usuario))
+    refresh = await _nuevo_refresh_token(session, usuario.id)
+    return _sesion(usuario, await _modulos_de(session, usuario), refresh_token=refresh)
+
+
+@router.post("/refresh", response_model=SesionOut)
+async def refrescar(payload: RefreshRequest, session: AsyncSession = Depends(get_admin_session)):
+    """Cambia un refresh token por una sesión nueva, sin pedir contraseña.
+
+    Es lo que usa la app móvil para no obligar a loguearse cada 8 horas
+    (el JWT normal, ver core/security.HORAS_DE_SESION). Corre con la
+    sesión del DUEÑO por el mismo motivo que /login: todavía no se sabe
+    la empresa hasta leer a quién pertenece el token.
+
+    El token viejo se revoca acá mismo (rotación): si alguien más lo
+    tuviera copiado, dejaría de servir apenas el dueño legítimo lo usa una
+    vez, en vez de seguir siendo válido hasta que venza solo.
+    """
+    token_hash = hash_refresh_token(payload.refresh_token)
+    fila = (
+        await session.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    ).scalar_one_or_none()
+
+    ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+    if not fila or fila.revoked_at is not None or fila.expires_at < ahora:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión inválida o vencida")
+
+    usuario = await session.get(User, fila.user_id)
+    if not usuario or not usuario.enabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Esta cuenta está desactivada")
+
+    fila.revoked_at = ahora
+    nuevo = await _nuevo_refresh_token(session, usuario.id, fila.platform)
+    return _sesion(usuario, await _modulos_de(session, usuario), refresh_token=nuevo)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def cerrar_sesion(payload: LogoutRequest, session: AsyncSession = Depends(get_admin_session)):
+    """Revoca el refresh token de la app móvil. Idempotente: si ya estaba
+    vencido o revocado, o no existe, no es un error — el resultado que le
+    importa a quien llama (poder cerrar sesión) ya se cumplió."""
+    token_hash = hash_refresh_token(payload.refresh_token)
+    fila = (
+        await session.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    ).scalar_one_or_none()
+    if fila and fila.revoked_at is None:
+        fila.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await session.commit()
 
 
 @router.get("/me", response_model=SesionOut)
@@ -215,6 +294,55 @@ async def poner_dnd(payload: DndRequest, usuario: User = Depends(usuario_actual)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"FreeSWITCH no disponible: {exc}")
     return {"ok": True, "dnd": payload.enabled}
+
+
+@router.post("/dispositivo", status_code=status.HTTP_204_NO_CONTENT)
+async def registrar_dispositivo(
+    payload: DeviceTokenIn,
+    usuario: User = Depends(usuario_actual),
+    session: AsyncSession = Depends(get_session),
+):
+    """Guarda (o reemplaza) el push token del teléfono de la app móvil,
+    para poder despertarla con un push de voz cuando entre una llamada a
+    su extensión (ver services/push.py). Una fila por usuario+plataforma:
+    volver a registrar simplemente actualiza el token vigente."""
+    existente = (
+        await session.execute(
+            select(DeviceToken).where(
+                DeviceToken.user_id == usuario.id, DeviceToken.platform == payload.platform
+            )
+        )
+    ).scalar_one_or_none()
+    if existente:
+        existente.token = payload.token
+        existente.token_type = payload.token_type
+        existente.extension_id = usuario.extension_id
+    else:
+        session.add(
+            DeviceToken(
+                user_id=usuario.id,
+                extension_id=usuario.extension_id,
+                platform=payload.platform,
+                token=payload.token,
+                token_type=payload.token_type,
+            )
+        )
+    await session.commit()
+
+
+@router.delete("/dispositivo/{platform}", status_code=status.HTTP_204_NO_CONTENT)
+async def desregistrar_dispositivo(
+    platform: str,
+    usuario: User = Depends(usuario_actual),
+    session: AsyncSession = Depends(get_session),
+):
+    """Borra el push token al cerrar sesión en la app: sin esto, alguien
+    que cierra sesión seguiría recibiendo pushes de llamadas que ya no
+    puede ver en ninguna pantalla."""
+    await session.execute(
+        delete(DeviceToken).where(DeviceToken.user_id == usuario.id, DeviceToken.platform == platform)
+    )
+    await session.commit()
 
 
 # Hash de una contraseña que nadie tiene, solo para gastar el mismo tiempo

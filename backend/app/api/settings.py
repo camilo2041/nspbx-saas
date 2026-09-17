@@ -35,10 +35,20 @@ async def update_settings(
     payload: SystemSettingsUpdate, session: AsyncSession = Depends(get_session)
 ):
     row = await get_or_create_settings(session)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    cambios = payload.model_dump(exclude_unset=True)
+    for field, value in cambios.items():
         setattr(row, field, value)
     await session.commit()
     await session.refresh(row)
     apply_to_runtime(row)
     await esl.invalidate_client()
+    # El contexto de dialplan `webcall_<slug>` se genera según estos campos
+    # (ver config_generator.build_dialplan_xml). Se sirve en vivo por
+    # xml_curl, pero un reloadxml purga el árbol cacheado para que el
+    # próximo lookup traiga el nuevo.
+    if any(k.startswith("webcall_") for k in cambios):
+        try:
+            await esl.reloadxml()
+        except Exception:
+            pass
     return row

@@ -27,6 +27,7 @@ from sqlalchemy.engine import make_url
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import SystemSettings
+from app.services import webcall
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,13 @@ class MaintenanceWorker:
             for _ in range(6 * 60):  # 6 horas, en pasos de 1 minuto
                 if not self._running:
                     return
+                # Libera cupos de sesiones del widget de llamada web que el
+                # navegador nunca cerró (cerró la pestaña sin colgar,
+                # perdió red) — ver app/services/webcall.py.
+                try:
+                    await webcall.registry.sweep()
+                except Exception:
+                    logger.exception("Error barriendo sesiones de llamada web")
                 await asyncio.sleep(60)
 
     async def ejecutar_una_vez(self) -> None:

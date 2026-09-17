@@ -58,8 +58,11 @@ def verificar_secreto_fs(secret: str | None = None) -> None:
 #   - /api/auth/login: hay que poder pedir el token sin tenerlo.
 #   - /api/appointments/agent/*: las usa el agente de IA con el secreto
 #     compartido de Ajustes (cabecera X-Agent-Secret), no con una sesión.
+#   - /api/webcall/*: las usa el navegador de un visitante anónimo en el
+#     sitio web de un cliente; se defienden con Turnstile + rate-limit +
+#     horario + tope global (ver app/api/webcall.py), no con sesión.
 _ABIERTAS = ("/api/auth/login",)
-_ABIERTAS_PREFIJO = ("/api/appointments/agent/",)
+_ABIERTAS_PREFIJO = ("/api/appointments/agent/", "/api/webcall/")
 
 _NO_AUTENTICADO = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,

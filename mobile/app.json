@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "NSPBX Móvil",
+    "slug": "nspbx-movil",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "nspbxmovil",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "co.com.gsco.nspbx",
+      "infoPlist": {
+        "UIBackgroundModes": ["voip", "audio"]
+      }
+    },
+    "android": {
+      "package": "co.com.gsco.nspbx",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS", "POST_NOTIFICATIONS"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-callkit-telecom",
+        {
+          "incomingCallTimeout": 45,
+          "outgoingCallTimeout": 60,
+          "fulfillAnswerCallTimeout": 30,
+          "includesCallsInRecents": true,
+          "microphonePermission": "$(PRODUCT_NAME) necesita el micrófono para hacer y recibir llamadas."
+        }
+      ],
+      "expo-secure-store",
+      "expo-router"
+    ]
+  }
+}

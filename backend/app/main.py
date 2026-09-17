@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, inbound_routes, logs_ws, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots
+from app.api import ai_usage, appointments as appointments_api, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import permissions
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
@@ -153,6 +153,20 @@ _COLUMN_PATCHES = [
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ari_user VARCHAR(80)",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ari_password VARCHAR(255)",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ari_app VARCHAR(80) NOT NULL DEFAULT 'nspbx'",
+    # Widget de llamada web ("hablar con un agente") — ver app/api/webcall.py.
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS webcall_enabled BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS webcall_queue_id INTEGER "
+    "REFERENCES queues(id) ON DELETE SET NULL",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS webcall_max_concurrent INTEGER NOT NULL DEFAULT 5",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS webcall_turnstile_site_key VARCHAR(255)",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS webcall_turnstile_secret VARCHAR(255)",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS webcall_schedule TEXT",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS webcall_greeting VARCHAR(255) "
+    "DEFAULT 'Presione para hablar con un agente'",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS webcall_button_text VARCHAR(120) "
+    "DEFAULT 'Hablar con un agente'",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS webcall_offline_text VARCHAR(255) "
+    "DEFAULT 'Estamos fuera de horario de atención'",
 ]
 
 # --- Multiempresa: paso 1 -------------------------------------------
@@ -176,6 +190,7 @@ _TABLAS_CON_TENANT = [
     "debts",
     "payment_promises",
     "licenses",
+    "device_tokens",
 ]
 
 # Restricciones que Postgres creó con nombre automático cuando la columna
@@ -555,6 +570,10 @@ def _con(*permisos: str) -> dict:
 # IA en curso.
 app.include_router(xml_endpoints.router)
 
+# Mismo motivo: lo llama FreeSWITCH desde el dialplan (mod_curl), sin
+# sesión de usuario — ver services/config_generator.py:_append_mobile_push_hook.
+app.include_router(fs_push.router)
+
 # Mismo motivo: un WebSocket de navegador no puede mandar la cabecera
 # Authorization, así que este router valida el token a mano (ver
 # app/api/logs_ws.py) en vez de con el guardia global de arriba.
@@ -618,6 +637,8 @@ app.include_router(
 )
 app.include_router(appointments_api.router)  # permisos por endpoint: el agente de IA entra acá
 app.include_router(calls_api.router)  # permisos por endpoint: /fs/cdr lo llama FreeSWITCH
+# La lista de exclusión de app/core/auth.py deja pasar /api/webcall/.
+app.include_router(webcall_api.router)
 app.include_router(ai_usage.router, **_con(permissions.CONSUMO_IA_VER))
 
 # Ajustes y estado del sistema: API keys de los proveedores y control de

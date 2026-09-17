@@ -1,6 +1,7 @@
 import json
 import xml.etree.ElementTree as ET
 
+from app.core.config import settings
 from app.services import voice_prompts
 from app.services.flow_engine import build_voicebot_flow_routes
 
@@ -47,6 +48,37 @@ def build_directory_xml(tenantes: list[dict]) -> str:
                 ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_name", "value": ext.caller_id_name})
             ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_number", "value": ext.number})
             ET.SubElement(v, "variable", attrib={"name": "user_context", "value": contexto})
+    return ET.tostring(root, encoding="unicode")
+
+
+def build_guest_directory_xml(username: str, password: str, domain: str, context_name: str) -> str:
+    """Directorio de UN usuario invitado del widget de llamada web (ver
+    app/services/webcall.py). Se genera al vuelo en cada lookup de
+    mod_xml_curl porque estas credenciales son efímeras y no viven en la
+    base.
+
+    Clave del aislamiento anti-fraude: `user_context = context_name`
+    (`webcall_<slug>` de la empresa dueña del widget), NO el contexto
+    normal de la empresa. Ese contexto (ver _append_webcall_context) solo
+    sabe llegar a la cola configurada — cualquier otro destino se cuelga.
+
+    `domain` es el `Tenant.sip_domain` de la empresa dueña del widget, no
+    un dominio global: con varias empresas, cada una tiene el suyo."""
+    root = _e("document", attrib={"type": "freeswitch/xml"})
+    section = ET.SubElement(root, "section", attrib={"name": "directory"})
+    domain_el = ET.SubElement(section, "domain", attrib={"name": domain})
+    params = ET.SubElement(domain_el, "params")
+    ET.SubElement(params, "param", attrib={"name": "dial-string", "value": "{^^:sip_invite_domain=${dialed_domain}:presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}"})
+    groups = ET.SubElement(domain_el, "groups")
+    group = ET.SubElement(groups, "group", attrib={"name": "default"})
+    users = ET.SubElement(group, "users")
+    user = ET.SubElement(users, "user", attrib={"id": username})
+    p = ET.SubElement(user, "params")
+    ET.SubElement(p, "param", attrib={"name": "password", "value": password})
+    v = ET.SubElement(user, "variables")
+    ET.SubElement(v, "variable", attrib={"name": "user_context", "value": context_name})
+    ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_name", "value": "Llamada web"})
+    ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_number", "value": username})
     return ET.tostring(root, encoding="unicode")
 
 
@@ -114,6 +146,37 @@ def _append_dnd_hook(context: ET.Element, extensions: list) -> None:
     ET.SubElement(c2, "action", attrib={"application": "answer"})
     _decir(c2, "dnd_no_disponible", "La extensión no está disponible en este momento.")
     ET.SubElement(c2, "action", attrib={"application": "hangup", "data": "USER_BUSY"})
+
+
+def _append_mobile_push_hook(context: ET.Element, extensions: list, push_numbers: set[str], slug: str) -> None:
+    """Antes de timbrarle a una extensión que tiene la app móvil registrada
+    (ver DeviceToken/api/fs_push.py), avisa al backend para que dispare un
+    push de voz (PushKit/FCM) — es lo único que puede despertar la app si
+    el teléfono está bloqueado o la app en segundo plano.
+
+    `continue="true"`: el aviso no reemplaza el timbrado SIP normal, sale
+    en paralelo antes de que la llamada siga su ruteo de siempre
+    (Local_Extension o la ruta entrante que la trajo hasta este contexto —
+    ver _append_inbound_routes, que transfiere acá con el dialplan-hunt
+    completo, por eso alcanza con este único hook por contexto).
+
+    Sin `FS_XML_SECRET` configurado no se agrega nada: el mismo secreto
+    protege este webhook (ver core.auth.verificar_secreto_fs), así que sin
+    él el aviso no tendría con qué autenticarse.
+    """
+    numbers = sorted(e.number for e in extensions if e.number in push_numbers)
+    if not numbers or not settings.fs_xml_secret:
+        return
+    patron = "|".join(numbers)
+    extension = ET.SubElement(context, "extension", attrib={"name": "nspbx_mobile_push", "continue": "true"})
+    condition = ET.SubElement(
+        extension, "condition", attrib={"field": "destination_number", "expression": f"^({patron})$"}
+    )
+    url = (
+        f"http://backend:8000/fs/push/{settings.fs_xml_secret}/{slug}/${{destination_number}}"
+        "?caller_id_number=${caller_id_number}&caller_id_name=${caller_id_name}&call_uuid=${uuid} get"
+    )
+    ET.SubElement(condition, "action", attrib={"application": "curl", "data": url})
 
 
 def _append_local_extension_route(context: ET.Element, extensions: list, dominio: str) -> None:
@@ -449,6 +512,59 @@ def _append_call_limits_hook(context: ET.Element, max_minutes: int) -> None:
     )
 
 
+def _append_webcall_context(
+    section: ET.Element, context_name: str, queue, dominio: str, record_all: bool, max_call_minutes: int
+) -> None:
+    """Contexto `webcall_<slug>`: el ÚNICO al que llegan las credenciales
+    temporales del widget de llamada web de esa empresa (ver
+    app/api/webcall.py). Tiene exactamente una ruta válida —`webqueue` → la
+    cola configurada— y un catch-all que cuelga todo lo demás. Sin rutas
+    salientes, sin códigos de función, sin acceso a extensiones internas:
+    aunque se filtre una credencial, no sirve para marcar a ningún lado.
+
+    El nombre lleva el slug de la empresa (no un `webcall` fijo) para que
+    activar el widget en una segunda empresa no choque con el de la
+    primera — cada una tiene su propio contexto aislado.
+
+    Si no hay cola configurada no se emite el contexto: un registro
+    invitado sin dialplan simplemente no puede hacer nada."""
+    if queue is None:
+        return
+    ctx = ET.SubElement(section, "context", attrib={"name": context_name})
+    _append_call_limits_hook(ctx, max_call_minutes)
+
+    ext = ET.SubElement(ctx, "extension", attrib={"name": "webcall_queue", "continue": "false"})
+    cond = ET.SubElement(ext, "condition", attrib={"field": "destination_number", "expression": "^webqueue$"})
+    ET.SubElement(cond, "action", attrib={"application": "answer"})
+    if queue.record and not record_all:
+        _append_recording_hook_call(cond)
+    ET.SubElement(cond, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
+    # Dominio literal de la empresa (no $${domain}, variable global que no
+    # sirve con varias empresas) — mismo patrón que _append_queue_routes.
+    ET.SubElement(cond, "action", attrib={"application": "callcenter", "data": f"{queue.name}@{dominio}"})
+    ET.SubElement(cond, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+    deny = ET.SubElement(ctx, "extension", attrib={"name": "webcall_deny", "continue": "false"})
+    dcond = ET.SubElement(deny, "condition", attrib={"field": "destination_number", "expression": "^.*$"})
+    ET.SubElement(dcond, "action", attrib={"application": "hangup", "data": "CALL_REJECTED"})
+
+
+def _append_recording_hook_call(cond: ET.Element) -> None:
+    """Graba esta llamada puntual (cola con `record` propio, sin que la
+    grabación global ya esté activa) — mismas acciones que
+    `_append_recording_hook` pero dentro de una condición existente en vez
+    de una extensión nueva."""
+    ET.SubElement(cond, "action", attrib={"application": "set", "data": "RECORD_STEREO=false"})
+    dia = "${strftime(%Y)}/${strftime(%m)}/${strftime(%d)}"
+    ET.SubElement(
+        cond,
+        "action",
+        attrib={"application": "set", "data": f"nspbx_recording=$${{recordings_dir}}/{dia}/llamada_${{uuid}}.wav"},
+    )
+    ET.SubElement(cond, "action", attrib={"application": "system", "data": f"mkdir -p $${{recordings_dir}}/{dia}"})
+    ET.SubElement(cond, "action", attrib={"application": "record_session", "data": "${nspbx_recording}"})
+
+
 def build_dialplan_xml(
     tenantes: list[dict],
     routes: list | None = None,
@@ -486,6 +602,7 @@ def build_dialplan_xml(
             _append_recording_hook(context)
         _append_dnd_feature_codes(context)
         _append_dnd_hook(context, extensions)
+        _append_mobile_push_hook(context, extensions, t.get("push_extensions") or set(), slugs.get(t["tenant_id"], ""))
         _append_local_extension_route(context, extensions, dominio)
         _append_voicebot_routes(section, context, bots, dominio, t["tenant_id"])
         _append_queue_routes(context, queues, dominio)
@@ -497,6 +614,13 @@ def build_dialplan_xml(
         ET.SubElement(c, "action", attrib={"application": "echo"})
 
         _append_outbound_route(context, trunks, slugs)
+
+        webcall_queue = t.get("webcall_queue")
+        if webcall_queue is not None:
+            slug = slugs.get(t["tenant_id"], t.get("slug", ""))
+            _append_webcall_context(
+                section, f"webcall_{slug}", webcall_queue, dominio, t["record_all"], t["max_call_minutes"]
+            )
 
     public_context = ET.SubElement(section, "context", attrib={"name": "public"})
     _append_call_limits_hook(public_context, max_minutes_public)

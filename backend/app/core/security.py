@@ -29,6 +29,15 @@ ALGORITMO = "HS256"
 # jornada, y no deja sesiones abiertas de un día para el otro.
 HORAS_DE_SESION = 8
 
+# Vida del refresh token de la app móvil. A diferencia del JWT de 8h, este
+# SÍ se puede revocar (vive en la tabla `refresh_tokens`, no solo firmado),
+# así que puede durar semanas sin el mismo riesgo: cerrar sesión o
+# desactivar al usuario lo invalida al instante, no hay que esperar a que
+# venza. 30 días alcanza para no pedirle contraseña de nuevo a alguien que
+# usa la app todos los días, sin dejarla viva indefinidamente en un
+# teléfono perdido.
+DIAS_DE_REFRESH = 30
+
 _ITERACIONES = 480_000
 
 
@@ -90,6 +99,21 @@ def crear_token(user_id: int, rol: str, tenant_id: int | None = None) -> tuple[s
         algorithm=ALGORITMO,
     )
     return token, HORAS_DE_SESION * 3600
+
+
+def generar_refresh_token() -> tuple[str, str, datetime]:
+    """Nuevo refresh token: `(token_en_claro, hash_para_guardar, vencimiento)`.
+
+    Solo el hash va a la base (mismo criterio que `hash_password`): un
+    volcado de la tabla no debe alcanzar para hacerse pasar por nadie.
+    """
+    token = secrets.token_urlsafe(48)
+    vence = datetime.now(timezone.utc) + timedelta(days=DIAS_DE_REFRESH)
+    return token, hash_refresh_token(token), vence
+
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def leer_token(token: str) -> dict | None:

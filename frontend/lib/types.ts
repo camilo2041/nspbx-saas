@@ -239,6 +239,15 @@ export interface SystemSettings {
   ari_user: string | null;
   ari_password: string | null;
   ari_app: string;
+  webcall_enabled: boolean;
+  webcall_queue_id: number | null;
+  webcall_max_concurrent: number;
+  webcall_turnstile_site_key: string | null;
+  webcall_turnstile_secret: string | null;
+  webcall_schedule: string | null;
+  webcall_greeting: string | null;
+  webcall_button_text: string | null;
+  webcall_offline_text: string | null;
 }
 
 export interface MaintenanceStatus {

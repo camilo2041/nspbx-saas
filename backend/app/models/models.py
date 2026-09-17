@@ -347,6 +347,33 @@ class SystemSettings(Base):
     # proveedor empieza a rechazar TODO, entrantes incluidas.
     max_concurrent_calls: Mapped[int] = mapped_column(Integer, default=20)
 
+    # Widget de "llamar a un agente" embebible en sitios web públicos (ver
+    # app/api/webcall.py y app/services/webcall.py). Un visitante anónimo
+    # obtiene una credencial SIP temporal y entra a UNA cola. Apagado por
+    # defecto: es una superficie expuesta a internet. Por ahora está
+    # cableado a tenant_id=1 (ver docstring de app/api/webcall.py); el
+    # campo ya vive por empresa para no tener que migrar nada cuando se
+    # generalice.
+    webcall_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    webcall_queue_id: Mapped[int | None] = mapped_column(
+        ForeignKey("queues.id", ondelete="SET NULL"), nullable=True
+    )
+    webcall_max_concurrent: Mapped[int] = mapped_column(Integer, default=5)
+    webcall_turnstile_site_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    webcall_turnstile_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # JSON semanal {"mon": ["08:00","18:00"], ...}. Día ausente = cerrado;
+    # NULL/vacío = 24/7. Se evalúa en hora local del negocio (core/clock.py).
+    webcall_schedule: Mapped[str | None] = mapped_column(Text, nullable=True)
+    webcall_greeting: Mapped[str | None] = mapped_column(
+        String(255), default="Presione para hablar con un agente"
+    )
+    webcall_button_text: Mapped[str | None] = mapped_column(
+        String(120), default="Hablar con un agente"
+    )
+    webcall_offline_text: Mapped[str | None] = mapped_column(
+        String(255), default="Estamos fuera de horario de atención"
+    )
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
@@ -663,3 +690,68 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     extension: Mapped["Extension | None"] = relationship(lazy="joined")
+
+
+class RefreshToken(Base):
+    """Sesión larga de la app móvil.
+
+    Vive fuera del JWT (que solo dura 8h, ver core/security.py) porque un
+    JWT no se puede revocar sin esta tabla: sin ella, cerrar sesión desde
+    la app o desactivar un usuario no tendría forma de invalidar un
+    refresh que ya está en el teléfono. Se guarda el HASH, nunca el token
+    en claro, mismo criterio que `password_hash`.
+
+    Sin `tenant_id`, igual que `users`: se consulta con la sesión del
+    dueño porque hace falta ANTES de saber a qué empresa pertenece la
+    sesión que se está renovando (la fila de `users` es la que lo dice).
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    device_label: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    platform: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class DeviceToken(Base):
+    """Dispositivo móvil de un usuario, para poder despertarlo con un push
+    cuando le entra una llamada a su extensión (ver services/push.py y el
+    hook `nspbx_mobile_push` del dialplan en services/config_generator.py).
+
+    Un solo `token` por fila, no uno de VoIP y otro "normal" separados:
+    `expo-callkit-telecom` (la librería que usa la app, ver mobile/) expone
+    un único token de llamada por plataforma —el de PushKit en iOS
+    (`APNS_VOIP`), el de FCM en Android (`FCM`)— y es el único que este
+    sistema necesita, porque el único push que se manda es "te está
+    entrando una llamada".
+
+    Una fila por usuario y plataforma: alguien puede tener un iPhone y un
+    Android a la vez, pero no dos iPhones registrados —el último que
+    inicia sesión reemplaza el token del anterior, igual que hacen la
+    mayoría de apps de mensajería.
+    """
+
+    __tablename__ = "device_tokens"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", "platform", name="ux_device_tokens_tenant_user_platform"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    extension_id: Mapped[int | None] = mapped_column(
+        ForeignKey("extensions.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    platform: Mapped[str] = mapped_column(String(20))  # ios | android
+    # "APNS_VOIP" (iOS/PushKit) o "FCM" (Android) — tal cual lo reporta
+    # `useVoIPPushToken()` del lado de la app.
+    token_type: Mapped[str] = mapped_column(String(20))
+    token: Mapped[str] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )

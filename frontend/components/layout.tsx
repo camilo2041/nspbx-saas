@@ -361,7 +361,14 @@ function Marco({ children }: { children: ReactNode }) {
 
   // La pantalla de entrada se dibuja sola, sin menú ni cabecera: no hay
   // sesión todavía y no habría nada que poner en ellos.
-  if (pathname === "/login") return <>{children}</>;
+  //
+  // /webcall también queda afuera: es la página del widget "hablar con un
+  // agente" (ver app/webcall/page.tsx), la carga un <iframe> embebido en
+  // el sitio de un cliente y la usa un visitante ANÓNIMO — nunca hay
+  // sesión de panel ahí, así que ni el sidebar ni la verificación de
+  // usuario de abajo tienen sentido (y sin esta excepción, `!usuario`
+  // dejaría la página en blanco para siempre).
+  if (pathname === "/login" || pathname === "/webcall") return <>{children}</>;
   if (cargando || !usuario) return null;
 
   // Escribir la dirección a mano no debe abrir una pantalla que el rol no

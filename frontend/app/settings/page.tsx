@@ -17,8 +17,9 @@ import {
   Skeleton,
   Toggle,
 } from "@/components/ui";
+import { WebcallEmbed } from "@/components/webcall-embed";
 import { api } from "@/lib/api";
-import { DetectedIp, Diagnostics, MaintenanceStatus, SystemSettings, TtsVoice } from "@/lib/types";
+import { DetectedIp, Diagnostics, MaintenanceStatus, Queue, SystemSettings, TtsVoice } from "@/lib/types";
 
 function fecha(iso: string | null) {
   if (!iso) return "Nunca";
@@ -88,6 +89,15 @@ const empty: SystemSettings = {
   ari_user: null,
   ari_password: null,
   ari_app: "nspbx",
+  webcall_enabled: false,
+  webcall_queue_id: null,
+  webcall_max_concurrent: 5,
+  webcall_turnstile_site_key: null,
+  webcall_turnstile_secret: null,
+  webcall_schedule: null,
+  webcall_greeting: null,
+  webcall_button_text: null,
+  webcall_offline_text: null,
 };
 
 export default function SettingsPage() {
@@ -109,15 +119,19 @@ export default function SettingsPage() {
   const [diagCargando, setDiagCargando] = useState(true);
   const [errorDiag, setErrorDiag] = useState("");
 
+  const [queues, setQueues] = useState<Queue[]>([]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [st, m] = await Promise.all([
+      const [st, m, qs] = await Promise.all([
         api.get<SystemSettings>("/api/system/settings"),
         api.get<MaintenanceStatus>("/api/system/maintenance"),
+        api.get<Queue[]>("/api/queues"),
       ]);
       setForm(st);
       setMant(m);
+      setQueues(qs);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
@@ -779,6 +793,14 @@ export default function SettingsPage() {
             </Button>
           </CardBody>
         </Card>
+      </div>
+
+      <div className="mt-4">
+        <WebcallEmbed
+          value={form}
+          onPatch={(p) => setForm((f) => ({ ...f, ...p }))}
+          queues={queues}
+        />
       </div>
 
       <div className="mt-4 flex items-center gap-3">

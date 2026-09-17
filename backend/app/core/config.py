@@ -109,5 +109,28 @@ class Settings(BaseSettings):
     # que durar lo que tarda en establecerse la llamada, no la llamada.
     turn_ttl_segundos: int = 3600
 
+    # --- Push a la app móvil (avisar una llamada entrante) -------------
+    # Todo vacío por defecto = push desactivado (services/push.py se
+    # limita a loguear una advertencia y no manda nada), igual criterio
+    # que turn_host: sin esto configurado, la app sigue sirviendo para
+    # llamar con la app abierta, solo no despierta en segundo plano.
+    #
+    # APNs (voz/VoIP en iOS). Salen de una cuenta de Apple Developer:
+    # clave .p8 con capability "Apple Push Notifications service (VoIP)".
+    apns_key_id: str = ""
+    apns_team_id: str = ""
+    # Contenido completo del archivo .p8 (empieza con "-----BEGIN PRIVATE KEY-----").
+    apns_auth_key: str = ""
+    # Bundle id de la app SIN el sufijo ".voip" — services/push.py se lo agrega.
+    apns_bundle_id: str = ""
+    # true = usa api.sandbox.push.apple.com (builds de desarrollo/TestFlight interno).
+    apns_use_sandbox: bool = False
+
+    # FCM (push en Android). Sale de un proyecto de Firebase: Configuración
+    # del proyecto → Cuentas de servicio → Generar nueva clave privada.
+    fcm_project_id: str = ""
+    # Contenido completo del JSON de la cuenta de servicio (no la ruta).
+    fcm_service_account_json: str = ""
+
 
 settings = Settings()

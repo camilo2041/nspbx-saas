@@ -5,6 +5,8 @@ asyncpg==0.30.0
 pydantic==2.10.6
 pydantic-settings==2.7.1
 httpx==0.28.1
+h2==4.1.0
+cryptography==44.0.0
 python-multipart==0.0.20
 edge-tts==7.2.8
 websockets==14.1

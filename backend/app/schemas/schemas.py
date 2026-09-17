@@ -207,6 +207,16 @@ class SystemSettingsOut(BaseModel):
     ari_password: Optional[str] = None
     ari_app: str = "nspbx"
 
+    webcall_enabled: bool = False
+    webcall_queue_id: Optional[int] = None
+    webcall_max_concurrent: int = 5
+    webcall_turnstile_site_key: Optional[str] = None
+    webcall_turnstile_secret: Optional[str] = None
+    webcall_schedule: Optional[str] = None
+    webcall_greeting: Optional[str] = None
+    webcall_button_text: Optional[str] = None
+    webcall_offline_text: Optional[str] = None
+
 
 class SystemSettingsUpdate(BaseModel):
     app_name: Optional[str] = None
@@ -257,6 +267,18 @@ class SystemSettingsUpdate(BaseModel):
     ari_user: Optional[str] = Field(default=None, max_length=80)
     ari_password: Optional[str] = Field(default=None, max_length=255)
     ari_app: Optional[str] = Field(default=None, max_length=80)
+
+    webcall_enabled: Optional[bool] = None
+    # 0 = usar el tope de webcall_max_concurrent deshabilitado no aplica:
+    # este control siempre debe tener un número (0 sería "nadie puede llamar").
+    webcall_queue_id: Optional[int] = None
+    webcall_max_concurrent: Optional[int] = Field(default=None, ge=1, le=200)
+    webcall_turnstile_site_key: Optional[str] = None
+    webcall_turnstile_secret: Optional[str] = None
+    webcall_schedule: Optional[str] = None
+    webcall_greeting: Optional[str] = Field(default=None, max_length=255)
+    webcall_button_text: Optional[str] = Field(default=None, max_length=120)
+    webcall_offline_text: Optional[str] = Field(default=None, max_length=255)
 
 
 class CallLogOut(BaseModel):
@@ -713,6 +735,25 @@ class SesionOut(BaseModel):
     # Módulos habilitados de la empresa (voicebot/pbx). La interfaz oculta
     # las secciones del pack que la empresa no contrató.
     modulos: list[str] = Field(default_factory=list)
+    # Solo lo usa la app móvil (el panel web no tiene forma de guardarlo con
+    # la misma seguridad que un almacén de llavero del sistema operativo, y
+    # no lo necesita: su sesión dura lo que dura la pestaña abierta).
+    refresh_token: Optional[str] = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+class DeviceTokenIn(BaseModel):
+    platform: str = Field(pattern="^(ios|android)$")
+    # Tal cual los reporta expo-callkit-telecom del lado de la app.
+    token_type: str = Field(pattern="^(APNS_VOIP|FCM)$")
+    token: str
 
 
 class CambiarPasswordRequest(BaseModel):
