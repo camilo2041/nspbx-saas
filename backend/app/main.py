@@ -219,8 +219,22 @@ def _parches_multiempresa() -> list[str]:
     stmts: list[str] = [
         # La empresa que hereda todo lo que ya existía. Con id fijo en 1
         # para que el relleno de abajo no dependa de ninguna consulta.
-        "INSERT INTO tenants (id, name, slug, sip_domain, enabled, created_at) "
-        "VALUES (1, 'Empresa inicial', 'empresa1', 'empresa1.pbx.local', true, NOW()) "
+        #
+        # business_type/modules se listan explícitos (no solo confiar en
+        # el DEFAULT de la columna): en una base NUEVA, create_all() ya
+        # crea `tenants` con el esquema actual —business_type/modules
+        # NOT NULL sin DEFAULT a nivel de Postgres, porque el `default=`
+        # de SQLAlchemy es del lado ORM, no un DEFAULT de columna—. El
+        # ALTER ADD COLUMN IF NOT EXISTS de más abajo no vuelve a correr
+        # sobre una columna que ya existe, así que sin esto el INSERT
+        # revienta por NOT NULL en cualquier despliegue desde cero.
+        #
+        # subdomain también va explícito: el `UPDATE tenants SET subdomain
+        # = slug` que lo siembra corre ANTES que este INSERT (va en la
+        # lista base, este INSERT se agrega después), así que sobre una
+        # base nueva nunca alcanza a ver esta fila.
+        "INSERT INTO tenants (id, name, slug, sip_domain, subdomain, business_type, modules, enabled, created_at) "
+        "VALUES (1, 'Empresa inicial', 'empresa1', 'empresa1.pbx.local', 'empresa1', 'general', 'voicebot,pbx', true, NOW()) "
         "ON CONFLICT (id) DO NOTHING",
         # Sin esto, la próxima empresa creada desde el panel pediría el id
         # 1 y chocaría con la de arriba.
