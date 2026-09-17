@@ -75,6 +75,33 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "registrar_promesa",
+            "description": (
+                "Registra la promesa de pago que la persona acaba de aceptar en una "
+                "llamada de cobranza: cuánto se compromete a pagar, para qué fecha, "
+                "y si es el pago total, un abono o un plan de cuotas."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "monto": {"type": "number", "description": "Monto en pesos que la persona se compromete a pagar."},
+                    "fecha": {"type": "string", "description": "Fecha prometida de pago en formato YYYY-MM-DD."},
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["completo", "abono", "cuotas"],
+                        "description": "completo = paga toda la deuda; abono = paga una parte; cuotas = plan de pagos en varias cuotas.",
+                    },
+                    "cuotas": {"type": "integer", "description": "Número de cuotas, solo si tipo es 'cuotas'."},
+                    "cliente": {"type": "string", "description": "Nombre de la persona que aceptó la promesa."},
+                    "nota": {"type": "string", "description": "Detalle breve de lo acordado, ej. 'abono inicial de 50 mil y el resto en dos semanas'."},
+                },
+                "required": ["monto", "fecha", "tipo"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "terminar_llamada",
             "description": "Cierra la conversación cuando ya no hay nada más que hacer (el paciente se despide, o ya se resolvió su solicitud).",
             "parameters": {"type": "object", "properties": {}},

@@ -53,9 +53,43 @@ def _aplicar_tenant(session, transaction, connection):
     )
 
 
+@event.listens_for(SyncSession, "before_flush")
+def _rellenar_tenant(session, flush_context, instances):
+    """Completa `tenant_id` en los INSERT que no lo traen.
+
+    Con la migración a multiempresa, todas las tablas de negocio exigen
+    tenant_id NOT NULL. En la API el token ya fijó la empresa de la sesión
+    (ver `fijar_tenant`), así que un insert que se olvide del tenant —por
+    ejemplo `Campaign(**payload.model_dump())`, que no incluye la columna—
+    fallaría con un error de NOT NULL sin relación con el motivo real. Este
+    listener lo rellena solo con la empresa de la sesión.
+
+    No es un atajo para ocultar olvidos: es la forma de que el guardián de
+    aislamiento sea la base (RLS) y no la disciplina de cada endpoint. En
+    las sesiones del DUEÑO (workers, voizbot) no hay empresa fijada y esto
+    no actúa: ahí los inserts deben pasar tenant_id explícito, que es lo
+    que hace visible de qué empresa se está escribiendo.
+    """
+    tid = session.info.get("tenant_id")
+    if tid is None:
+        return
+    for obj in session.new:
+        tabla = getattr(obj, "__table__", None)
+        if tabla is None or "tenant_id" not in tabla.columns:
+            continue
+        if obj.tenant_id is None:
+            obj.tenant_id = tid
+
+
 def fijar_tenant(session, tenant_id: int | None) -> None:
     """Ata una sesión asíncrona a una empresa. Ver `_aplicar_tenant`."""
     session.sync_session.info["tenant_id"] = tenant_id
+
+
+def tenant_de_sesion(session) -> int | None:
+    """La empresa a la que está atada esta sesión (lo que puso
+    `fijar_tenant`), o None si es una sesión del dueño."""
+    return session.sync_session.info.get("tenant_id")
 
 
 async def get_session():

@@ -6,8 +6,8 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.database import get_session
-from app.models import Appointment, Campaign, CampaignNumber, Trunk
+from app.core.database import get_session, tenant_de_sesion
+from app.models import Appointment, Campaign, CampaignNumber, Debt, Trunk
 from app.schemas import (
     CampaignCreate,
     CampaignNumberIn,
@@ -16,6 +16,7 @@ from app.schemas import (
     CampaignStats,
     CampaignUpdate,
 )
+from app.services import licensing
 from app.services.appointments import is_slot_free
 from app.services.fechas import parse_fecha_hora as _parse_fecha_hora
 from app.workers.dialer import dialer
@@ -74,6 +75,73 @@ async def _sincronizar_agenda(
     return nueva.id, None
 
 
+async def _sincronizar_deuda(
+    session: AsyncSession, phone: str, variables: dict[str, str]
+) -> tuple[int | None, str | None]:
+    """Si el número trae "cliente" y "monto" (campaña de cobranza), crea o
+    actualiza la deuda de ese teléfono — es lo que le da al voizbot algo
+    real sobre qué conversar durante la llamada (monto, vencimiento,
+    factura). Devuelve (id_de_la_deuda, None) o (None, motivo)."""
+    claves = {k.lower(): v for k, v in variables.items()}
+    cliente = claves.get("cliente")
+    monto_raw = claves.get("monto")
+    if not cliente or not monto_raw:
+        return None, None  # esta fila no trae deuda, solo variables de saludo — no es un error
+    try:
+        monto = float(str(monto_raw).replace(",", "").replace("$", "").strip())
+    except ValueError:
+        return None, f'"{monto_raw}" no se pudo leer como monto'
+
+    due_date = None
+    if claves.get("vencimiento"):
+        due_date = _parse_fecha_hora(claves["vencimiento"])
+        if not due_date:
+            # El vencimiento suele cargarse solo con la fecha, sin hora; el
+            # parser de agenda exige hora. Se acepta fecha sola también.
+            try:
+                from datetime import datetime
+
+                due_date = datetime.strptime(claves["vencimiento"].strip(), "%Y-%m-%d")
+            except ValueError:
+                try:
+                    due_date = datetime.strptime(claves["vencimiento"].strip().replace("/", "-"), "%d-%m-%Y")
+                except ValueError:
+                    due_date = None
+        if not due_date:
+            return None, f'"{claves["vencimiento"]}" no se pudo leer como fecha (formato: AAAA-MM-DD)'
+
+    # La deuda se identifica por teléfono: es como la busca el voizbot al
+    # contestar. Se actualiza la existente (se mantiene el id para no
+    # romper promesas ya registradas contra la deuda vieja).
+    existente = (
+        await session.execute(
+            select(Debt).where(
+                (Debt.phone == phone) | (func.lower(Debt.debtor_name) == cliente.lower()),
+            )
+        )
+    ).scalars().first()
+    if existente:
+        existente.debtor_name = cliente
+        existente.amount = monto
+        existente.due_date = due_date
+        if claves.get("factura"):
+            existente.invoice_number = claves["factura"]
+        existente.status = "open"
+        return existente.id, None
+
+    deuda = Debt(
+        phone=phone,
+        debtor_name=cliente,
+        amount=monto,
+        due_date=due_date,
+        invoice_number=claves.get("factura"),
+        status="open",
+    )
+    session.add(deuda)
+    await session.flush()  # para conocer deuda.id sin esperar al commit del lote
+    return deuda.id, None
+
+
 @router.get("", response_model=list[CampaignOut])
 async def list_campaigns(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
@@ -105,6 +173,7 @@ async def list_campaigns_detail(session: AsyncSession = Depends(get_session)):
                 "max_concurrency": c.max_concurrency,
                 "retries": c.retries,
                 "message_template": c.message_template,
+                "ai_intent": c.ai_intent,
                 "status": c.status,
                 "started_at": c.started_at,
                 "finished_at": c.finished_at,
@@ -128,6 +197,14 @@ async def list_campaigns_detail(session: AsyncSession = Depends(get_session)):
 
 @router.post("", response_model=CampaignOut, status_code=status.HTTP_201_CREATED)
 async def create_campaign(payload: CampaignCreate, session: AsyncSession = Depends(get_session)):
+    tid = tenant_de_sesion(session)
+    if tid is not None:
+        lic = await licensing.obtener(session, tid)
+        if not await licensing.hay_cupo(session, lic, "max_campaigns", await licensing.contar_campanas(session, tid)):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Alcanzaste el límite de campañas de tu plan. Mejora la licencia para crear más.",
+            )
     if payload.trunk_id:
         trunk = await session.get(Trunk, payload.trunk_id)
         if not trunk:
@@ -198,6 +275,7 @@ async def add_numbers(
         select(CampaignNumber).where(CampaignNumber.campaign_id == campaign_id)
     )
     existentes = {n.phone: n for n in res.scalars().all()}
+    es_cobranza = (campaign.ai_intent or "").strip().lower() == "cobranza"
     added = 0
     updated = 0
     agenda_creadas = 0
@@ -223,12 +301,17 @@ async def add_numbers(
             existentes[fila.phone] = numero
             added += 1
         if fila.vars:
-            appointment_id, motivo = await _sincronizar_agenda(session, fila.phone, fila.vars)
-            if motivo:
-                agenda_omitidas.append({"phone": fila.phone, "motivo": motivo})
-            elif appointment_id:
-                numero.appointment_id = appointment_id
-                agenda_creadas += 1
+            if es_cobranza:
+                deuda_id, motivo = await _sincronizar_deuda(session, fila.phone, fila.vars)
+                if motivo:
+                    agenda_omitidas.append({"phone": fila.phone, "motivo": motivo})
+            else:
+                appointment_id, motivo = await _sincronizar_agenda(session, fila.phone, fila.vars)
+                if motivo:
+                    agenda_omitidas.append({"phone": fila.phone, "motivo": motivo})
+                elif appointment_id:
+                    numero.appointment_id = appointment_id
+                    agenda_creadas += 1
     await session.commit()
     return {
         "added": added,

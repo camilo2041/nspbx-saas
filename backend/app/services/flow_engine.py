@@ -92,7 +92,9 @@ def _node_audio_action(node: dict) -> ET.Element | None:
     return None
 
 
-def build_voicebot_flow_routes(section: ET.Element, context: ET.Element, bot) -> bool:
+def build_voicebot_flow_routes(
+    section: ET.Element, context: ET.Element, bot, dominio: str, tenant_id: int
+) -> bool:
     """Genera el dialplan a partir de un flujo visual (nodos + conexiones,
     estilo n8n) guardado en bot.flow_json. Devuelve False si el bot no tiene
     un flujo válido (para que el llamador use el generador simple legado).
@@ -103,6 +105,11 @@ def build_voicebot_flow_routes(section: ET.Element, context: ET.Element, bot) ->
     técnica de `transfer` a un contexto nuevo que usa el resto del sistema,
     necesaria porque FreeSWITCH evalúa las <condition> de una extension al
     momento de enrutar, no en vivo después de `read`.
+
+    `dominio` es el de la EMPRESA a la que pertenece el bot (con él se
+    arma el bridge hacia sus extensiones) y `tenant_id` viaja como variable
+    de canal para que el motor de IA sepa de qué empresa es la llamada
+    cuando FreeSWITCH le entrega el control.
     """
     flow = parse_flow(bot.flow_json)
     if not flow:
@@ -129,6 +136,7 @@ def build_voicebot_flow_routes(section: ET.Element, context: ET.Element, bot) ->
     directo_cond = ET.SubElement(
         directo_ext, "condition", attrib={"field": "${nspbx_ai_intent}", "expression": "."}
     )
+    ET.SubElement(directo_cond, "action", attrib={"application": "set", "data": f"nspbx_tenant_id={tenant_id}"})
     ET.SubElement(directo_cond, "action", attrib={"application": "answer"})
     ET.SubElement(
         directo_cond, "action", attrib={"application": "socket", "data": f"{settings.voicebot_esl_socket} async full"}
@@ -226,7 +234,7 @@ def build_voicebot_flow_routes(section: ET.Element, context: ET.Element, bot) ->
                 continue
             option_ext = ET.SubElement(route_context, "extension", attrib={"name": f"opcion_{digit}", "continue": "false"})
             option_cond = ET.SubElement(option_ext, "condition", attrib={"field": "destination_number", "expression": f"^opt{_escape_regex_digit(digit)}$"})
-            _append_target_actions(option_cond, target, bot.id)
+            _append_target_actions(option_cond, target, bot.id, dominio, tenant_id)
 
         # Sin marcar nada el destino llega como "opt" pelado; se le da una
         # vuelta más al menú antes de rendirse, que es lo que haría una
@@ -252,7 +260,7 @@ def build_voicebot_flow_routes(section: ET.Element, context: ET.Element, bot) ->
     return True
 
 
-def _append_target_actions(cond: ET.Element, target: dict, bot_id: int) -> None:
+def _append_target_actions(cond: ET.Element, target: dict, bot_id: int, dominio: str, tenant_id: int) -> None:
     data = target.get("data", {})
     ttype = target.get("type", "menu")
 
@@ -274,13 +282,17 @@ def _append_target_actions(cond: ET.Element, target: dict, bot_id: int) -> None:
             return
         if extension == "ai_agent":
             # Qué gestión viene a resolver el bot en esta rama del menú
-            # (confirmar / reagendar / cancelar / agendar). Se fija como
-            # variable del canal ANTES de entregar el control: sin esto el
-            # bot no sabía qué tecla marcó la persona y tenía que
-            # preguntarle otra vez. Ver app/services/ai_intents.py.
+            # (confirmar / reagendar / cancelar / agendar / cobranza). Se
+            # fija como variable del canal ANTES de entregar el control:
+            # sin esto el bot no sabía qué tecla marcó la persona y tenía
+            # que preguntarle otra vez. Ver app/services/ai_intents.py.
             intent = str(data.get("ai_intent", "") or "").strip().lower()
             if intent:
                 ET.SubElement(cond, "action", attrib={"application": "set", "data": f"nspbx_ai_intent={intent}"})
+            # La empresa viaja igual: el motor de IA necesita saber de
+            # qué tenant es la llamada para leer sus ajustes (API keys)
+            # y guardar con tenant_id (ver app/services/ai_agent.py).
+            ET.SubElement(cond, "action", attrib={"application": "set", "data": f"nspbx_tenant_id={tenant_id}"})
             # Entrega el control de la llamada al voizbot conversacional
             # (ESL "outbound socket" — ver backend/app/services/ai_agent.py,
             # que corre en el contenedor "voicebot", separado del backend
@@ -301,13 +313,10 @@ def _append_target_actions(cond: ET.Element, target: dict, bot_id: int) -> None:
             ET.SubElement(cond, "action", attrib={"application": "set", "data": "bridge_pre_execute_bleg_app=speak"})
             ET.SubElement(cond, "action", attrib={"application": "set", "data": f"bridge_pre_execute_bleg_data=flite|kal|{whisper_text}"})
         ET.SubElement(cond, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
-        # $${domain} (variable GLOBAL de FreeSWITCH, siempre existe) en vez
-        # de ${domain_name} (variable POR LLAMADA que solo queda seteada si
-        # se entró por una ruta entrante que la define explícitamente) —
-        # con ${domain_name} la transferencia fallaba en silencio (bridge a
-        # "user/1010@" con dominio vacío) al marcar el bot directo desde una
-        # extensión o desde una campaña, en vez de por una llamada entrante real.
-        ET.SubElement(cond, "action", attrib={"application": "bridge", "data": f"user/{extension}@$${{domain}}"})
+        # El dominio de la EMPRESA (no $${domain}, global): es la etiqueta
+        # con la que se registra cada extensión en el directorio, y con
+        # varias empresas $${domain} no puede ser el de todas a la vez.
+        ET.SubElement(cond, "action", attrib={"application": "bridge", "data": f"user/{extension}@{dominio}"})
         return
 
     ET.SubElement(cond, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})

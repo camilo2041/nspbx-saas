@@ -84,6 +84,10 @@ const empty: SystemSettings = {
   backups_max_gb: 5,
   max_call_duration_minutes: 60,
   max_concurrent_calls: 20,
+  ari_base_url: null,
+  ari_user: null,
+  ari_password: null,
+  ari_app: "nspbx",
 };
 
 export default function SettingsPage() {
@@ -578,6 +582,52 @@ export default function SettingsPage() {
               placeholder="Genera una cadena larga y aleatoria"
               hint="Lo usa un agente conversacional externo (ej. una app de ElevenLabs Agents) para autenticarse contra /api/appointments/agent/* — configúralo como header 'x-agent-secret' en esa herramienta."
             />
+          </CardBody>
+        </Card>
+
+        <Card delay={340} className="lg:col-span-2">
+          <CardHeader
+            title="Conector Issabel (ARI)"
+            subtitle="Issabel como motor telefónico externo: NSPBX se conecta como app Stasis para recibir y originar llamadas y streamear el audio por WebSocket"
+          />
+          <CardBody className="space-y-4">
+            <Note tone={form.ari_base_url ? "brand" : "muted"}>
+              {form.ari_base_url
+                ? "El conector ARI está configurado. Las llamadas que Issabel enrute a la app Stasis llegarán al voicebot."
+                : "Vacío = desactivado: NSPBX usa su propio FreeSWITCH. Para conectar Issabel, completá la URL base, las credenciales de ARI y el nombre de la app Stasis que habilite el proveedor."}
+            </Note>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Input
+                label="URL base de ARI"
+                value={form.ari_base_url ?? ""}
+                onChange={(v) => set("ari_base_url", v)}
+                placeholder="http://issabel.proveedor.com:8088"
+                hint="Sin la barra final. El puerto típico de ARI es 8088."
+                mono
+              />
+              <Input
+                label="Nombre de la app Stasis"
+                value={form.ari_app}
+                onChange={(v) => set("ari_app", v)}
+                placeholder="nspbx"
+                hint="La app que Issabel debe habilitar y enrutar hacia este panel."
+                mono
+              />
+              <Input
+                label="Usuario ARI"
+                value={form.ari_user ?? ""}
+                onChange={(v) => set("ari_user", v)}
+                placeholder="nspbx"
+                mono
+              />
+              <Input
+                label="Contraseña ARI"
+                type="password"
+                value={form.ari_password ?? ""}
+                onChange={(v) => set("ari_password", v)}
+                placeholder="••••••••"
+              />
+            </div>
           </CardBody>
         </Card>
 

@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_local
 from app.core.database import get_session
-from app.models import AiCallUsage, SystemSettings
+from app.models import AiCallUsage
+from app.services.ajustes import ajustes_de
 
 router = APIRouter(prefix="/api/ai-usage", tags=["ai-usage"])
 
@@ -76,7 +77,7 @@ class Tarifas:
 
 
 async def _tarifas(session: AsyncSession) -> Tarifas:
-    return Tarifas(await session.get(SystemSettings, 1))
+    return Tarifas(await ajustes_de(session))
 
 
 def _agrupar_por_proveedor(filas, t: Tarifas) -> list[dict]:

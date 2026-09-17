@@ -4,7 +4,6 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from app.core.config import settings
-from app.core.runtime_settings import runtime_settings
 from app.services import esl
 
 logger = logging.getLogger(__name__)
@@ -24,15 +23,22 @@ def parse_agents(agents_json: str | None) -> list[str]:
     return [str(a).strip() for a in data if str(a).strip()]
 
 
-def _queue_key(name: str) -> str:
-    return f"{name}@{runtime_settings.fs_domain}"
+# El dominio llega como parámetro y ya no sale de una variable de
+# proceso. En mod_callcenter los nombres de cola y de agente son un
+# espacio de nombres GLOBAL: con un dominio único, la cola "soporte" de
+# una empresa y la de otra serían literalmente la misma cola y sus
+# agentes atenderían llamadas cruzadas. El dominio por empresa es lo que
+# las separa, así que tiene que viajar con cada cola en vez de ser un
+# valor ambiente que la última empresa procesada deja pisado.
+def _queue_key(name: str, dominio: str) -> str:
+    return f"{name}@{dominio}"
 
 
-def _agent_key(extension: str) -> str:
-    return f"{extension}@{runtime_settings.fs_domain}"
+def _agent_key(extension: str, dominio: str) -> str:
+    return f"{extension}@{dominio}"
 
 
-def build_callcenter_xml(queues: list) -> str:
+def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
     """Genera callcenter.conf.xml completo (settings + queues + agents +
     tiers) a partir de las colas en la base de datos. mod_callcenter solo
     permite declarar agentes con TODOS sus parámetros (max-no-answer,
@@ -54,7 +60,7 @@ def build_callcenter_xml(queues: list) -> str:
     for queue in queues:
         if not queue.enabled:
             continue
-        qkey = _queue_key(queue.name)
+        qkey = _queue_key(queue.name, dominios[queue.tenant_id])
         queue_el = ET.SubElement(queues_el, "queue", attrib={"name": qkey})
         params = {
             "strategy": queue.strategy,
@@ -80,10 +86,10 @@ def build_callcenter_xml(queues: list) -> str:
             ET.SubElement(queue_el, "param", attrib={"name": name, "value": value})
 
         for ext in parse_agents(queue.agents):
-            akey = _agent_key(ext)
+            akey = _agent_key(ext, dominios[queue.tenant_id])
             if akey not in seen_agents:
                 seen_agents.add(akey)
-                contact = f"[leg_timeout={queue.agent_ring_timeout}]user/{ext}@{runtime_settings.fs_domain}"
+                contact = f"[leg_timeout={queue.agent_ring_timeout}]user/{ext}@{dominios[queue.tenant_id]}"
                 ET.SubElement(
                     agents_el,
                     "agent",
@@ -103,10 +109,10 @@ def build_callcenter_xml(queues: list) -> str:
     return ET.tostring(root, encoding="unicode")
 
 
-def write_callcenter_conf(queues: list) -> Path:
+def write_callcenter_conf(queues: list, dominios: dict[int, str]) -> Path:
     path = Path(settings.fs_conf_dir) / CALLCENTER_CONF_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(build_callcenter_xml(queues), encoding="utf-8")
+    path.write_text(build_callcenter_xml(queues, dominios), encoding="utf-8")
     logger.info("callcenter.conf.xml regenerado (%d colas)", len(queues))
     return path
 
@@ -129,12 +135,12 @@ async def _current_tier_agents(qkey: str) -> set[str]:
     return agents
 
 
-async def sync_queue(queue) -> None:
+async def sync_queue(queue, dominio: str) -> None:
     """Aplica los cambios de UNA cola sin tocar las demás: borra los tiers
     que ya no correspondan y recarga (o carga por primera vez) solo esa
     cola en mod_callcenter."""
-    qkey = _queue_key(queue.name)
-    new_agents = {_agent_key(e) for e in parse_agents(queue.agents)} if queue.enabled else set()
+    qkey = _queue_key(queue.name, dominio)
+    new_agents = {_agent_key(e, dominio) for e in parse_agents(queue.agents)} if queue.enabled else set()
 
     current_agents = await _current_tier_agents(qkey)
     for stale in current_agents - new_agents:
@@ -149,22 +155,22 @@ async def sync_queue(queue) -> None:
         await _run(f"callcenter_config queue load {qkey}")
 
 
-async def remove_queue(name: str) -> None:
-    qkey = _queue_key(name)
+async def remove_queue(name: str, dominio: str) -> None:
+    qkey = _queue_key(name, dominio)
     for agent in await _current_tier_agents(qkey):
         await _run(f"callcenter_config tier del {qkey} {agent}")
     await _run(f"callcenter_config queue unload {qkey}")
 
 
-async def apply_queues(queues: list) -> None:
+async def apply_queues(queues: list, dominios: dict[int, str]) -> None:
     """Reescribe callcenter.conf.xml completo y recarga XML, luego aplica
     (carga/recarga) cada cola habilitada de forma dirigida. Se usa al
     arrancar el backend, cuando mod_callcenter pierde todo su estado."""
-    write_callcenter_conf(queues)
+    write_callcenter_conf(queues, dominios)
     await _run("reloadxml")
     for queue in queues:
         if queue.enabled:
-            qkey = _queue_key(queue.name)
+            qkey = _queue_key(queue.name, dominios[queue.tenant_id])
             result = await _run(f"callcenter_config queue reload {qkey}")
             if "-ERR" in result:
                 await _run(f"callcenter_config queue load {qkey}")

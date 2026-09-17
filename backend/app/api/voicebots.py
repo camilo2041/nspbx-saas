@@ -14,8 +14,8 @@ from app.schemas import (
     VoiceBotTtsRequest,
     VoiceBotUpdate,
 )
-from app.models import SystemSettings
 from app.services import deepgram, greetings, tts, tts_elevenlabs
+from app.services.ajustes import ajustes_de
 from app.services.esl import reloadxml
 from app.services.flow_engine import legacy_flow_from_bot
 
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/voicebots", tags=["voicebots"])
 
 
 async def _get_elevenlabs_key(session: AsyncSession) -> str:
-    row = await session.get(SystemSettings, 1)
+    row = await ajustes_de(session)
     return (row.elevenlabs_api_key if row else None) or ""
 
 
@@ -35,7 +35,7 @@ async def _synthesize(text: str, voice: str, provider: str, session: AsyncSessio
         api_key = await _get_elevenlabs_key(session)
         return await tts_elevenlabs.synthesize(text, voice, api_key), "wav"
     if provider == "deepgram":
-        row = await session.get(SystemSettings, 1)
+        row = await ajustes_de(session)
         return await deepgram.synthesize(text, voice, (row.deepgram_api_key if row else None) or ""), "wav"
     return await tts.synthesize(text, voice), "mp3"
 

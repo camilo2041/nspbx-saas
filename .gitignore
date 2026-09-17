@@ -67,6 +67,10 @@ venv/
 # lado, así que se ignora explícitamente acá.
 .claude/
 
+# Volcado/respaldo suelto de main.py hecho antes de una edición riesgosa,
+# no es código fuente vigente.
+.main_dump.py
+
 # --- Sistema operativo / editores -----------------------------------
 .DS_Store
 Thumbs.db

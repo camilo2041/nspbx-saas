@@ -12,9 +12,10 @@
 :root {
   color-scheme: light;
 
-  --bg: #f4f6fb;
-  --bg-tint-a: rgb(249 115 22 / 0.1);
-  --bg-tint-b: rgb(14 165 233 / 0.08);
+  --bg: #f2f5fb;
+  --bg-tint-a: rgb(249 115 22 / 0.16);
+  --bg-tint-b: rgb(14 165 233 / 0.12);
+  --bg-tint-c: rgb(139 92 246 / 0.09);
 
   --surface: #ffffff;
   --surface-2: #f8fafc;
@@ -68,8 +69,9 @@
   color-scheme: dark;
 
   --bg: #080b14;
-  --bg-tint-a: rgb(251 146 60 / 0.16);
-  --bg-tint-b: rgb(56 189 248 / 0.1);
+  --bg-tint-a: rgb(251 146 60 / 0.22);
+  --bg-tint-b: rgb(56 189 248 / 0.16);
+  --bg-tint-c: rgb(167 139 250 / 0.12);
 
   --surface: #0f1524;
   --surface-2: #141b2d;
@@ -189,8 +191,10 @@
     transition: background-color 0.3s ease, color 0.3s ease;
   }
 
-  /* Luz ambiental de fondo: dos manchas suaves que dan profundidad sin
-     interferir con el contenido (fixed + sin eventos de puntero). */
+  /* Luz ambiental de fondo: manchas suaves que dan profundidad sin
+     interferir con el contenido (fixed + sin eventos de puntero). Tres
+     focos de color (naranja, celeste, violeta) para que el panel no se
+     sienta plano. */
   body::before {
     content: "";
     position: fixed;
@@ -198,8 +202,9 @@
     z-index: -1;
     pointer-events: none;
     background:
-      radial-gradient(60rem 34rem at 12% -8%, var(--bg-tint-a), transparent 60%),
-      radial-gradient(52rem 30rem at 92% 4%, var(--bg-tint-b), transparent 60%);
+      radial-gradient(70rem 38rem at 10% -10%, var(--bg-tint-a), transparent 62%),
+      radial-gradient(58rem 34rem at 96% -6%, var(--bg-tint-b), transparent 62%),
+      radial-gradient(52rem 30rem at 50% 116%, var(--bg-tint-c), transparent 62%);
   }
 
   ::selection {

@@ -12,15 +12,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, select, text, update
+from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, auth as auth_api, calls as calls_api, campaigns, extensions, inbound_routes, logs_ws, queues as queues_api, settings as settings_api, system, trunks, users as users_api, voicebots
+from app.api import ai_usage, appointments as appointments_api, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, inbound_routes, logs_ws, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots
 from app.core import permissions
-from app.core.auth import escribir_requiere, requiere, sesion_obligatoria
+from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
 from app.core.database import Base, async_session, engine, verificar_rol_sin_privilegios
 from app.core.security import hash_password
-from app.models import CampaignNumber, Queue, Trunk, User
+from app.models import CampaignNumber, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
 from app.services import voice_prompts, xml_endpoints
@@ -127,6 +127,32 @@ _COLUMN_PATCHES = [
     "INTEGER REFERENCES appointments(id) ON DELETE SET NULL",
     "ALTER TABLE ai_call_usage ADD COLUMN IF NOT EXISTS action_appointment_date TIMESTAMP",
     "ALTER TABLE ai_call_usage ADD COLUMN IF NOT EXISTS action_patient_name VARCHAR(150)",
+    # Intención del voizbot por campaña (confirmar / cobranza / …) — ver
+    # Campaign.ai_intent en los modelos.
+    "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS ai_intent VARCHAR(30)",
+    # Subdominio del panel por empresa (ver Tenant.subdomain). Se siembra
+    # del slug para que las empresas existentes queden con su subdominio
+    # sin migrar datos a mano.
+    "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subdomain VARCHAR(80)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_tenants_subdomain ON tenants (subdomain)",
+    "UPDATE tenants SET subdomain = slug WHERE subdomain IS NULL",
+    # Tipo de negocio de la empresa (general | clinica | cobranza).
+    "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS business_type VARCHAR(30) NOT NULL DEFAULT 'general'",
+    # Módulos de la empresa (CSV: "voicebot,pbx"). Las existentes quedan
+    # con el pack completo.
+    "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS modules VARCHAR(120) NOT NULL DEFAULT 'voicebot,pbx'",
+    # Licencia por empresa (tabla nueva; create_all la crea). Las empresas
+    # existentes reciben una licencia trial de 15 días para no cortarles
+    # la operación de golpe.
+    "INSERT INTO licenses (tenant_id, plan, status, started_at, expires_at, created_at, updated_at) "
+    "SELECT id, 'trial', 'trial', NOW(), NOW() + INTERVAL '15 days', NOW(), NOW() "
+    "FROM tenants ON CONFLICT (tenant_id) DO NOTHING",
+    # Conector Issabel (ARI): base URL, credenciales y app Stasis. Vacíos =
+    # desactivado (NSPBX usa su FreeSWITCH).
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ari_base_url VARCHAR(255)",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ari_user VARCHAR(80)",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ari_password VARCHAR(255)",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ari_app VARCHAR(80) NOT NULL DEFAULT 'nspbx'",
 ]
 
 # --- Multiempresa: paso 1 -------------------------------------------
@@ -147,6 +173,9 @@ _TABLAS_CON_TENANT = [
     "queues",
     "inbound_routes",
     "appointments",
+    "debts",
+    "payment_promises",
+    "licenses",
 ]
 
 # Restricciones que Postgres creó con nombre automático cuando la columna
@@ -208,11 +237,16 @@ def _parches_multiempresa() -> list[str]:
         ]
 
     # users aparte: admite NULL, así que no lleva SET NOT NULL. Los
-    # usuarios que ya existían son de la empresa inicial.
+    # usuarios que ya existían son de la empresa inicial — EXCEPTO los de
+    # la PLATAFORMA (rol 'plataforma', sin empresa), que siempre quedan
+    # en NULL a propósito: es la señal de "administra todas las empresas".
+    # La migración vieja (sin el filtro de rol) los había metido en la
+    # empresa 1; este UPDATE también los corrige.
     stmts += [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER "
         "REFERENCES tenants(id) ON DELETE CASCADE",
-        "UPDATE users SET tenant_id = 1 WHERE tenant_id IS NULL",
+        "UPDATE users SET tenant_id = 1 WHERE tenant_id IS NULL AND role <> 'plataforma'",
+        "UPDATE users SET tenant_id = NULL WHERE role = 'plataforma'",
         "CREATE INDEX IF NOT EXISTS ix_users_tenant_id ON users (tenant_id)",
     ]
 
@@ -345,9 +379,24 @@ async def _asegurar_admin(session) -> None:
     del contenedor, que es el único sitio donde el dueño del servidor
     puede leerla. Nunca se usa una contraseña fija tipo "admin/admin":
     quedaría igual en toda instalación que no la cambie.
+
+    El admin se crea con la PRIMERA empresa (tenant_id): con Row-Level
+    Security, un usuario sin empresa no ve nada en las rutas normales —
+    las políticas no devuelven filas sin `app.tenant_id`, y eso hace que
+    hasta su propio login responda 401. Si el admin ya existía de un
+    arranque anterior sin tenant (creado antes de la migración
+    multiempresa), se le asigna la primera empresa también.
     """
-    hay = (await session.execute(select(func.count(User.id)))).scalar() or 0
-    if hay:
+    tenante = (
+        await session.execute(select(Tenant).order_by(Tenant.id).limit(1))
+    ).scalar_one_or_none()
+    admin = (
+        await session.execute(select(User).where(User.username == "admin"))
+    ).scalar_one_or_none()
+    if admin:
+        if admin.tenant_id is None and tenante is not None:
+            admin.tenant_id = tenante.id
+            await session.commit()
         return
 
     password = os.getenv("ADMIN_PASSWORD", "").strip() or secrets.token_urlsafe(12)
@@ -355,6 +404,7 @@ async def _asegurar_admin(session) -> None:
         User(
             username="admin",
             full_name="Administrador",
+            tenant_id=tenante.id if tenante else None,
             password_hash=hash_password(password),
             role=permissions.ADMIN,
             enabled=True,
@@ -371,6 +421,40 @@ async def _asegurar_admin(session) -> None:
         )
 
 
+async def _asegurar_plataforma(session) -> None:
+    """Crea el usuario de la PLATAFORMA (sin empresa) si no existe.
+
+    Es quien da de alta empresas desde el panel. Usa la misma contraseña
+    de ADMIN_PASSWORD que el admin inicial (misma clave, distinto rol):
+    si alguien entra como `plataforma`, administra empresas; como
+    `admin`, administra la empresa inicial.
+    """
+    existe = (
+        await session.execute(select(User).where(User.username == "plataforma"))
+    ).scalar_one_or_none()
+    if existe:
+        # La migración de arranque puede haberle metido tenant_id=1 (el
+        # UPDATE de relleno de la empresa inicial). La plataforma NO
+        # pertenece a ninguna empresa; se corrige en cada arranque.
+        if existe.tenant_id is not None:
+            existe.tenant_id = None
+            await session.commit()
+        return
+    password = os.getenv("ADMIN_PASSWORD", "").strip() or secrets.token_urlsafe(12)
+    session.add(
+        User(
+            username="plataforma",
+            full_name="Operador de plataforma",
+            tenant_id=None,  # sin empresa: administra todas
+            role=permissions.PLATAFORMA,
+            password_hash=hash_password(password),
+            enabled=True,
+        )
+    )
+    await session.commit()
+    logger.warning("Usuario de plataforma creado: 'plataforma' con la misma contraseña que 'admin'")
+
+
 async def lifespan(app: FastAPI):
     # Las migraciones van con el motor del DUEÑO, no con el de la
     # aplicación: el rol restringido está sujeto a las políticas que
@@ -385,15 +469,27 @@ async def lifespan(app: FastAPI):
     # porque el rol se crea recién en la migración de arriba.
     await verificar_rol_sin_privilegios()
     async with async_session() as session:
-        row = await settings_api.get_or_create_settings(session)
-        settings_api.apply_to_runtime(row)
+        # Ajustes y ESL por empresa. Los ajustes se siembran desde cada
+        # tenant (fs_domain sale de Tenant.sip_domain) y la config de
+        # infraestructura (host/puerto/password de ESL) se vuelca al
+        # singleton de proceso: es única por instalación y todas las
+        # empresas comparten el mismo FreeSWITCH, así que basta con la de
+        # la primera.
+        tenantes_rows = (await session.execute(select(Tenant))).scalars().all()
+        dominios: dict[int, str] = {}
+        slugs: dict[int, str] = {}
+        for t in tenantes_rows:
+            fila_ajustes = await settings_api.get_or_create_settings(session, t.id)
+            dominios[t.id] = fila_ajustes.fs_domain or t.sip_domain
+            slugs[t.id] = t.slug
+            settings_api.apply_to_runtime(fila_ajustes)
         trunks_rows = (await session.execute(select(Trunk))).scalars().all()
-        sync_gateways(trunks_rows)
+        sync_gateways(trunks_rows, slugs)
         # mod_callcenter guarda colas/agentes en memoria — se pierden en cada
         # reinicio de FreeSWITCH, así que hay que reescribir su config y
         # recargar el módulo al arrancar el backend.
         queues_rows = (await session.execute(select(Queue))).scalars().all()
-        await apply_queues(queues_rows)
+        await apply_queues(queues_rows, dominios)
         # Números que quedaron en "dialing" por un reinicio/caída previa del
         # backend nunca vuelven a "pending" solos (las tareas de _dial se
         # cancelan sin llegar a su bloque finally) — quedarían excluidos de
@@ -403,7 +499,9 @@ async def lifespan(app: FastAPI):
         )
         await session.commit()
         await _asegurar_admin(session)
-        await voice_prompts.ensure_prompts(session)
+        await _asegurar_plataforma(session)
+        for t in tenantes_rows:
+            await voice_prompts.ensure_prompts(session, t.id)
     dialer.start()
     maintenance.start()
     yield
@@ -454,10 +552,28 @@ app.include_router(auth_api.router)
 app.include_router(users_api.router)
 
 # Infraestructura telefónica: solo admin. Estas respuestas traen las
-# credenciales SIP en claro.
-app.include_router(trunks.router, **_con(permissions.TELEFONIA_GESTIONAR))
-app.include_router(extensions.router, **_con(permissions.TELEFONIA_GESTIONAR))
-app.include_router(inbound_routes.router, **_con(permissions.TELEFONIA_GESTIONAR))
+# credenciales SIP en claro. Además exigen el módulo "pbx" (modelo de
+# packs — ver Tenant.modules) y una licencia operativa.
+_TELEFONIA = [
+    Depends(requiere(permissions.TELEFONIA_GESTIONAR)),
+    Depends(requiere_modulo("pbx")),
+    Depends(licencia_operativa()),
+]
+app.include_router(trunks.router, dependencies=_TELEFONIA)
+app.include_router(extensions.router, dependencies=_TELEFONIA)
+app.include_router(inbound_routes.router, dependencies=_TELEFONIA)
+# Colas: su propio permiso, pero también módulo pbx y licencia.
+app.include_router(
+    queues_api.router,
+    dependencies=[
+        Depends(requiere(permissions.COLAS_GESTIONAR)),
+        Depends(requiere_modulo("pbx")),
+        Depends(licencia_operativa()),
+    ],
+)
+
+# Módulo voicebot: voizbots, campañas y cobranza. También licencia.
+_VOICEBOT = [Depends(requiere_modulo("voicebot")), Depends(licencia_operativa())]
 
 # El coordinador puede mirar los voizbots pero no editarlos ni lanzar
 # síntesis de voz (que se paga por carácter).
@@ -466,10 +582,26 @@ app.include_router(
     dependencies=[
         Depends(requiere(permissions.VOIZBOTS_VER)),
         Depends(escribir_requiere(permissions.VOIZBOTS_GESTIONAR)),
+        *_VOICEBOT,
     ],
 )
-app.include_router(campaigns.router, **_con(permissions.CAMPANAS_GESTIONAR))
-app.include_router(queues_api.router, **_con(permissions.COLAS_GESTIONAR))
+app.include_router(
+    campaigns.router,
+    dependencies=[Depends(requiere(permissions.CAMPANAS_GESTIONAR)), *_VOICEBOT],
+)
+app.include_router(
+    cobranza.router,
+    dependencies=[Depends(requiere(permissions.CAMPANAS_GESTIONAR)), *_VOICEBOT],
+)
+app.include_router(
+    ai_usage.router,
+    dependencies=[Depends(requiere(permissions.CONSUMO_IA_VER)), *_VOICEBOT],
+)
+# Empresas: SOLO el rol de plataforma (usa la sesión del dueño).
+app.include_router(
+    tenants_api.router,
+    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
+)
 app.include_router(appointments_api.router)  # permisos por endpoint: el agente de IA entra acá
 app.include_router(calls_api.router)  # permisos por endpoint: /fs/cdr lo llama FreeSWITCH
 app.include_router(ai_usage.router, **_con(permissions.CONSUMO_IA_VER))

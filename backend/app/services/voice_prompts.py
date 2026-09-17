@@ -53,7 +53,7 @@ def prompt_path(key: str) -> str | None:
     return f"{FS_SIDE_SOUNDS_DIR}/{PROMPTS_DIR}/{key}.wav"
 
 
-async def ensure_prompts(session: AsyncSession) -> None:
+async def ensure_prompts(session: AsyncSession, tenant_id: int | None = None) -> None:
     """Genera los audios que falten. Se llama una vez al arrancar el
     backend; si no hay API key todavía, no revienta nada — el dialplan
     cae de vuelta a `speak` con flite hasta que se configure una."""
@@ -61,7 +61,9 @@ async def ensure_prompts(session: AsyncSession) -> None:
     if not faltantes:
         return
 
-    fila = await session.get(SystemSettings, 1)
+    from app.services.ajustes import ajustes_de
+
+    fila = await ajustes_de(session, tenant_id)
     api_key = (fila.deepgram_api_key if fila else None) or ""
     if not api_key:
         logger.info(

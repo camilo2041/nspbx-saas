@@ -33,7 +33,7 @@ export function Card({
   return (
     <div
       style={delay ? { animationDelay: `${delay}ms` } : undefined}
-      className={`rounded-2xl border border-line bg-surface shadow-[var(--shadow-1)] ${
+      className={`rounded-2xl border border-line bg-gradient-to-b from-surface to-surface-2/60 shadow-[var(--shadow-1)] ${
         hover ? "card-lift sheen" : ""
       } ${animate ? "animate-fade-up" : ""} ${className}`}
     >
@@ -87,10 +87,13 @@ export function PageHeader({
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="bg-gradient-to-br from-fg to-muted bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-[1.7rem]">
-          {title}
-        </h1>
-        {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted">{subtitle}</p>}
+        <div className="flex items-center gap-2.5">
+          <span className="h-6 w-1 shrink-0 rounded-full bg-gradient-to-b from-brand to-accent" />
+          <h1 className="bg-gradient-to-br from-fg via-fg to-brand bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-[1.7rem]">
+            {title}
+          </h1>
+        </div>
+        {subtitle && <p className="mt-1.5 max-w-2xl text-sm text-muted">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -104,7 +107,7 @@ type Variant = "primary" | "secondary" | "danger" | "success" | "ghost";
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-brand text-on-brand shadow-[var(--shadow-brand)] hover:bg-brand-hover hover:shadow-[0_8px_24px_-8px_rgb(99_102_241/0.7)]",
+    "bg-gradient-to-r from-brand to-accent text-on-brand shadow-[var(--shadow-brand)] hover:from-brand-hover hover:to-brand hover:shadow-[0_10px_26px_-8px_rgb(234_88_12/0.55)]",
   secondary:
     "border border-line bg-surface text-fg-soft hover:border-line-strong hover:bg-surface-2 hover:text-fg",
   danger: "bg-danger text-white shadow-[0_6px_18px_-8px_var(--danger)] hover:brightness-110",
@@ -691,7 +694,7 @@ export function EmptyState({
 }) {
   return (
     <div className="animate-fade-up flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
-      <div className="mb-1 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-3 text-faint ring-1 ring-line">
+      <div className="mb-1 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-soft to-info-soft text-brand-text shadow-[var(--shadow-1)] ring-1 ring-brand/15">
         {icon ?? (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-5 w-5">
             <rect x="3" y="5" width="18" height="14" rx="2" />
@@ -716,7 +719,7 @@ export function Table({ head, children }: { head: Column[]; children: ReactNode 
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-line bg-surface-2/60 text-left text-[11px] font-semibold uppercase tracking-wider text-muted">
+          <tr className="border-b border-line bg-gradient-to-b from-surface-2 to-surface-3/70 text-left text-[11px] font-semibold uppercase tracking-wider text-muted">
             {head.map((c, i) => {
               const col = typeof c === "string" ? { label: c, align: "left" as const } : c;
               return (
@@ -740,7 +743,7 @@ export function Tr({ children, delay = 0 }: { children: ReactNode; delay?: numbe
   return (
     <tr
       style={delay ? { animationDelay: `${delay}ms` } : undefined}
-      className="animate-fade-up border-b border-line/60 transition-colors last:border-0 hover:bg-surface-2"
+      className="animate-fade-up border-b border-line/60 transition-colors last:border-0 hover:bg-brand-soft/40"
     >
       {children}
     </tr>

@@ -73,18 +73,28 @@ class MaintenanceWorker:
                 await asyncio.sleep(60)
 
     async def ejecutar_una_vez(self) -> None:
+        # La sesión es la del DUEÑO (sin RLS): el respaldo es de la base
+        # COMPLETA, no de una empresa, y el worker corre una vez para todo
+        # el sistema. La configuración (¿respaldar?, retención, topes) es
+        # por empresa; se combina de la forma más conservadora: se respalda
+        # si CUALQUIER empresa lo tiene activo, y se conserva lo máximo /
+        # se borra con el tope mínimo de todas.
         async with async_session() as session:
-            row = await session.get(SystemSettings, 1)
-            if not row:
+            filas = (await session.execute(select(SystemSettings))).scalars().all()
+            if not filas:
                 return
-            necesita_backup = row.backup_enabled and (
-                row.last_backup_at is None
-                or datetime.utcnow() - row.last_backup_at >= timedelta(hours=23)
+            necesita_backup = any(
+                f.backup_enabled
+                and (
+                    f.last_backup_at is None
+                    or datetime.utcnow() - f.last_backup_at >= timedelta(hours=23)
+                )
+                for f in filas
             )
-            retencion_backup = row.backup_retention_days
-            tope_backup_gb = row.backups_max_gb
-            retencion_grabaciones = row.recordings_retention_days
-            tope_gb = row.recordings_max_gb
+            retencion_backup = max(f.backup_retention_days for f in filas)
+            tope_backup_gb = min(f.backups_max_gb for f in filas)
+            retencion_grabaciones = max(f.recordings_retention_days for f in filas)
+            tope_gb = min(f.recordings_max_gb for f in filas)
 
         if necesita_backup:
             await self._respaldar_postgres(retencion_backup, tope_backup_gb)
@@ -96,9 +106,9 @@ class MaintenanceWorker:
         retención configurada, para no dejar acumular copias de más solo
         porque alguien lo disparó a mano varias veces seguidas."""
         async with async_session() as session:
-            row = await session.get(SystemSettings, 1)
-            retencion = row.backup_retention_days if row else 14
-            tope_gb = row.backups_max_gb if row else 5.0
+            filas = (await session.execute(select(SystemSettings))).scalars().all()
+            retencion = max((f.backup_retention_days for f in filas), default=14)
+            tope_gb = min((f.backups_max_gb for f in filas), default=5.0)
         await self._respaldar_postgres(retencion, tope_gb)
 
     async def _respaldar_postgres(self, retencion_dias: int, tope_gb: float) -> None:
@@ -143,12 +153,14 @@ class MaintenanceWorker:
             logger.error("Falló el respaldo de Postgres: %s", error)
 
         async with async_session() as session:
-            row = await session.get(SystemSettings, 1)
-            if row:
+            # El resultado se anota en TODAS las empresas: el respaldo es
+            # de la base completa, así que vale para todas por igual.
+            filas = (await session.execute(select(SystemSettings))).scalars().all()
+            for row in filas:
                 row.last_backup_at = datetime.utcnow()
                 row.last_backup_ok = error is None
                 row.last_backup_error = error
-                await session.commit()
+            await session.commit()
 
         if error is None:
             self._purgar_backups_viejos(destino, retencion_dias, tope_gb)

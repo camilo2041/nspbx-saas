@@ -11,11 +11,15 @@ const CLAVE = "nspbx-token";
 interface Estado {
   usuario: Usuario | null;
   permisos: string[];
+  /** Módulos habilitados de la empresa (voicebot/pbx). */
+  modulos: string[];
   cargando: boolean;
   entrar: (username: string, password: string) => Promise<void>;
   salir: () => void;
   /** ¿El rol actual tiene este permiso? Ver backend/app/core/permissions.py */
   puede: (permiso: string) => boolean;
+  /** ¿La empresa tiene este módulo activo (voicebot/pbx)? */
+  tieneModulo: (modulo: string) => boolean;
 }
 
 const Ctx = createContext<Estado | null>(null);
@@ -29,6 +33,7 @@ export function useAuth() {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [permisos, setPermisos] = useState<string[]>([]);
+  const [modulos, setModulos] = useState<string[]>([]);
   const [cargando, setCargando] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
@@ -43,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setUsuario(s.usuario);
     setPermisos(s.permisos);
+    setModulos(s.modulos ?? []);
   }, []);
 
   const salir = useCallback(() => {
@@ -54,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setUsuario(null);
     setPermisos([]);
+    setModulos([]);
     router.replace("/login");
   }, [router]);
 
@@ -108,15 +115,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const entrar = useCallback(
     async (username: string, password: string) => {
-      aplicar(await api.post<Sesion>("/api/auth/login", { username, password }));
+      // El login viaja atado al subdominio desde el que se entra: si este
+      // panel se sirve por "consultorio-andino.<base>", el backend exige
+      // que la cuenta pertenezca a esa empresa. El backend ignora el
+      // subdominio si no pertenece a ninguna empresa (dominio base).
+      let subdomain: string | undefined;
+      if (typeof window !== "undefined") {
+        const host = window.location.hostname.toLowerCase();
+        const partes = host.split(".");
+        const primero = partes[0];
+        if (partes.length >= 2 && primero !== "www" && primero !== "localhost" && !/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+          subdomain = primero;
+        }
+      }
+      aplicar(await api.post<Sesion>("/api/auth/login", { username, password, subdomain }));
       router.replace("/");
     },
     [aplicar, router]
   );
 
   const puede = useCallback((permiso: string) => permisos.includes(permiso), [permisos]);
+  const tieneModulo = useCallback((modulo: string) => modulos.includes(modulo), [modulos]);
 
   return (
-    <Ctx.Provider value={{ usuario, permisos, cargando, entrar, salir, puede }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ usuario, permisos, modulos, cargando, entrar, salir, puede, tieneModulo }}>
+      {children}
+    </Ctx.Provider>
   );
 }

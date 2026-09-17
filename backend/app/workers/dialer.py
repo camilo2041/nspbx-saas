@@ -5,11 +5,13 @@ from datetime import datetime
 
 from sqlalchemy import select, update
 
+from app.core.clock import fecha_en_palabras
 from app.core.database import async_session
-from app.models import Campaign, CampaignNumber, SystemSettings, Trunk, VoiceBot
-from app.services import esl, templating
+from app.models import Campaign, CampaignNumber, SystemSettings, Tenant, Trunk, VoiceBot
+from app.services import esl, licensing, templating
 from app.services.fechas import formatear_natural, parse_fecha_hora
 from app.services.config_generator import orden_troncales
+from app.services.numeros import numero_a_palabras
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +73,24 @@ class CampaignDialer:
             # FreeSWITCH (current_sessions cuenta ambas patas de cada
             # llamada bridgeada, no solo las de campañas), no contra un
             # contador propio que podría desincronizarse.
-            settings_row = await session.get(SystemSettings, 1)
-            tope_global = settings_row.max_concurrent_calls if settings_row else 20
+            #
+            # Ahora el tope es por EMPRESA, pero el canal es un recurso
+            # compartido del PBX: se usa el tope más restrictivo de las
+            # empresas que están marcando, que es el que protege la troncal
+            # contra todas.
+            ajustes_rows = (await session.execute(select(SystemSettings))).scalars().all()
+            ajustes_por_tenant = {r.tenant_id: r for r in ajustes_rows}
+            result = await session.execute(
+                select(Campaign).where(Campaign.status == "running")
+            )
+            campaigns = result.scalars().all()
+            # Tope por campaña efectivo: el que la licencia permite, sin
+            # pasar del configurado en Ajustes.
+            tops = []
+            for c in campaigns:
+                cap = ajustes_por_tenant[c.tenant_id].max_concurrent_calls if c.tenant_id in ajustes_por_tenant else 20
+                tops.append(await licensing.tope_concurrentes(session, c.tenant_id, cap))
+            tope_global = min(tops) if tops else 20
 
             try:
                 estado = await esl.status()
@@ -85,10 +103,6 @@ class CampaignDialer:
             if margen_global <= 0:
                 return
 
-            result = await session.execute(
-                select(Campaign).where(Campaign.status == "running")
-            )
-            campaigns = result.scalars().all()
             for campaign in campaigns:
                 if margen_global <= 0:
                     break
@@ -122,33 +136,91 @@ class CampaignDialer:
                 fresh = await s.get(Campaign, campaign.id)
                 trunk = await s.get(Trunk, fresh.trunk_id) if fresh.trunk_id else None
                 bot = await s.get(VoiceBot, fresh.voicebot_id) if fresh.voicebot_id else None
-                todas_troncales = (await s.execute(select(Trunk))).scalars().all()
+                # SOLO las troncales de la empresa de la campaña: con la
+                # sesión del dueño, un SELECT sin filtro traería las de
+                # TODAS las empresas y una campaña podría marcar por la
+                # troncal de otra — una fuga de recursos entre tenants.
+                todas_troncales = (
+                    await s.execute(
+                        select(Trunk).where(Trunk.tenant_id == fresh.tenant_id)
+                    )
+                ).scalars().all()
+                # El contexto de dialplan de la EMPRESA de la campaña: el
+                # originate tiene que ejecutar el bot en él, no en "default"
+                # (que ya no existe con varias empresas — ver esl.originate).
+                tenant = await s.get(Tenant, fresh.tenant_id) if fresh.tenant_id else None
+                contexto = tenant.dialplan_context if tenant else "default"
+                slug = tenant.slug if tenant else "x"
             if not trunk or not trunk.enabled:
                 raise RuntimeError("Campaña sin troncal habilitado")
             exten = f"bot_{bot.id}" if bot and bot.enabled else None
 
-            # Campaña de confirmación de citas: el saludo se arma ACÁ, antes
-            # de marcar, con las variables cargadas para este número
-            # específico — así el bot abre nombrando a la persona y su cita
-            # real en vez del saludo genérico. El resto de la conversación
-            # (confirmar, reagendar, cancelar con disponibilidad real) sigue
-            # siendo la intención "confirmar" de siempre (ver ai_intents.py).
-            extra_vars: dict[str, str] = {}
+            # La empresa y la gestión de esta llamada viajan SIEMPRE en el
+            # originate: el voizbot las necesita para leer los ajustes de
+            # la empresa (API keys) y saber a qué intención responder (ver
+            # app/services/ai_agent.py). La gestión sale de la campaña
+            # (confirmar, cobranza, …) y cae a "confirmar" por
+            # compatibilidad con las campañas viejas.
+            extra_vars: dict[str, str] = {
+                "nspbx_tenant_id": str(fresh.tenant_id),
+                "nspbx_ai_intent": (fresh.ai_intent or "").strip().lower() or "confirmar",
+            }
+            intencion = extra_vars["nspbx_ai_intent"]
+
+            # El saludo de apertura de las gestiones de AGENDA se arma ACÁ,
+            # antes de marcar, con las variables cargadas para este número —
+            # así el bot abre nombrando a la persona y su cita real en vez
+            # del saludo genérico.
+            #
+            # En COBRANZA NO se arma acá a propósito (blindaje): el saludo
+            # lo controla el voizbot (identificación primero, sin revelar
+            # la deuda). Renderizar el message_template acá filtraría el
+            # {monto}/{vencimiento} a un tercero que conteste sin confirmar
+            # identidad — ver app/services/ai_agent.py.
             if fresh.message_template and number.extra_data:
                 variables = json.loads(number.extra_data)
-                # La fecha llega tal cual la escribió quien cargó la
-                # campaña ("8/21/26 9:00") — si se metiera cruda en el
-                # saludo, el TTS la lee número por número en vez de decir
-                # algo natural. Se reformatea a texto hablado ("jueves 21
-                # de agosto a las 9:00 a. m.") solo para la voz; si no se
-                # puede leer como fecha, se deja el texto original tal
-                # cual (puede que ya venga en un formato hablado).
-                if "fecha" in variables:
-                    fecha_dt = parse_fecha_hora(variables["fecha"])
-                    if fecha_dt:
-                        variables["fecha"] = formatear_natural(fecha_dt)
-                extra_vars["nspbx_greeting"] = templating.render(fresh.message_template, variables)
-                extra_vars["nspbx_ai_intent"] = "confirmar"
+                if intencion != "cobranza":
+                    # La fecha llega tal cual la escribió quien cargó la
+                    # campaña ("8/21/26 9:00") — si se metiera cruda en el
+                    # saludo, el TTS la lee número por número en vez de decir
+                    # algo natural. Se reformatea a texto hablado ("jueves 21
+                    # de agosto a las 9:00 a. m.") solo para la voz; si no se
+                    # puede leer como fecha, se deja el texto original tal
+                    # cual (puede que ya venga en un formato hablado).
+                    if "fecha" in variables:
+                        fecha_dt = parse_fecha_hora(variables["fecha"])
+                        if fecha_dt:
+                            variables["fecha"] = formatear_natural(fecha_dt)
+                    if "vencimiento" in variables:
+                        v_dt = parse_fecha_hora(variables["vencimiento"])
+                        if not v_dt:
+                            from datetime import datetime as dt
+
+                            try:
+                                v_dt = dt.strptime(variables["vencimiento"].strip(), "%Y-%m-%d")
+                            except ValueError:
+                                v_dt = None
+                        if v_dt:
+                            variables["vencimiento"] = fecha_en_palabras(v_dt.date())
+                    if "monto" in variables:
+                        monto_raw = str(variables["monto"]).replace("$", "").replace(" ", "").strip()
+                        # "350.000" con un único punto seguido de 3 dígitos es
+                        # separador de MILES, no decimal: se quita para parsear.
+                        if "." in monto_raw and monto_raw.count(".") == 1 and monto_raw.endswith(".000"):
+                            monto_raw = monto_raw.replace(".", "")
+                        monto_raw = monto_raw.replace(",", "")
+                        try:
+                            variables["monto"] = numero_a_palabras(int(monto_raw))
+                        except ValueError:
+                            pass
+                    extra_vars["nspbx_greeting"] = templating.render(fresh.message_template, variables)
+                # Los datos de la deuda (cliente, monto, vencimiento,
+                # factura) viajan como variables del canal para que el bot
+                # los tenga en la conversación, no solo en el saludo.
+                for clave in ("cliente", "monto", "vencimiento", "factura", "saldo"):
+                    valor = variables.get(clave)
+                    if valor:
+                        extra_vars[f"nspbx_debt_{clave}"] = valor
                 # La cita EXACTA (ver _sincronizar_agenda en
                 # api/campaigns.py) — así confirmar_cita/cancelar_cita/
                 # reagendar_cita actúan sobre esta cita puntual y no
@@ -177,7 +249,9 @@ class CampaignDialer:
             cid_global = trunk.caller_id_number or trunk.username
             if cid_global:
                 extra_vars["origination_caller_id_number"] = cid_global
-            tramos = [f"sofia/gateway/{t.name}/{number.phone}" for t in cadena]
+            # El gateway en sofia lleva el slug de la empresa como prefijo
+            # (ver app/services/gateways.py).
+            tramos = [f"sofia/gateway/{slug}_{t.name}/{number.phone}" for t in cadena]
 
             await esl.originate(
                 dest=number.phone,
@@ -187,6 +261,7 @@ class CampaignDialer:
                 exten=exten,
                 wait_timeout=30 * len(tramos) + 15,
                 extra_vars=extra_vars or None,
+                contexto=contexto,
             )
             async with async_session() as s:
                 await s.execute(

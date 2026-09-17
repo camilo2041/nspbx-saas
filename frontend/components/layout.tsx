@@ -86,6 +86,17 @@ const GROUPS: NavGroup[] = [
           </>
         ),
       },
+      {
+        href: "/cobranza",
+        label: "Cobranza",
+        permiso: PERMISOS.campanas,
+        icon: icon(
+          <>
+            <circle cx="12" cy="12" r="9" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 2" />
+          </>
+        ),
+      },
     ],
   },
   {
@@ -189,6 +200,17 @@ const GROUPS: NavGroup[] = [
     title: "Sistema",
     items: [
       {
+        href: "/empresas",
+        label: "Empresas",
+        permiso: PERMISOS.empresas,
+        icon: icon(
+          <>
+            <rect x="3" y="9" width="18" height="12" rx="2" />
+            <path strokeLinecap="round" d="M12 9V3m0 0a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM9 14h6M12 11v6" />
+          </>
+        ),
+      },
+      {
         href: "/users",
         label: "Usuarios",
         permiso: PERMISOS.usuarios,
@@ -226,6 +248,23 @@ const GROUPS: NavGroup[] = [
 const ALL_ITEMS = GROUPS.flatMap((g) => g.items);
 const SIDEBAR_KEY = "nspbx-sidebar-collapsed";
 
+// Qué módulo de la empresa habilita cada sección (modelo de packs — ver
+// backend Tenant.modules). voicebot = el bot de IA; pbx = telefonía.
+const MODULO_POR_SECCION: Record<string, string | null> = {
+  "/softphone": "pbx",
+  "/calls": "pbx",
+  "/extensions": "pbx",
+  "/trunks": "pbx",
+  "/inbound-routes": "pbx",
+  "/queues": "pbx",
+  "/logs": "pbx",
+  "/voicebots": "voicebot",
+  "/ai-usage": "voicebot",
+  "/campaigns": "voicebot",
+  "/cobranza": "voicebot",
+  "/appointments": "voicebot",
+};
+
 function SinAcceso({ rol }: { rol: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
@@ -255,6 +294,7 @@ const ETIQUETA_ROL: Record<string, string> = {
   supervisor: "Supervisor",
   coordinador: "Coordinador",
   asesor: "Asesor",
+  plataforma: "Plataforma",
 };
 
 export default function SidebarLayout({ children }: { children: ReactNode }) {
@@ -271,7 +311,7 @@ export default function SidebarLayout({ children }: { children: ReactNode }) {
 
 function Marco({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { usuario, puede, salir, cargando } = useAuth();
+  const { usuario, puede, tieneModulo, salir, cargando } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -293,10 +333,16 @@ function Marco({ children }: { children: ReactNode }) {
 
   // El menú muestra solo lo que el rol puede abrir. No es la seguridad
   // —esa está en el backend, que responde 403 igual— sino no ofrecerle a
-  // un asesor cinco pantallas que solo le van a dar error.
+  // un asesor cinco pantallas que solo le van a dar error. Además se
+  // ocultan las secciones del pack que la empresa no contrató (módulos).
   const grupos = GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter((i) => i.permiso === null || puede(i.permiso)),
+    items: g.items.filter((i) => {
+      if (i.permiso !== null && !puede(i.permiso)) return false;
+      const mod = MODULO_POR_SECCION[i.href];
+      if (mod && !tieneModulo(mod)) return false;
+      return true;
+    }),
   })).filter((g) => g.items.length > 0);
 
   // La ruta más específica que coincide gana, para que /voicebots/3/flow
@@ -322,11 +368,18 @@ function Marco({ children }: { children: ReactNode }) {
   // puede usar. El backend ya responde 403, pero sin esto la página se
   // dibuja igual y muestra su estado vacío ("No hay usuarios. Crea el
   // primero"), que hace pensar que no hay datos en vez de que no hay
-  // permiso.
-  const sinAcceso = current?.permiso != null && !puede(current.permiso);
+  // permiso. Idem si la empresa no tiene el módulo.
+  const sinAcceso =
+    (current?.permiso != null && !puede(current.permiso)) ||
+    (current != null &&
+      MODULO_POR_SECCION[current.href] != null &&
+      !tieneModulo(MODULO_POR_SECCION[current.href] as string));
 
   return (
     <div className="flex min-h-screen">
+      {/* Línea de degradado superior: el borde de color que recorre toda la
+          app y la saca de lo plano. */}
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-[60] h-[3px] bg-gradient-to-r from-brand via-accent to-info" />
       {mobileOpen && (
         <div
           className="animate-fade-soft fixed inset-0 z-30 bg-slate-950/50 backdrop-blur-sm lg:hidden"
@@ -374,7 +427,7 @@ function Marco({ children }: { children: ReactNode }) {
                         collapsed ? "justify-center" : ""
                       } ${
                         active
-                          ? "bg-brand-soft text-brand-text"
+                          ? "bg-gradient-to-r from-brand-soft to-info-soft/60 text-brand-text"
                           : "text-muted hover:bg-surface-2 hover:text-fg"
                       }`}
                     >

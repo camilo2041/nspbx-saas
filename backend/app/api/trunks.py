@@ -2,13 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session
-from app.models import Trunk
+from app.core.database import get_session, tenant_de_sesion
+from app.models import Tenant, Trunk
 from app.schemas import TrunkCreate, TrunkOut, TrunkUpdate
+from app.services import licensing
 from app.services.esl import gateway_status, rescan_profile
-from app.services.gateways import remove_gateway_file, write_gateway_file
+from app.services.gateways import nombre_gateway, remove_gateway_file, write_gateway_file
 
 router = APIRouter(prefix="/api/trunks", tags=["trunks"])
+
+
+async def _slug_de(session: AsyncSession, tenant_id: int) -> str:
+    ten = await session.get(Tenant, tenant_id)
+    return ten.slug if ten else "x"
 
 
 @router.get("", response_model=list[TrunkOut])
@@ -19,6 +25,14 @@ async def list_trunks(session: AsyncSession = Depends(get_session)):
 
 @router.post("", response_model=TrunkOut, status_code=status.HTTP_201_CREATED)
 async def create_trunk(payload: TrunkCreate, session: AsyncSession = Depends(get_session)):
+    tid = tenant_de_sesion(session)
+    if tid is not None:
+        lic = await licensing.obtener(session, tid)
+        if not await licensing.hay_cupo(session, lic, "max_trunks", await licensing.contar_troncales(session, tid)):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Alcanzaste el límite de troncales de tu plan. Mejora la licencia para agregar más.",
+            )
     trunk = Trunk(**payload.model_dump())
     session.add(trunk)
     try:
@@ -27,7 +41,7 @@ async def create_trunk(payload: TrunkCreate, session: AsyncSession = Depends(get
         await session.rollback()
         raise HTTPException(status_code=400, detail="Nombre de troncal duplicado")
     await session.refresh(trunk)
-    write_gateway_file(trunk)
+    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id))
     try:
         await rescan_profile("external")
     except Exception:
@@ -54,7 +68,7 @@ async def update_trunk(
         setattr(trunk, field, value)
     await session.commit()
     await session.refresh(trunk)
-    write_gateway_file(trunk)
+    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id))
     try:
         await rescan_profile("external")
     except Exception:
@@ -69,7 +83,7 @@ async def delete_trunk(trunk_id: int, session: AsyncSession = Depends(get_sessio
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     await session.delete(trunk)
     await session.commit()
-    remove_gateway_file(trunk.name)
+    remove_gateway_file(nombre_gateway(trunk.name, await _slug_de(session, trunk.tenant_id)))
     try:
         await rescan_profile("external")
     except Exception:
@@ -85,7 +99,7 @@ async def trunk_rescan(trunk_id: int, session: AsyncSession = Depends(get_sessio
         out = await rescan_profile("external")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"FreeSWITCH no disponible: {exc}")
-    return {"ok": True, "gateway": trunk.name, "output": out}
+    return {"ok": True, "gateway": nombre_gateway(trunk.name, await _slug_de(session, trunk.tenant_id)), "output": out}
 
 
 @router.get("/{trunk_id}/status")
@@ -94,6 +108,6 @@ async def trunk_status(trunk_id: int, session: AsyncSession = Depends(get_sessio
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     try:
-        return await gateway_status(trunk.name)
+        return await gateway_status(nombre_gateway(trunk.name, await _slug_de(session, trunk.tenant_id)))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"FreeSWITCH no disponible: {exc}")

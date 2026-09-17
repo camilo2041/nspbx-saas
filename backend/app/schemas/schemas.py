@@ -133,6 +133,10 @@ class CampaignBase(BaseModel):
     max_concurrency: int = Field(default=5, ge=1, le=100)
     retries: int = Field(default=0, ge=0, le=10)
     message_template: Optional[str] = None
+    # Intención del voizbot para las llamadas de esta campaña (ver
+    # app/services/ai_intents.py). Vacío/None = "confirmar" (compatibilidad
+    # con las campañas viejas, que eran todas de confirmación).
+    ai_intent: Optional[str] = None
 
 
 class CampaignCreate(CampaignBase):
@@ -146,6 +150,7 @@ class CampaignUpdate(BaseModel):
     max_concurrency: Optional[int] = Field(default=None, ge=1, le=100)
     retries: Optional[int] = Field(default=None, ge=0, le=10)
     message_template: Optional[str] = None
+    ai_intent: Optional[str] = None
 
 
 class CampaignOut(CampaignBase):
@@ -196,6 +201,11 @@ class SystemSettingsOut(BaseModel):
     backups_max_gb: float = 5.0
     max_call_duration_minutes: int = 60
     max_concurrent_calls: int = 20
+    # Conector Issabel (ARI). Vacíos = desactivado (NSPBX usa su FreeSWITCH).
+    ari_base_url: Optional[str] = None
+    ari_user: Optional[str] = None
+    ari_password: Optional[str] = None
+    ari_app: str = "nspbx"
 
 
 class SystemSettingsUpdate(BaseModel):
@@ -242,6 +252,11 @@ class SystemSettingsUpdate(BaseModel):
     # legítimo para quien de verdad necesita llamadas sin límite de tiempo.
     max_call_duration_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
     max_concurrent_calls: Optional[int] = Field(default=None, ge=1, le=500)
+
+    ari_base_url: Optional[str] = Field(default=None, max_length=255)
+    ari_user: Optional[str] = Field(default=None, max_length=80)
+    ari_password: Optional[str] = Field(default=None, max_length=255)
+    ari_app: Optional[str] = Field(default=None, max_length=80)
 
 
 class CallLogOut(BaseModel):
@@ -449,9 +464,174 @@ class CampaignStats(BaseModel):
     active_calls: int = 0
 
 
+# ---------- Empresas (tenants) ----------
+
+
+class TenantCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=150)
+    slug: str = Field(
+        ...,
+        min_length=3,
+        max_length=40,
+        pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        description="Identificador corto interno (minúsculas, guiones). De él salen el contexto del dialplan y el prefijo de troncales.",
+    )
+    sip_domain: str = Field(
+        ...,
+        min_length=3,
+        max_length=255,
+        description="Dominio SIP con el que se registran los teléfonos de la empresa.",
+    )
+    # Subdominio del panel. Vacío = se usa el slug. Debe ser un label de
+    # host válido (sin puntos): "consultorio-andino", no
+    # "consultorio-andino.ejemplo.com".
+    subdomain: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=80,
+        pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        description="Subdominio del panel (sin el dominio base). Vacío = se usa el slug.",
+    )
+    # general | clinica | cobranza
+    business_type: str = Field(
+        default="general",
+        pattern="^(general|clinica|cobranza)$",
+        description="Tipo de negocio de la empresa.",
+    )
+    # Módulos habilitados (pack): voicebot y/o pbx. Se puede ampliar después.
+    modules: list[str] = Field(
+        default_factory=lambda: ["voicebot", "pbx"],
+        description="Módulos: 'voicebot' (bot de IA), 'pbx' (telefonía/llamadas).",
+    )
+
+    @field_validator("modules")
+    @classmethod
+    def _validar_modulos(cls, v: list[str]) -> list[str]:
+        permitidos = {"voicebot", "pbx"}
+        limpios = sorted({str(m).strip().lower() for m in v} & permitidos)
+        if not limpios:
+            raise ValueError("Seleccioná al menos un módulo (voicebot o pbx)")
+        return limpios
+
+
+class TenantUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=150)
+    sip_domain: Optional[str] = Field(default=None, min_length=3, max_length=255)
+    subdomain: Optional[str] = Field(
+        default=None,
+        min_length=3,
+        max_length=80,
+        pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$",
+    )
+    business_type: Optional[str] = Field(default=None, pattern="^(general|clinica|cobranza)$")
+    modules: Optional[list[str]] = None
+    enabled: Optional[bool] = None
+
+
+class TenantOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    sip_domain: str
+    subdomain: Optional[str] = None
+    business_type: str = "general"
+    modules: list[str] = Field(default_factory=lambda: ["voicebot", "pbx"])
+    enabled: bool
+    created_at: datetime
+    users_count: int = 0
+    extensions_count: int = 0
+    licencia: Optional["LicenseOut"] = None
+
+
+class LicenseOut(BaseModel):
+    plan: str
+    status: str
+    # ok | vencida | suspendida (computado en caliente)
+    estado: str
+    started_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    max_extensions: Optional[int] = None
+    max_trunks: Optional[int] = None
+    max_concurrent_calls: Optional[int] = None
+    max_campaigns: Optional[int] = None
+
+
+class LicenseUpdate(BaseModel):
+    plan: Optional[str] = Field(default=None, pattern="^(trial|free|pro|enterprise|custom)$")
+    status: Optional[str] = Field(default=None, pattern="^(trial|active|suspended)$")
+    expires_at: Optional[datetime] = None
+    max_extensions: Optional[int] = Field(default=None, ge=0)
+    max_trunks: Optional[int] = Field(default=None, ge=0)
+    max_concurrent_calls: Optional[int] = Field(default=None, ge=0)
+    max_campaigns: Optional[int] = Field(default=None, ge=0)
+
+
+class TenantCreatedOut(TenantOut):
+    """Lo que ve el operador de la plataforma al crear una empresa: incluye
+    las credenciales del admin recién creado, que solo se muestran una vez."""
+
+    admin_username: str
+    admin_password: str
+
+
+# ---------- Cobranza ----------
+
+
+class DebtCreate(BaseModel):
+    phone: str = Field(..., min_length=1, max_length=30)
+    debtor_name: str = Field(..., min_length=1, max_length=150)
+    amount: float = Field(..., ge=0)
+    due_date: Optional[datetime] = None
+    invoice_number: Optional[str] = Field(default=None, max_length=50)
+    notes: Optional[str] = None
+    status: str = Field(default="open", pattern="^(open|promised|paid|overdue)$")
+
+
+class DebtUpdate(BaseModel):
+    debtor_name: Optional[str] = None
+    amount: Optional[float] = Field(default=None, ge=0)
+    due_date: Optional[datetime] = None
+    invoice_number: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = Field(default=None, pattern="^(open|promised|paid|overdue)$")
+
+
+class DebtOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    phone: str
+    debtor_name: str
+    amount: float
+    due_date: Optional[datetime] = None
+    invoice_number: Optional[str] = None
+    notes: Optional[str] = None
+    status: str
+    created_at: datetime
+
+
+class PaymentPromiseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    debt_id: Optional[int] = None
+    phone: str
+    debtor_name: Optional[str] = None
+    amount_promised: float
+    promise_date: datetime
+    plan: str
+    installments: Optional[int] = None
+    notes: Optional[str] = None
+    status: str
+    call_uuid: Optional[str] = None
+    created_at: datetime
+
+
 # ---------- Usuarios y sesión ----------
 
-_ROLES_PATRON = "^(admin|supervisor|coordinador|asesor)$"
+_ROLES_PATRON = "^(admin|supervisor|coordinador|asesor|plataforma)$"
 
 
 class UserBase(BaseModel):
@@ -516,6 +696,11 @@ class UserOut(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    # Subdominio del panel desde el que se entra (ej. "consultorio-andino"
+    # en "consultorio-andino.pbx.example.com"). Si corresponde a alguna
+    # empresa, el usuario DEBE pertenecer a ella; si no coincide, se
+    # rechaza el login. Vacío = acceso por el dominio base.
+    subdomain: Optional[str] = Field(default=None, max_length=80)
 
 
 class SesionOut(BaseModel):
@@ -525,6 +710,9 @@ class SesionOut(BaseModel):
     expira_en: int
     usuario: UserOut
     permisos: list[str]
+    # Módulos habilitados de la empresa (voicebot/pbx). La interfaz oculta
+    # las secciones del pack que la empresa no contrató.
+    modulos: list[str] = Field(default_factory=list)
 
 
 class CambiarPasswordRequest(BaseModel):

@@ -1,0 +1,27 @@
+# Override para desarrollo local SIN Traefik ni DNS público.
+#
+# El compose base asume el servidor de producción (Dokploy): se engancha a
+# la red externa `traefik-public` y publica por un proxy. En un equipo de
+# desarrollo con Docker Desktop no existe esa red ni el proxy, así que:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# - `traefik-public` se redeclara como red interna normal (los labels de
+#   Traefik del compose base quedan inertes: sin Traefik, no hacen nada).
+# - El backend expone SIP_WS_URL en claro (ws://) para que el softphone
+#   del navegador conecte sin lidiar con el certificado autofirmado del
+#   7443: el navegador abre el panel por http://localhost:3005 y registra
+#   contra ws://localhost:5066.
+# - Las IPs "públicas" de vars.xml quedaron en 127.0.0.1: alcanzan para
+#   llamadas internas (softphone → bot). Para marcar afuera por una
+#   troncal real hace falta la IP pública del equipo (ver scripts/setup.sh).
+
+services:
+  backend:
+    environment:
+      SIP_WS_URL: ws://localhost:5066
+      SIP_SERVER_IP: 127.0.0.1
+
+networks:
+  traefik-public:
+    driver: bridge

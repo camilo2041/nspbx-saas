@@ -26,9 +26,17 @@ STT_BYTES_PER_SECOND = 8000 * 2
 class UsageMeter:
     """Acumula el consumo de UNA llamada y lo guarda al terminar."""
 
-    def __init__(self, call_uuid: str, phone: str | None, tts_provider: str, stt_provider: str = "elevenlabs"):
+    def __init__(
+        self,
+        call_uuid: str,
+        phone: str | None,
+        tts_provider: str,
+        stt_provider: str = "elevenlabs",
+        tenant_id: int | None = None,
+    ):
         self.call_uuid = call_uuid
         self.phone = phone
+        self.tenant_id = tenant_id
         self.tts_provider = tts_provider
         self.stt_provider = stt_provider
         self.turns = 0
@@ -66,6 +74,7 @@ class UsageMeter:
             async with async_session() as session:
                 session.add(
                     AiCallUsage(
+                        tenant_id=self.tenant_id,
                         call_uuid=self.call_uuid,
                         phone=self.phone,
                         turns=self.turns,

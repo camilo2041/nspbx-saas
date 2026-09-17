@@ -17,10 +17,22 @@ def ensure_dirs():
     _gateways_path().mkdir(parents=True, exist_ok=True)
 
 
-def write_gateway_file(trunk) -> Path:
+def nombre_gateway(nombre: str, slug: str) -> str:
+    """El nombre REAL del gateway en FreeSWITCH.
+
+    En sofia los nombres de gateway son GLOBALES al perfil external: dos
+    empresas con una troncal llamada "principal" pisarían el archivo y el
+    registro del otro. El slug de la empresa va como prefijo
+    (`empresa2_principal`) para que cada una tenga el suyo sin chocar.
+    """
+    return f"{slug}_{nombre}"
+
+
+def write_gateway_file(trunk, slug: str) -> Path:
     """Escribe/actualiza el gateway de una troncal en la config de FreeSWITCH."""
     ensure_dirs()
-    path = _gateways_path() / f"gw_{trunk.name}.xml"
+    gw_name = nombre_gateway(trunk.name, slug)
+    path = _gateways_path() / f"gw_{gw_name}.xml"
 
     has_credentials = bool(trunk.username and trunk.password)
     # Solo se registra si hay credenciales Y la troncal lo tiene habilitado.
@@ -35,7 +47,7 @@ def write_gateway_file(trunk) -> Path:
 
     lines = [
         '<include>',
-        f'  <gateway name="{trunk.name}">',
+        f'  <gateway name="{gw_name}">',
         f'    <param name="proxy" value="{proxy}"/>',
     ]
     if trunk.username:
@@ -57,16 +69,16 @@ def write_gateway_file(trunk) -> Path:
     lines.append('  </gateway>')
     lines.append('</include>')
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    logger.info("Gateway %s escrito en %s (register=%s)", trunk.name, path, should_register)
+    logger.info("Gateway %s escrito en %s (register=%s)", gw_name, path, should_register)
     return path
 
 
-def remove_gateway_file(trunk_name: str):
+def remove_gateway_file(gw_name: str):
     ensure_dirs()
-    path = _gateways_path() / f"gw_{trunk_name}.xml"
+    path = _gateways_path() / f"gw_{gw_name}.xml"
     if path.exists():
         path.unlink()
-        logger.info("Gateway %s eliminado", trunk_name)
+        logger.info("Gateway %s eliminado", gw_name)
 
 
 def clean_gateways(valid_names: set[str]):
@@ -83,8 +95,9 @@ def clean_gateways(valid_names: set[str]):
                     pass
 
 
-def sync_gateways(trunks: list):
-    clean_gateways({t.name for t in trunks})
+def sync_gateways(trunks: list, slug_por_tenant: dict[int, str]):
+    validos = {nombre_gateway(t.name, slug_por_tenant.get(t.tenant_id, "x")) for t in trunks}
+    clean_gateways(validos)
     for trunk in trunks:
         if trunk.enabled:
-            write_gateway_file(trunk)
+            write_gateway_file(trunk, slug_por_tenant.get(trunk.tenant_id, "x"))

@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_session
-from app.models import SystemSettings, Trunk
+from app.models import Tenant, Trunk
 from app.services import network
+from app.services.ajustes import ajustes_de
 from app.services.esl import gateway_status, internal_profile_ip
 from app.services.esl import status as fs_status
+from app.services.gateways import nombre_gateway
 from app.workers.maintenance import maintenance
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -68,7 +70,7 @@ async def diagnostics(session: AsyncSession = Depends(get_session)):
     está anunciando al proveedor una IP por la que jamás podría recibir
     una llamada real (privada, loopback o CGNAT), algo que un simple
     "REGED" no revela porque el proveedor no valida esa dirección."""
-    fila = await session.get(SystemSettings, 1)
+    fila = await ajustes_de(session)
     esl_host = fila.fs_esl_host if fila else settings.fs_esl_host
 
     esl_task = fs_status()
@@ -76,6 +78,7 @@ async def diagnostics(session: AsyncSession = Depends(get_session)):
     ip_task = network.public_ip()
     trunks_result = await session.execute(select(Trunk).where(Trunk.enabled.is_(True)).order_by(Trunk.id))
     trunks = trunks_result.scalars().all()
+    slugs = {t.id: t.slug for t in (await session.execute(select(Tenant))).scalars().all()}
 
     esl_ok = True
     try:
@@ -88,7 +91,7 @@ async def diagnostics(session: AsyncSession = Depends(get_session)):
     troncales = []
     for t in trunks:
         try:
-            g = await gateway_status(t.name)
+            g = await gateway_status(nombre_gateway(t.name, slugs.get(t.tenant_id, "x")))
         except Exception:
             g = {"state": None, "status": None, "contact_ip": None}
         troncales.append(
@@ -138,7 +141,7 @@ async def maintenance_status(session: AsyncSession = Depends(get_session)):
     """Lo que antes no se podía ver sin entrar al servidor a mano: si el
     último respaldo salió bien, cuántos hay guardados, y cuánto disco
     ocupan las grabaciones frente al tope configurado."""
-    row = await session.get(SystemSettings, 1)
+    row = await ajustes_de(session)
 
     n_backups, bytes_backups = _tamano_carpeta(Path(settings.backups_dir))
     n_grabaciones, bytes_grabaciones = _tamano_carpeta(Path(settings.recordings_dir))

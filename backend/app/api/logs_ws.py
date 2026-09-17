@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import permissions
-from app.core.database import get_session
+from app.core.database import async_session, fijar_tenant, get_session
 from app.core.security import leer_token
 from app.models import User
 from app.services import esl
@@ -38,7 +38,22 @@ async def _usuario_del_token(token: str | None, session: AsyncSession) -> User |
         user_id = int(datos.get("sub", ""))
     except (TypeError, ValueError):
         return None
-    usuario = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    # Mismo criterio que sesion_obligatoria (ver app/core/auth.py): con
+    # Row-Level Security activado, una consulta sin la empresa fijada en
+    # la sesión no encuentra NINGUNA fila, ni siquiera la del propio
+    # usuario — este WebSocket se autentica solo (no pasa por
+    # sesion_obligatoria, ver el docstring de arriba) y antes de este
+    # arreglo nunca fijaba el tenant, así que la consola de logs siempre
+    # rechazaba la conexión (403) aunque el token fuera válido.
+    tid = datos.get("tid")
+    if tid is None:
+        async with async_session() as admin_sess:
+            usuario = (
+                (await admin_sess.execute(select(User).where(User.id == user_id))).unique().scalar_one_or_none()
+            )
+    else:
+        fijar_tenant(session, tid)
+        usuario = (await session.execute(select(User).where(User.id == user_id))).unique().scalar_one_or_none()
     if not usuario or not usuario.enabled:
         return None
     return usuario

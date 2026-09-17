@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,10 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import permissions
 from app.core.auth import requiere, usuario_actual, verificar_secreto_fs
 from app.core.config import settings
-from app.core.database import get_session
-from app.models import AiCallUsage, CallLog, SystemSettings, User
+from app.core.database import get_admin_session, get_session
+from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
 from app.services import deepgram, llm
+from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,24 @@ _INTERNAL_DESTS = ("go", "x")
 
 # /fs/cdr queda fuera de este guardia: lo llama FreeSWITCH al colgar, sin
 # sesión. Por eso el permiso va endpoint por endpoint y no en el router.
-_VER = Depends(requiere(permissions.LLAMADAS_VER_PROPIAS))
+# Además del permiso de ver llamadas, exige el módulo "pbx" de la empresa
+# (modelo de packs — ver Tenant.modules): sin él, una empresa que solo
+# contrató voicebot no ve el historial.
+async def _ver_pbx(
+    usuario: User = Depends(requiere(permissions.LLAMADAS_VER_PROPIAS)),
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    if usuario.tenant_id is not None:
+        ten = await session.get(Tenant, usuario.tenant_id)
+        if not ten or not ten.has_module("pbx"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tu empresa no tiene este módulo activo",
+            )
+    return usuario
+
+
+_VER = Depends(_ver_pbx)
 
 
 def _solo_suyas(usuario: User) -> str | None:
@@ -116,7 +134,7 @@ def _status_from(cause: str, billsec: int) -> str:
 
 
 @router.post("/fs/cdr/{secret}")
-async def receive_cdr(secret: str, request: Request, session: AsyncSession = Depends(get_session)):
+async def receive_cdr(secret: str, request: Request, session: AsyncSession = Depends(get_admin_session)):
     """Recibe el CDR que envía FreeSWITCH al colgar cada llamada.
 
     Lleva el MISMO secreto compartido que /fs/directory y /fs/dialplan
@@ -133,6 +151,12 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     pegado, no coincidía nunca y TODOS los CDR se rechazaban con 403
     (verificado en vivo: los CDR terminaban en json_cdr_failed/ y el
     historial dejaba de llenarse).
+
+    Usa la sesión del DUEÑO (sin RLS) como los demás endpoints que llama
+    FreeSWITCH: el CDR no trae token de usuario. La EMPRESA se deduce de
+    las variables del canal que viajan dentro del payload — `nspbx_tenant_id`
+    en las llamadas originadas por campañas/flujos (la fija el dialer o el
+    dialplan), o el dominio en las entrantes por DID.
     """
     verificar_secreto_fs(secret)
     try:
@@ -151,6 +175,11 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     existing = (await session.execute(select(CallLog).where(CallLog.uuid == uuid))).scalars().first()
     if existing:
         return {"ok": True, "duplicate": True}
+
+    tenant_id = await _tenant_de_cdr(session, variables)
+    if tenant_id is None:
+        logger.warning("CDR %s sin empresa identificable; se descarta", uuid)
+        return {"ok": True, "dropped": True}
 
     billsec = int(variables.get("billsec") or 0)
     cause = variables.get("hangup_cause") or ""
@@ -178,6 +207,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     )
 
     call = CallLog(
+        tenant_id=tenant_id,
         uuid=uuid,
         caller_number=caller,
         caller_name=variables.get("caller_id_name") or variables.get("origination_caller_id_name"),
@@ -198,6 +228,33 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     except Exception:
         await session.rollback()  # carrera con otro POST del mismo uuid
     return {"ok": True}
+
+
+async def _tenant_de_cdr(session: AsyncSession, variables: dict) -> int | None:
+    """A qué empresa pertenece la llamada del CDR.
+
+    Orden de deducción: primero `nspbx_tenant_id` (la fija el dialer en
+    cada campaña y el dialplan al entregar el control al voizbot); si no,
+    el dominio que fijó la ruta entrante (`domain_name`); y como último
+    recurso, la única empresa de la instalación. Ninguno → None, y el CDR
+    se descarta: sin empresa no hay a quién asignarle el registro."""
+    raw = variables.get("nspbx_tenant_id")
+    if raw:
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    dominio = variables.get("domain_name") or variables.get("sip_destination_domain")
+    if dominio:
+        ten = (
+            await session.execute(select(Tenant).where(Tenant.sip_domain == dominio))
+        ).scalar_one_or_none()
+        if ten:
+            return ten.id
+    ten = (
+        await session.execute(select(Tenant).order_by(Tenant.id).limit(1))
+    ).scalar_one_or_none()
+    return ten.id if ten else None
 
 
 def _recording_exists(call: CallLog) -> bool:
@@ -384,7 +441,7 @@ async def get_summary(
         falta_archivo = local is not None
         return {**datos, "summary": _resumen_sin_audio(call, falta_archivo), "from_cdr": True}
 
-    ajustes = await session.get(SystemSettings, 1)
+    ajustes = await ajustes_de(session)
     dg_key = (ajustes.deepgram_api_key if ajustes else None) or ""
     llm_base_url = (getattr(ajustes, "ai_llm_base_url", None) if ajustes else None) or "https://api.deepseek.com/v1"
     llm_model = (getattr(ajustes, "ai_llm_model", None) if ajustes else None) or "deepseek-chat"

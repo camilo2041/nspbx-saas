@@ -29,23 +29,26 @@ def parse_time(value: str) -> time:
     return datetime.strptime(value, "%H:%M").time()
 
 
-async def get_appointments_on(session: AsyncSession, day: date) -> list[Appointment]:
+async def get_appointments_on(
+    session: AsyncSession, day: date, tenant_id: int | None = None
+) -> list[Appointment]:
     start = datetime.combine(day, time.min)
     end = datetime.combine(day, time.max)
-    result = await session.execute(
-        select(Appointment).where(
-            Appointment.appointment_date >= start,
-            Appointment.appointment_date <= end,
-            Appointment.status == "confirmed",
-        )
+    query = select(Appointment).where(
+        Appointment.appointment_date >= start,
+        Appointment.appointment_date <= end,
+        Appointment.status == "confirmed",
     )
+    if tenant_id is not None:
+        query = query.where(Appointment.tenant_id == tenant_id)
+    result = await session.execute(query)
     return list(result.scalars().all())
 
 
-async def available_slots(session: AsyncSession, day: date) -> list[str]:
+async def available_slots(session: AsyncSession, day: date, tenant_id: int | None = None) -> list[str]:
     if day.weekday() == CLOSED_WEEKDAY:
         return []
-    booked = await get_appointments_on(session, day)
+    booked = await get_appointments_on(session, day, tenant_id)
     busy_ranges = [(a.appointment_date, a.appointment_date + timedelta(minutes=a.duration_minutes)) for a in booked]
 
     slots: list[str] = []
@@ -83,7 +86,12 @@ def business_hours_error(start: datetime, duration_minutes: int = SLOT_MINUTES) 
     return None
 
 
-async def find_next_appointment(session: AsyncSession, phone: str, on_date: date | None = None) -> Appointment | None:
+async def find_next_appointment(
+    session: AsyncSession,
+    phone: str,
+    on_date: date | None = None,
+    tenant_id: int | None = None,
+) -> Appointment | None:
     # Coincidencia por los últimos 10 dígitos, no por igualdad exacta: el
     # mismo teléfono llega distinto según de dónde venga la llamada
     # ("3011321381", "573011321381", "+57 301 132 1381"), y una comparación
@@ -92,6 +100,10 @@ async def find_next_appointment(session: AsyncSession, phone: str, on_date: date
     suffix = digits[-10:] if len(digits) >= 10 else digits
 
     query = select(Appointment).where(Appointment.status == "confirmed")
+    if tenant_id is not None:
+        # Con la sesión del DUEÑO (voizbot) no hay RLS que filtre: sin esto
+        # el bot encontraría las citas de CUALQUIER empresa para un número.
+        query = query.where(Appointment.tenant_id == tenant_id)
     if suffix:
         query = query.where(Appointment.phone.like(f"%{suffix}"))
     else:
@@ -107,8 +119,10 @@ async def find_next_appointment(session: AsyncSession, phone: str, on_date: date
     return result.scalars().first()
 
 
-async def is_slot_free(session: AsyncSession, start: datetime, duration_minutes: int) -> bool:
-    day_appts = await get_appointments_on(session, start.date())
+async def is_slot_free(
+    session: AsyncSession, start: datetime, duration_minutes: int, tenant_id: int | None = None
+) -> bool:
+    day_appts = await get_appointments_on(session, start.date(), tenant_id)
     end = start + timedelta(minutes=duration_minutes)
     for a in day_appts:
         a_end = a.appointment_date + timedelta(minutes=a.duration_minutes)

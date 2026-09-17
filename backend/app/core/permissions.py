@@ -16,14 +16,19 @@ ADMIN = "admin"
 SUPERVISOR = "supervisor"
 COORDINADOR = "coordinador"
 ASESOR = "asesor"
+# Usuario de la PLATAFORMA (tenant_id NULL): el que da de alta empresas y
+# puede entrar a cualquiera. Es el único rol por encima del admin de una
+# empresa. Ver docs/arquitectura-multitenant.md.
+PLATAFORMA = "plataforma"
 
-ROLES = (ADMIN, SUPERVISOR, COORDINADOR, ASESOR)
+ROLES = (ADMIN, SUPERVISOR, COORDINADOR, ASESOR, PLATAFORMA)
 
 ETIQUETAS = {
     ADMIN: "Administrador",
     SUPERVISOR: "Supervisor",
     COORDINADOR: "Coordinador",
     ASESOR: "Asesor",
+    PLATAFORMA: "Plataforma",
 }
 
 DESCRIPCIONES = {
@@ -33,6 +38,7 @@ DESCRIPCIONES = {
     COORDINADOR: "Coordina el día a día: agenda, campañas y llamadas. "
     "Sin acceso a la infraestructura telefónica.",
     ASESOR: "Trabaja sobre su extensión: softphone, sus propias llamadas y la agenda.",
+    PLATAFORMA: "Opera la plataforma: crea y administra las empresas.",
 }
 
 # El asesor es el único rol que exige una extensión: sin ella no puede
@@ -44,6 +50,9 @@ REQUIERE_EXTENSION = (ASESOR,)
 
 USUARIOS_GESTIONAR = "usuarios:gestionar"
 AJUSTES_GESTIONAR = "ajustes:gestionar"
+# Crear/editar/eliminar EMPRESAS (tenants). Es solo del rol de plataforma:
+# un admin de empresa gestiona su central, no las demás.
+EMPRESAS_GESTIONAR = "empresas:gestionar"
 # Troncales, extensiones y rutas entrantes. Es solo de admin y no hay un
 # "telefonia:ver" aparte a propósito: esas respuestas incluyen las
 # credenciales SIP (contraseña de extensión, usuario y clave de la
@@ -105,6 +114,14 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             LLAMADAS_VER_PROPIAS,
             CITAS_GESTIONAR,
             SOFTPHONE_USAR,
+        }
+    ),
+    # El rol de plataforma solo administra empresas. No ve datos de
+    # operación de ninguna empresa (para eso entra a cada una con su
+    # propio usuario): sus rutas usan la sesión del dueño, no RLS.
+    PLATAFORMA: frozenset(
+        {
+            EMPRESAS_GESTIONAR,
         }
     ),
 }

@@ -14,9 +14,10 @@ from app.core import permissions
 from app.core.auth import usuario_actual
 from app.core.database import get_admin_session, get_session
 from app.core.security import crear_token, hash_password, verificar_password
-from app.models import SystemSettings, User
+from app.models import Tenant, User
 from app.schemas import CambiarPasswordRequest, LoginRequest, SesionOut, UserOut
 from app.services import esl, turn
+from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,16 @@ def usuario_out(u: User) -> UserOut:
     return datos
 
 
-def _sesion(u: User) -> SesionOut:
+async def _modulos_de(session: AsyncSession, u: User) -> list[str]:
+    """Los módulos habilitados de la empresa del usuario (voicebot/pbx).
+    La plataforma no tiene empresa → lista vacía."""
+    if not u.tenant_id:
+        return []
+    ten = await session.get(Tenant, u.tenant_id)
+    return ten.modules_list if ten else []
+
+
+def _sesion(u: User, modulos: list[str] | None = None) -> SesionOut:
     # La empresa viaja dentro del token: es lo que permite atar cada
     # petición a su aislamiento sin consultar la base primero (ver
     # security.crear_token y core/auth.sesion_obligatoria).
@@ -39,6 +49,7 @@ def _sesion(u: User) -> SesionOut:
         expira_en=vida,
         usuario=usuario_out(u),
         permisos=sorted(permissions.permisos_de(u.role)),
+        modulos=modulos or [],
     )
 
 
@@ -78,18 +89,46 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_admin
     usuario.last_login_at = datetime.utcnow()
     await session.commit()
     await session.refresh(usuario)
+
+    # El login queda atado al subdominio del panel desde el que se entra.
+    # Cada empresa tiene su subdominio (ver Tenant.subdomain): si entrás
+    # por "consultorio-andino.<base>" y tu cuenta es de otra empresa, no
+    # podés iniciar sesión ahí. Si el subdominio no pertenece a ninguna
+    # empresa (el dominio base, "www", etc.), se ignora.
+    sub = (payload.subdomain or "").strip().lower()
+    if sub and sub not in ("www", "localhost", "127.0.0.1"):
+        ten = (
+            await session.execute(select(Tenant).where(Tenant.subdomain == sub))
+        ).scalar_one_or_none()
+        # El usuario de PLATAFORMA (sin empresa) no está atado a ningún
+        # subdominio: puede entrar desde cualquier lado para administrar
+        # las empresas. El resto DEBE pertenecer a la empresa del
+        # subdominio.
+        if ten and usuario.tenant_id is not None and usuario.tenant_id != ten.id:
+            logger.info(
+                "Login rechazado por subdominio: %s intentó entrar por '%s' (empresa %s)",
+                payload.username, sub, ten.id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Esta cuenta no pertenece a la empresa de este dominio",
+            )
+
     logger.info("Sesión iniciada: %s (%s)", usuario.username, usuario.role)
-    return _sesion(usuario)
+    return _sesion(usuario, await _modulos_de(session, usuario))
 
 
 @router.get("/me", response_model=SesionOut)
-async def yo(usuario: User = Depends(usuario_actual)):
+async def yo(
+    usuario: User = Depends(usuario_actual),
+    session: AsyncSession = Depends(get_session),
+):
     """Renueva el token y devuelve permisos al día.
 
     La interfaz lo llama al cargar: así un cambio de rol se aplica al
     recargar la página, sin esperar a que caduque la sesión.
     """
-    return _sesion(usuario)
+    return _sesion(usuario, await _modulos_de(session, usuario))
 
 
 @router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
@@ -126,7 +165,7 @@ async def mi_entorno(
     if not permissions.puede(usuario.role, permissions.SOFTPHONE_USAR):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tu rol no usa el softphone")
 
-    ajustes = await session.get(SystemSettings, 1)
+    ajustes = await ajustes_de(session)
     extension = None
     if usuario.extension:
         # Si FreeSWITCH no responde, que el softphone igual cargue en

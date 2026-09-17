@@ -54,8 +54,32 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(150))
     slug: Mapped[str] = mapped_column(String(40), unique=True, index=True)
     sip_domain: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    # Subdominio del PANEL de esta empresa (ej. "consultorio-andino" para
+    # "consultorio-andino.pbx.example.com"). Es la etiqueta con la que el
+    # login sabe en qué empresa estás entrando cuando usás su URL propia.
+    # Se siembra igual al slug; se puede editar desde la pantalla Empresas.
+    subdomain: Mapped[str | None] = mapped_column(String(80), unique=True, index=True, nullable=True)
+    # Qué tipo de negocio es: general | clinica | cobranza. No cambia el
+    # aislamiento (eso lo da tenant_id) pero permite saber de qué se trata
+    # cada empresa y ajustar el panel/ajustes en consecuencia (ver
+    # get_or_create_settings en app/services/ajustes.py).
+    business_type: Mapped[str] = mapped_column(String(30), default="general")
+    # Módulos habilitados de la empresa, en CSV: "voicebot,pbx". Es la base
+    # del modelo de "packs": una empresa puede ser solo voicebot, solo
+    # PBX/call o el pack completo, elegido al crearla y AMPLIABLE después
+    # desde la pantalla Empresas. Cada módulo podría vivir como servicio
+    # propio más adelante (microservicios); acá se activa/oculta en el
+    # panel y en la API por empresa.
+    modules: Mapped[str] = mapped_column(String(120), default="voicebot,pbx")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    @property
+    def modules_list(self) -> list[str]:
+        return [m.strip() for m in (self.modules or "").split(",") if m.strip()]
+
+    def has_module(self, mod: str) -> bool:
+        return mod in self.modules_list
 
     @property
     def dialplan_context(self) -> str:
@@ -151,6 +175,11 @@ class Campaign(Base):
     max_concurrency: Mapped[int] = mapped_column(Integer, default=5)
     retries: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(20), default="idle")  # idle|running|paused|done
+    # Qué gestión resuelve el voizbot en las llamadas de esta campaña
+    # (confirmar / reagendar / cancelar / agendar / cobranza… — ver
+    # app/services/ai_intents.py). Sin esto, toda campaña era una campaña
+    # de confirmación de citas aunque el bot fuera de otra cosa.
+    ai_intent: Mapped[str | None] = mapped_column(String(30), nullable=True)
     # Mensaje de apertura personalizado, con {variables} que se rellenan por
     # número desde CampaignNumber.extra_data (ej. "Hola {cliente}, te
     # recuerdo tu cita del {fecha}"). Si está vacío, el bot abre con el
@@ -279,6 +308,16 @@ class SystemSettings(Base):
     # acumulaban sin límite hasta llenar el disco (lo que tumba a
     # FreeSWITCH y a Postgres a la vez).
     backup_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # --- Conector Issabel (ARI) --------------------------------------
+    # Issabel como motor telefónico externo: NSPBX se conecta como una app
+    # Stasis de Asterisk para recibir/originar llamadas y streamear el
+    # audio por WebSocket (ver app/services/ari.py). Vacío = desactivado
+    # (NSPBX sigue usando su propio FreeSWITCH).
+    ari_base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ari_user: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    ari_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ari_app: Mapped[str] = mapped_column(String(80), default="nspbx")
     backup_retention_days: Mapped[int] = mapped_column(Integer, default=14)
     last_backup_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_backup_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -400,6 +439,105 @@ class AiCallUsage(Base):
     duration_seconds: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Debt(Base):
+    """Deuda de cobranza — una por teléfono de deudor.
+
+    La crea la campaña de cobranza al cargar los números (ver
+    `_sincronizar_deuda` en app/api/campaigns.py) o se da de alta a mano
+    desde la página de Cobranza. El voizbot la consulta por teléfono
+    (app/services/ai_agent.py) para saber de cuánto es la deuda y con
+    quién habla, sin depender de variables que viajen en la llamada."""
+
+    __tablename__ = "debts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    phone: Mapped[str] = mapped_column(String(30), index=True)
+    debtor_name: Mapped[str] = mapped_column(String(150))
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    invoice_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # open | promised | paid | overdue
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    promises: Mapped[list["PaymentPromise"]] = relationship(back_populates="debt")
+
+
+class PaymentPromise(Base):
+    """Promesa de pago registrada por el voizbot de cobranza.
+
+    Es el resultado concreto de una llamada de cobranza: la persona se
+    comprometió a pagar X el día Y, en total, como abono o en un plan de
+    cuotas. Sin esta tabla, "el bot llamó" no decía nada de si la cobranza
+    avanzó o no."""
+
+    __tablename__ = "payment_promises"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    debt_id: Mapped[int | None] = mapped_column(
+        ForeignKey("debts.id", ondelete="SET NULL"), nullable=True
+    )
+    phone: Mapped[str] = mapped_column(String(30), index=True)
+    debtor_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # Monto que la persona se compromete a pagar.
+    amount_promised: Mapped[float] = mapped_column(Float, default=0)
+    # Fecha para la que se compromete el pago.
+    promise_date: Mapped[datetime] = mapped_column(DateTime)
+    # completo | abono | cuotas
+    plan: Mapped[str] = mapped_column(String(20), default="completo")
+    installments: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # pending | completed | missed
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    # Llamada del voizbot que la registró (para cruzar con Consumo IA).
+    call_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    debt: Mapped["Debt | None"] = relationship(back_populates="promises")
+
+
+class License(Base):
+    """Licencia de UNA empresa: plan, estado, vencimiento y límites.
+
+    Es el modelo de monetización por empresa (ver app/services/licensing.py
+    para los presets de cada plan). Los límites se enforcean al crear
+    recursos y al originar llamadas; cuando la licencia está vencida o
+    suspendida, la empresa no puede operar (solo ver su estado).
+
+    El estado se guarda explícito (`trial | active | suspended`) pero el
+    vencimiento se evalúa en caliente: una licencia `trial` o `active`
+    cuya fecha ya pasó se comporta como vencida sin migrar nada."""
+
+    __tablename__ = "licenses"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="ux_licenses_tenant"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    # free | pro | enterprise | custom
+    plan: Mapped[str] = mapped_column(String(30), default="free")
+    # trial | active | suspended
+    status: Mapped[str] = mapped_column(String(20), default="trial")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Límites (None = sin límite). Se toman del plan si no se sobreescriben.
+    max_extensions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_trunks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_concurrent_calls: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_campaigns: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class Queue(Base):

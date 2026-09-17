@@ -147,7 +147,7 @@ function DashboardSkeleton() {
 }
 
 export default function DashboardPage() {
-  const { puede } = useAuth();
+  const { puede, usuario } = useAuth();
   const [counts, setCounts] = useState({ trunks: 0, extensions: 0, bots: 0, campaigns: 0, running: 0 });
   const [callStats, setCallStats] = useState<CallStats | null>(null);
   const [fs, setFs] = useState<FsStatus | null>(null);
@@ -269,7 +269,10 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <PageHeader title="Dashboard" subtitle="Resumen de la central telefónica" />
+      <PageHeader
+        title={`Hola, ${(usuario?.full_name ?? "bienvenido").split(" ")[0]}`}
+        subtitle="Resumen de tu central telefónica"
+      />
 
       {error && (
         <div className="mb-6">

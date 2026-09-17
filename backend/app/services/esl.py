@@ -359,6 +359,7 @@ async def originate(
     exten: str | None = None,
     wait_timeout: int | None = None,
     extra_vars: dict[str, str] | None = None,
+    contexto: str = "default",
 ) -> str:
     """Origina una llamada. endpoint ej: sofia/gateway/trunkX.
 
@@ -395,7 +396,12 @@ async def originate(
     el texto (un nombre compuesto, una frase con "por ejemplo, ...") rompe
     la sintaxis `{var=val,...}` del comando originate. Del otro lado,
     ai_agent.py los decodifica al leerlos.
-    """
+
+    `contexto`: el contexto de dialplan en el que se ejecuta `exten` al
+    contestar. Con varias empresas cada una tiene el suyo (`ctx_<slug>`,
+    ver docs/arquitectura-multitenant.md); quien origina para una empresa
+    tiene que pasarlo, o el "XML default" de antes quedaba apuntando a un
+    contexto que ya no existe."""
     action = exten if exten else "&park()"
     endpoint_str = "|".join(endpoint) if isinstance(endpoint, list) else f"{endpoint}/{dest}"
     # safe="": por defecto quote() deja pasar "/" sin escapar (piensa que
@@ -419,7 +425,7 @@ async def originate(
     # número marcado — funcionaba por accidente). Ver ai_agent.handle_call.
     cmd = (
         f"originate {{ignore_early_media=true,nspbx_customer={dest}{extra}}}{endpoint_str} "
-        f"{action} XML default '{caller_id}' '{caller_id_number or '_undef_'}' {timeout}"
+        f"{action} XML {contexto} '{caller_id}' '{caller_id_number or '_undef_'}' {timeout}"
     )
     return await bgapi_wait(cmd, timeout=wait_timeout if wait_timeout is not None else timeout + 10)
 

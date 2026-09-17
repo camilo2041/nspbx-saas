@@ -36,7 +36,15 @@ import {
 } from "@/lib/types";
 import { statusBadge } from "@/lib/utils";
 
-const empty = { name: "", trunk_id: "", voicebot_id: "", max_concurrency: 5, retries: 0, message_template: "" };
+const empty = { name: "", trunk_id: "", voicebot_id: "", max_concurrency: 5, retries: 0, ai_intent: "", message_template: "" };
+
+const INTENCIONES = [
+  { value: "confirmar", label: "Confirmar cita" },
+  { value: "reagendar", label: "Reagendar cita" },
+  { value: "cancelar", label: "Cancelar cita" },
+  { value: "agendar", label: "Agendar cita nueva" },
+  { value: "cobranza", label: "Cobranza de cartera" },
+];
 
 const POR_PAGINA = 50;
 
@@ -113,6 +121,7 @@ export default function CampaignsPage() {
       voicebot_id: c.voicebot_id ? String(c.voicebot_id) : "",
       max_concurrency: c.max_concurrency,
       retries: c.retries,
+      ai_intent: c.ai_intent ?? "",
       message_template: c.message_template ?? "",
     });
     setModal(true);
@@ -131,6 +140,7 @@ export default function CampaignsPage() {
         voicebot_id: form.voicebot_id ? Number(form.voicebot_id) : null,
         max_concurrency: Number(form.max_concurrency),
         retries: Number(form.retries),
+        ai_intent: form.ai_intent || null,
         message_template: form.message_template.trim() || null,
       };
       if (editing) {
@@ -236,6 +246,28 @@ export default function CampaignsPage() {
     new Set(Array.from((selected?.message_template ?? "").matchAll(/\{(\w+)\}/g), (m) => m[1]))
   );
 
+  // Un valor de ejemplo por columna según su nombre — se usa tanto para
+  // la plantilla descargable como para el placeholder del pegado de
+  // abajo. Antes ese placeholder era un string fijo ("...; Camilo
+  // Barragán; 2026-08-21 09:00") sin importar qué {variables} usara en
+  // realidad el mensaje de apertura: en una campaña de cobranza (que
+  // pide cliente/monto/vencimiento/factura, no fecha) mostraba un
+  // ejemplo que no correspondía a ninguna de esas columnas.
+  const ejemploPara = (nombre: string) => {
+    switch (nombre.toLowerCase()) {
+      case "fecha":
+        return "2026-08-21 09:00";
+      case "monto":
+        return "250000";
+      case "vencimiento":
+        return "2026-09-15";
+      case "factura":
+        return "F-001234";
+      default:
+        return "Camilo Barragán";
+    }
+  };
+
   // Plantilla descargable: encabezado + una fila de ejemplo, con las
   // variables que usa el mensaje de apertura (o cliente/fecha de
   // ejemplo si la campaña todavía no tiene mensaje). Se abre bien en
@@ -244,8 +276,6 @@ export default function CampaignsPage() {
   // y lo que se pega son lo mismo.
   const descargarPlantilla = () => {
     const cols = nombresColumnas.length > 0 ? nombresColumnas : ["cliente", "fecha"];
-    const ejemploPara = (nombre: string) =>
-      nombre.toLowerCase() === "fecha" ? "2026-08-21 09:00" : "Camilo Barragán";
     const encabezado = ["telefono", ...cols].join(";");
     const ejemplo = ["3011234567", ...cols.map(ejemploPara)].join(";");
     const contenido = `${encabezado}\n${ejemplo}\n`;
@@ -532,6 +562,13 @@ export default function CampaignsPage() {
             placeholder="— Sin voizbot —"
             options={bots.map((b) => ({ value: String(b.id), label: b.name }))}
           />
+          <Select
+            label="Intención del bot"
+            value={form.ai_intent || "confirmar"}
+            onChange={(v) => setForm({ ...form, ai_intent: v })}
+            options={INTENCIONES}
+            hint="Qué gestión resuelve el voizbot en estas llamadas. Cobranza le informa la deuda y registra promesas de pago; el resto trabaja sobre la agenda de citas."
+          />
           <Input
             label="Concurrencia máxima"
             type="number"
@@ -550,7 +587,11 @@ export default function CampaignsPage() {
             onChange={(v) => setForm({ ...form, message_template: v })}
             rows={3}
             placeholder="Hola {cliente}, te recuerdo tu cita pendiente para el {fecha}. ¿La confirmas?"
-            hint="Con {variables} que se rellenan por número al cargarlos más abajo. El bot dice esto como primera frase y sigue la conversación normal (confirmar, cancelar o reagendar con disponibilidad real). Vacío = saludo genérico."
+            hint={
+              form.ai_intent === "cobranza"
+                ? "Con {variables} que se rellenan por número al cargarlos. El bot abre SIEMPRE confirmando identidad sin revelar la deuda (protección de datos): este mensaje no se usa como primera frase. Para cobranza, {cliente}, {monto}, {vencimiento} y {factura} cargan/actualizan la deuda en Cobranza."
+                : "Con {variables} que se rellenan por número al cargarlos más abajo. El bot dice esto como primera frase y sigue la conversación normal (confirmar, cancelar o reagendar con disponibilidad real). Vacío = saludo genérico."
+            }
             mono
           />
         </div>
@@ -602,7 +643,11 @@ export default function CampaignsPage() {
                 <Note tone="brand">
                   Esta campaña espera <span className="font-mono">{nombresColumnas.join(", ")}</span> — lo que
                   usa su mensaje de apertura. Cada línea de abajo: teléfono; {nombresColumnas.join("; ")}.
-                  "cliente" y "fecha" (AAAA-MM-DD HH:MM) además cargan/actualizan la cita en la Agenda.
+                  {selected?.ai_intent === "cobranza" ? (
+                    <> "cliente", "monto", "vencimiento" y "factura" además cargan/actualizan la deuda en Cobranza.</>
+                  ) : (
+                    <> "cliente" y "fecha" (AAAA-MM-DD HH:MM) además cargan/actualizan la cita en la Agenda.</>
+                  )}
                 </Note>
               ) : (
                 <Note tone="muted">
@@ -638,7 +683,7 @@ export default function CampaignsPage() {
                   rows={4}
                   placeholder={
                     nombresColumnas.length > 0
-                      ? "3011234567; Camilo Barragán; 2026-08-21 09:00"
+                      ? ["3011234567", ...nombresColumnas.map(ejemploPara)].join("; ")
                       : "5551001\n5551002\n5551003"
                   }
                   hint={

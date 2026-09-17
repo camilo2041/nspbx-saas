@@ -5,10 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
-from app.core.runtime_settings import runtime_settings
-from app.models import Queue
+from app.models import Queue, Tenant
 from app.schemas import QueueCreate, QueueUpdate
 from app.services import esl
+from app.services.ajustes import dominios_tenants
 from app.services.queues_sync import parse_agents, remove_queue, sync_queue, write_callcenter_conf
 
 router = APIRouter(prefix="/api/queues", tags=["queues"])
@@ -35,6 +35,11 @@ def _out(queue: Queue) -> dict:
     }
 
 
+async def _dominio_de(session: AsyncSession, tenant_id: int) -> str:
+    tenant = await session.get(Tenant, tenant_id)
+    return tenant.sip_domain if tenant else "nspbx.local"
+
+
 async def _rewrite_conf_file(session: AsyncSession) -> None:
     """Regenera callcenter.conf.xml completo (necesario porque los agentes
     se declaran ahí con todos sus parámetros) y refresca el árbol XML en
@@ -42,7 +47,8 @@ async def _rewrite_conf_file(session: AsyncSession) -> None:
     afecta colas ya cargadas — solo actualiza qué vería un `queue
     load/reload` posterior."""
     rows = (await session.execute(select(Queue))).scalars().all()
-    write_callcenter_conf(rows)
+    dominios = await dominios_tenants(session)
+    write_callcenter_conf(rows, dominios)
     try:
         await esl.api("reloadxml")
     except Exception:
@@ -68,7 +74,7 @@ async def create_queue(payload: QueueCreate, session: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail="Nombre o extensión de cola duplicados")
     await session.refresh(queue)
     await _rewrite_conf_file(session)
-    await sync_queue(queue)
+    await sync_queue(queue, await _dominio_de(session, queue.tenant_id))
     return _out(queue)
 
 
@@ -100,8 +106,8 @@ async def update_queue(queue_id: int, payload: QueueUpdate, session: AsyncSessio
     await _rewrite_conf_file(session)
     if old_name != queue.name:
         # Si cambió el nombre, la cola vieja queda huérfana en mod_callcenter.
-        await remove_queue(old_name)
-    await sync_queue(queue)
+        await remove_queue(old_name, await _dominio_de(session, queue.tenant_id))
+    await sync_queue(queue, await _dominio_de(session, queue.tenant_id))
     return _out(queue)
 
 
@@ -111,10 +117,11 @@ async def delete_queue_endpoint(queue_id: int, session: AsyncSession = Depends(g
     if not queue:
         raise HTTPException(status_code=404, detail="Cola no encontrada")
     name = queue.name
+    dominio = await _dominio_de(session, queue.tenant_id)
     await session.delete(queue)
     await session.commit()
     await _rewrite_conf_file(session)
-    await remove_queue(name)
+    await remove_queue(name, dominio)
 
 
 @router.get("/{queue_id}/status")
@@ -124,7 +131,7 @@ async def queue_status(queue_id: int, session: AsyncSession = Depends(get_sessio
     queue = await session.get(Queue, queue_id)
     if not queue:
         raise HTTPException(status_code=404, detail="Cola no encontrada")
-    qkey = f"{queue.name}@{runtime_settings.fs_domain}"
+    qkey = f"{queue.name}@{await _dominio_de(session, queue.tenant_id)}"
     try:
         agents_raw = await esl.api(f"callcenter_config queue list agents {qkey}")
         tiers_raw = await esl.api(f"callcenter_config queue list tiers {qkey}")

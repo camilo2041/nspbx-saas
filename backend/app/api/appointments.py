@@ -8,7 +8,7 @@ from app.core import permissions
 from app.core.auth import requiere
 from app.core.clock import now_local
 from app.core.database import get_session
-from app.models import AiCallUsage, Appointment, SystemSettings
+from app.models import AiCallUsage, Appointment
 from app.schemas import (
     AgentBookRequest,
     AgentCancelRequest,
@@ -17,6 +17,7 @@ from app.schemas import (
     AppointmentOut,
     AppointmentUpdate,
 )
+from app.services.ajustes import ajustes_de
 from app.services.appointments import (
     available_slots,
     find_next_appointment,
@@ -143,7 +144,7 @@ async def get_availability(day: str, session: AsyncSession = Depends(get_session
 
 
 async def _check_agent_secret(session: AsyncSession, x_agent_secret: str | None) -> None:
-    row = await session.get(SystemSettings, 1)
+    row = await ajustes_de(session)
     expected = row.agent_webhook_secret if row else None
     if not expected:
         raise HTTPException(status_code=503, detail="Configura primero el secreto del agente en Ajustes")

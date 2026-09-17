@@ -1,7 +1,6 @@
 import json
 import xml.etree.ElementTree as ET
 
-from app.core.runtime_settings import runtime_settings
 from app.services import voice_prompts
 from app.services.flow_engine import build_voicebot_flow_routes
 
@@ -17,29 +16,37 @@ def _dashed_phone(phone: str) -> str:
     return "".join(ch for ch in phone if ch.isdigit())
 
 
-def build_directory_xml(extensions: list) -> str:
-    """Genera la seccion <section name='directory'> con las extensiones."""
+def build_directory_xml(tenantes: list[dict]) -> str:
+    """Genera la seccion <section name='directory'>.
+
+    `tenantes` es una lista de dicts con `dominio` (Tenant.sip_domain o el
+    de Ajustes), `contexto` (ctx_<slug>) y `extensions` (solo las de esa
+    empresa). Cada empresa recibe su propio bloque `<domain name=...>`: es
+    la etiqueta con la que FreeSWITCH decide de quién es cada teléfono que
+    se registra, y `user_context` dentro de cada usuario es lo que hace que
+    sus llamadas entren al contexto de su empresa y no al de otra.
+    """
     root = _e("document", attrib={"type": "freeswitch/xml"})
     section = ET.SubElement(root, "section", attrib={"name": "directory"})
-    domain = ET.SubElement(
-        section, "domain", attrib={"name": runtime_settings.fs_domain}
-    )
-    params = ET.SubElement(domain, "params")
-    ET.SubElement(params, "param", attrib={"name": "dial-string", "value": "{^^:sip_invite_domain=${dialed_domain}:presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}"})
-    groups = ET.SubElement(domain, "groups")
-    group = ET.SubElement(groups, "group", attrib={"name": "default"})
-    users = ET.SubElement(group, "users")
-    for ext in extensions:
-        user = ET.SubElement(users, "user", attrib={"id": ext.number})
-        params = ET.SubElement(user, "params")
-        ET.SubElement(params, "param", attrib={"name": "password", "value": ext.password})
-        ET.SubElement(params, "param", attrib={"name": "vm-password", "value": ext.password})
-        v = ET.SubElement(user, "variables")
-        if ext.caller_id_name:
-            ET.SubElement(v, "variable", attrib={"name": "user_context", "value": "default"})
-            ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_name", "value": ext.caller_id_name})
-        ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_number", "value": ext.number})
-        ET.SubElement(v, "variable", attrib={"name": "user_context", "value": "default"})
+    for t in tenantes:
+        dominio = t["dominio"]
+        contexto = t["contexto"]
+        domain = ET.SubElement(section, "domain", attrib={"name": dominio})
+        params = ET.SubElement(domain, "params")
+        ET.SubElement(params, "param", attrib={"name": "dial-string", "value": "{^^:sip_invite_domain=${dialed_domain}:presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}"})
+        groups = ET.SubElement(domain, "groups")
+        group = ET.SubElement(groups, "group", attrib={"name": "default"})
+        users = ET.SubElement(group, "users")
+        for ext in t["extensions"]:
+            user = ET.SubElement(users, "user", attrib={"id": ext.number})
+            params = ET.SubElement(user, "params")
+            ET.SubElement(params, "param", attrib={"name": "password", "value": ext.password})
+            ET.SubElement(params, "param", attrib={"name": "vm-password", "value": ext.password})
+            v = ET.SubElement(user, "variables")
+            if ext.caller_id_name:
+                ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_name", "value": ext.caller_id_name})
+            ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_number", "value": ext.number})
+            ET.SubElement(v, "variable", attrib={"name": "user_context", "value": contexto})
     return ET.tostring(root, encoding="unicode")
 
 
@@ -109,7 +116,7 @@ def _append_dnd_hook(context: ET.Element, extensions: list) -> None:
     ET.SubElement(c2, "action", attrib={"application": "hangup", "data": "USER_BUSY"})
 
 
-def _append_local_extension_route(context: ET.Element, extensions: list) -> None:
+def _append_local_extension_route(context: ET.Element, extensions: list, dominio: str) -> None:
     """Extension a extension (Local_Extension)."""
     if not extensions:
         return
@@ -127,10 +134,11 @@ def _append_local_extension_route(context: ET.Element, extensions: list) -> None
     # el que se encarga de contestarla en ese momento, no antes.
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "continue_on_fail=true"})
-    # $${domain} (global, siempre existe) en vez de ${domain_name} (variable
-    # por llamada que no queda seteada si se llega aquí sin pasar antes por
-    # una ruta entrante que la defina explícitamente — ver flow_engine.py).
-    ET.SubElement(condition, "action", attrib={"application": "bridge", "data": "user/${destination_number}@$${domain}"})
+    # El dominio literal de la EMPRESA y no $${domain} (variable global):
+    # con varias empresas, $${domain} no puede ser el de todas a la vez y
+    # `user/<ext>@$${domain}` terminaría buscando el contacto en el dominio
+    # equivocado. Acá cada contexto ya sabe de qué empresa es.
+    ET.SubElement(condition, "action", attrib={"application": "bridge", "data": f"user/${{destination_number}}@{dominio}"})
     anti = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": f"^({numbers})$"})
     anti.set("break", "on-false")
     ET.SubElement(anti, "action", attrib={"application": "hangup", "data": "NO_ANSWER"})
@@ -160,7 +168,9 @@ def _parse_bot_menu(config_json: str | None) -> dict[str, str]:
     return out
 
 
-def _append_voicebot_routes(section: ET.Element, context: ET.Element, bots: list) -> None:
+def _append_voicebot_routes(
+    section: ET.Element, context: ET.Element, bots: list, dominio: str, tenant_id: int
+) -> None:
     """IVR simple (sin IA): saluda con audio o texto (TTS) y enruta según la
     tecla presionada hacia una extensión, reutilizando Local_Extension.
 
@@ -175,8 +185,8 @@ def _append_voicebot_routes(section: ET.Element, context: ET.Element, bots: list
     """
     for bot in bots:
         if bot.bot_type != "ivr":
-            continue  # el motor de IA aún no está implementado
-        if build_voicebot_flow_routes(section, context, bot):
+            continue  # los bots de IA se entregan directo al motor (campaña o flujo)
+        if build_voicebot_flow_routes(section, context, bot, dominio, tenant_id):
             continue  # el bot tiene un flujo visual (nodos/edges); ya se generó su dialplan
         menu = _parse_bot_menu(bot.config)
         var_name = f"ivr_digit_{bot.id}"
@@ -279,7 +289,7 @@ def orden_troncales(trunks: list, principal_id: int | None = None) -> list:
     return [principal] + [t for t in habilitadas if t.id != principal_id]
 
 
-def _append_outbound_route(context: ET.Element, trunks: list) -> None:
+def _append_outbound_route(context: ET.Element, trunks: list, slug_por_tenant: dict[int, str]) -> None:
     """Ruta de salida: números externos (7-15 dígitos) vía la cadena de
     troncales habilitadas, en serie (separadas por "|" en `bridge`, que es
     la sintaxis de FreeSWITCH para "probá la primera; si no contesta o la
@@ -299,41 +309,61 @@ def _append_outbound_route(context: ET.Element, trunks: list) -> None:
     nombres = " -> ".join(t.name for t in cadena)
     ET.SubElement(condition, "action", attrib={"application": "log", "data": f"Llamada saliente vía {nombres}"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
-    destinos = "|".join(f"sofia/gateway/{t.name}/${{destination_number}}" for t in cadena)
+    # El gateway en sofia lleva el slug de la empresa como prefijo (ver
+    # app/services/gateways.py) — sin él, la ruta apuntaría a un gateway
+    # que no existe o al de otra empresa.
+    destinos = "|".join(
+        f"sofia/gateway/{slug_por_tenant.get(t.tenant_id, 'x')}_{t.name}/${{destination_number}}"
+        for t in cadena
+    )
     ET.SubElement(condition, "action", attrib={"application": "bridge", "data": destinos})
 
 
-def _append_queue_routes(context: ET.Element, queues: list) -> None:
+def _append_queue_routes(context: ET.Element, queues: list, dominio: str) -> None:
     """Extensión de entrada de cada cola: contesta y entra a mod_callcenter.
     Si la cola se agota (timeout/sin agentes) o `callcenter` falla, sigue a
     la extensión de desbordamiento (o cuelga si no hay una configurada) —
-    igual que el "Fail over destination" de las colas en Issabel/FreePBX."""
+    igual que el "Fail over destination" de las colas en Issabel/FreePBX.
+
+    El nombre de la cola lleva el dominio de la empresa porque en
+    mod_callcenter los nombres son GLOBALES: con el dominio, la cola
+    "soporte" de una empresa y la de otra no son la misma (ver
+    app/services/queues_sync.py)."""
     for queue in queues:
         if not queue.enabled:
             continue
+        qkey = f"{queue.name}@{dominio}"
         extension = ET.SubElement(context, "extension", attrib={"name": f"queue_{queue.name}", "continue": "false"})
         condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": f"^{queue.extension}$"})
         ET.SubElement(condition, "action", attrib={"application": "answer"})
         ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=false"})
-        ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": f"{queue.name}@$${{domain}}"})
+        ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})
         if queue.failover_extension:
-            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML default"})
+            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML {context.get('name')}"})
         else:
             ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
 
 
-def _append_inbound_routes(public_context: ET.Element, routes: list) -> None:
+def _append_inbound_routes(
+    public_context: ET.Element, routes: list, contextos: dict[int, str], dominios: dict[int, str]
+) -> None:
     """Contexto "public": adonde caen las llamadas entrantes de la troncal
     (ver sip_profiles/external.xml y el context="public" de cada gateway).
     Cada ruta hace matching por DID (número marcado por quien llama) y
-    transfiere al contexto "default", reutilizando TODO el ruteo que ya
-    existe ahí (extensión → Local_Extension, cola → queue_<nombre>,
-    voizbot → bot_<id>) — igual que "Inbound Routes" en Issabel/FreePBX.
+    transfiere al contexto de SU empresa (ctx_<slug>), reutilizando TODO el
+    ruteo que ya existe ahí (extensión → Local_Extension, cola →
+    queue_<nombre>, voizbot → bot_<id>) — igual que "Inbound Routes" en
+    Issabel/FreePBX.
+
+    Es el único lugar donde el ruteo cruza empresas: la llamada entrante
+    solo trae el número marcado, y ese número es la clave que decide de
+    quién es. El DID es único en toda la plataforma (ver
+    InboundRoute.did_pattern en los modelos).
 
     Si ninguna ruta matchea, se cuelga (UNALLOCATED_NUMBER) en vez de
-    dejar pasar la llamada a "default" sin control — eso sería un hueco de
-    fraude telefónico (un desconocido podría terminar pudiendo marcar
-    salientes vía la troncal).
+    dejar pasar la llamada sin control — eso sería un hueco de fraude
+    telefónico (un desconocido podría terminar pudiendo marcar salientes
+    vía la troncal).
     """
     tag_ext = ET.SubElement(public_context, "extension", attrib={"name": "outside_call_tag", "continue": "true"})
     tag_cond = ET.SubElement(tag_ext, "condition")
@@ -343,13 +373,14 @@ def _append_inbound_routes(public_context: ET.Element, routes: list) -> None:
     for route in ordered:
         pattern = route.did_pattern.strip()
         expression = ".*" if pattern.lower() in ("any", "*", "") else f"^{pattern}$"
+        destino_ctx = contextos.get(route.tenant_id) or "default"
         extension = ET.SubElement(public_context, "extension", attrib={"name": f"did_{route.id}_{route.name}", "continue": "false"})
         condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": expression})
-        ET.SubElement(condition, "action", attrib={"application": "set", "data": "domain_name=$${domain}"})
+        ET.SubElement(condition, "action", attrib={"application": "set", "data": f"domain_name={dominios.get(route.tenant_id, '$${domain}')}"})
         if route.destination_type == "hangup" or not route.destination_value:
             ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
         else:
-            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{route.destination_value} XML default"})
+            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{route.destination_value} XML {destino_ctx}"})
 
     fallback = ET.SubElement(public_context, "extension", attrib={"name": "no_route", "continue": "false"})
     fb_cond = ET.SubElement(fallback, "condition", attrib={"field": "destination_number", "expression": ".*"})
@@ -419,40 +450,58 @@ def _append_call_limits_hook(context: ET.Element, max_minutes: int) -> None:
 
 
 def build_dialplan_xml(
-    extensions: list,
-    bots: list,
-    trunks: list | None = None,
-    queues: list | None = None,
-    inbound_routes: list | None = None,
-    record_all: bool = False,
-    max_call_minutes: int = 60,
+    tenantes: list[dict],
+    routes: list | None = None,
+    contextos: dict[int, str] | None = None,
+    dominios: dict[int, str] | None = None,
+    slugs: dict[int, str] | None = None,
 ) -> str:
-    """Genera la seccion <section name='dialplan'> completa."""
+    """Genera la seccion <section name='dialplan'> completa.
+
+    Un contexto por empresa (`ctx_<slug>`) con SOLO sus extensiones, bots,
+    colas y troncales — es lo que hace que la extensión 1000 de una empresa
+    no sea la de otra —, más un contexto `public` único que enruta las
+    llamadas entrantes por DID al contexto de la empresa que corresponde.
+    """
+    contextos = contextos or {}
+    dominios = dominios or {}
+    slugs = slugs or {}
     root = _e("document", attrib={"type": "freeswitch/xml"})
     section = ET.SubElement(root, "section", attrib={"name": "dialplan"})
-    context = ET.SubElement(section, "context", attrib={"name": "default"})
 
-    _append_call_limits_hook(context, max_call_minutes)
-    if record_all:
-        _append_recording_hook(context)
-    _append_dnd_feature_codes(context)
-    _append_dnd_hook(context, extensions)
-    _append_local_extension_route(context, extensions)
-    _append_voicebot_routes(section, context, bots)
-    _append_queue_routes(context, queues or [])
+    record_public = any(t["record_all"] for t in tenantes)
+    max_minutes_public = max((t["max_call_minutes"] for t in tenantes), default=60)
 
-    # Echo test
-    echo = ET.SubElement(context, "extension", attrib={"name": "Echo_Test", "continue": "false"})
-    c = ET.SubElement(echo, "condition", attrib={"field": "destination_number", "expression": "^9196$"})
-    ET.SubElement(c, "action", attrib={"application": "answer"})
-    ET.SubElement(c, "action", attrib={"application": "echo"})
+    for t in tenantes:
+        contexto = t["contexto"]
+        dominio = t["dominio"]
+        extensions = t["extensions"]
+        bots = t["bots"]
+        trunks = t["trunks"]
+        queues = t["queues"]
+        context = ET.SubElement(section, "context", attrib={"name": contexto})
 
-    _append_outbound_route(context, trunks or [])
+        _append_call_limits_hook(context, t["max_call_minutes"])
+        if t["record_all"]:
+            _append_recording_hook(context)
+        _append_dnd_feature_codes(context)
+        _append_dnd_hook(context, extensions)
+        _append_local_extension_route(context, extensions, dominio)
+        _append_voicebot_routes(section, context, bots, dominio, t["tenant_id"])
+        _append_queue_routes(context, queues, dominio)
+
+        # Echo test
+        echo = ET.SubElement(context, "extension", attrib={"name": "Echo_Test", "continue": "false"})
+        c = ET.SubElement(echo, "condition", attrib={"field": "destination_number", "expression": "^9196$"})
+        ET.SubElement(c, "action", attrib={"application": "answer"})
+        ET.SubElement(c, "action", attrib={"application": "echo"})
+
+        _append_outbound_route(context, trunks, slugs)
 
     public_context = ET.SubElement(section, "context", attrib={"name": "public"})
-    _append_call_limits_hook(public_context, max_call_minutes)
-    if record_all:
+    _append_call_limits_hook(public_context, max_minutes_public)
+    if record_public:
         _append_recording_hook(public_context)
-    _append_inbound_routes(public_context, inbound_routes or [])
+    _append_inbound_routes(public_context, routes or [], contextos, dominios)
 
     return ET.tostring(root, encoding="unicode")

@@ -89,6 +89,7 @@ export interface Campaign {
   max_concurrency: number;
   retries: number;
   message_template: string | null;
+  ai_intent: string | null;
   status: string;
   started_at: string | null;
   finished_at: string | null;
@@ -129,6 +130,42 @@ export interface CampaignWithStats extends Campaign {
   stats: CampaignStats;
   trunk_name?: string | null;
   voicebot_name?: string | null;
+}
+
+export interface Debt {
+  id: number;
+  phone: string;
+  debtor_name: string;
+  amount: number;
+  due_date: string | null;
+  invoice_number: string | null;
+  notes: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface PaymentPromise {
+  id: number;
+  debt_id: number | null;
+  phone: string;
+  debtor_name: string | null;
+  amount_promised: number;
+  promise_date: string;
+  plan: string;
+  installments: number | null;
+  notes: string | null;
+  status: string;
+  call_uuid: string | null;
+  created_at: string;
+}
+
+export interface CobranzaSummary {
+  debts_total: number;
+  debts_open: number;
+  amount_owed: number;
+  promises_total: number;
+  promises_pending: number;
+  amount_promised: number;
 }
 
 export interface InboundRoute {
@@ -198,6 +235,10 @@ export interface SystemSettings {
   backups_max_gb: number;
   max_call_duration_minutes: number;
   max_concurrent_calls: number;
+  ari_base_url: string | null;
+  ari_user: string | null;
+  ari_password: string | null;
+  ari_app: string;
 }
 
 export interface MaintenanceStatus {
@@ -307,6 +348,7 @@ export interface CallStats {
 export const PERMISOS = {
   usuarios: "usuarios:gestionar",
   ajustes: "ajustes:gestionar",
+  empresas: "empresas:gestionar",
   telefonia: "telefonia:gestionar",
   colas: "colas:gestionar",
   campanas: "campanas:gestionar",
@@ -319,7 +361,40 @@ export const PERMISOS = {
   softphone: "softphone:usar",
 } as const;
 
-export type Rol = "admin" | "supervisor" | "coordinador" | "asesor";
+export type Rol = "admin" | "supervisor" | "coordinador" | "asesor" | "plataforma";
+
+export interface Empresa {
+  id: number;
+  name: string;
+  slug: string;
+  sip_domain: string;
+  subdomain: string | null;
+  business_type: string;
+  modules: string[];
+  enabled: boolean;
+  created_at: string;
+  users_count: number;
+  extensions_count: number;
+  licencia: Licencia | null;
+}
+
+export interface Licencia {
+  plan: string;
+  status: string;
+  // ok | vencida | suspendida (computado)
+  estado: string;
+  started_at: string | null;
+  expires_at: string | null;
+  max_extensions: number | null;
+  max_trunks: number | null;
+  max_concurrent_calls: number | null;
+  max_campaigns: number | null;
+}
+
+export interface EmpresaCreada extends Empresa {
+  admin_username: string;
+  admin_password: string;
+}
 
 export interface Usuario {
   id: number;
@@ -339,6 +414,8 @@ export interface Sesion {
   expira_en: number;
   usuario: Usuario;
   permisos: string[];
+  // Módulos habilitados de la empresa (voicebot/pbx) para ocultar secciones.
+  modulos: string[];
 }
 
 export interface RolInfo {
