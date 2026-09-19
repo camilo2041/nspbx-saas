@@ -3,6 +3,7 @@ import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from app.core import validacion
 from app.core.config import settings
 from app.services import esl
 
@@ -60,11 +61,14 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
     for queue in queues:
         if not queue.enabled:
             continue
+        if not validacion.NOMBRE_RE.fullmatch(queue.name or ""):
+            logger.error("Cola %s omitida: el nombre %r no es válido. Corrígela desde el panel.", queue.id, queue.name)
+            continue
         qkey = _queue_key(queue.name, dominios[queue.tenant_id])
         queue_el = ET.SubElement(queues_el, "queue", attrib={"name": qkey})
         params = {
             "strategy": queue.strategy,
-            "moh-sound": queue.moh_sound,
+            "moh-sound": queue.moh_sound if validacion.moh_valido(queue.moh_sound) else validacion.MOH_POR_DEFECTO,
             "time-base-score": "system",
             "max-wait-time": str(queue.max_wait_time),
             "max-wait-time-with-no-agent": str(queue.max_wait_time_with_no_agent),
@@ -106,7 +110,7 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
                 )
             ET.SubElement(tiers_el, "tier", attrib={"agent": akey, "queue": qkey, "level": "1", "position": "1"})
 
-    return ET.tostring(root, encoding="unicode")
+    return validacion.limpiar_xml(ET.tostring(root, encoding="unicode"))
 
 
 def write_callcenter_conf(queues: list, dominios: dict[int, str]) -> Path:

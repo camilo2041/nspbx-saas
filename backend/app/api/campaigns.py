@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_session, tenant_de_sesion
-from app.models import Appointment, Campaign, CampaignNumber, Debt, Trunk
+from app.models import Appointment, Campaign, CampaignNumber, Debt, Trunk, VoiceBot
 from app.schemas import (
     CampaignCreate,
     CampaignNumberIn,
@@ -195,6 +195,16 @@ async def list_campaigns_detail(session: AsyncSession = Depends(get_session)):
     return out
 
 
+async def _validar_referencias(session: AsyncSession, trunk_id: int | None, voicebot_id: int | None) -> None:
+    """La troncal y el voizbot tienen que ser de ESTA empresa. `session.get` va
+    por la sesión atada a la empresa, que no ve las ajenas; sin esta comprobación
+    un id adivinado apuntaba a la troncal de otra (la FK no distingue empresas)."""
+    if trunk_id and not await session.get(Trunk, trunk_id):
+        raise HTTPException(status_code=400, detail="Troncal inexistente")
+    if voicebot_id and not await session.get(VoiceBot, voicebot_id):
+        raise HTTPException(status_code=400, detail="Voizbot inexistente")
+
+
 @router.post("", response_model=CampaignOut, status_code=status.HTTP_201_CREATED)
 async def create_campaign(payload: CampaignCreate, session: AsyncSession = Depends(get_session)):
     tid = tenant_de_sesion(session)
@@ -205,10 +215,7 @@ async def create_campaign(payload: CampaignCreate, session: AsyncSession = Depen
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Alcanzaste el límite de campañas de tu plan. Mejora la licencia para crear más.",
             )
-    if payload.trunk_id:
-        trunk = await session.get(Trunk, payload.trunk_id)
-        if not trunk:
-            raise HTTPException(status_code=400, detail="Troncal inexistente")
+    await _validar_referencias(session, payload.trunk_id, payload.voicebot_id)
     campaign = Campaign(**payload.model_dump())
     session.add(campaign)
     try:
@@ -235,7 +242,9 @@ async def update_campaign(
     campaign = await session.get(Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    cambios = payload.model_dump(exclude_unset=True)
+    await _validar_referencias(session, cambios.get("trunk_id"), cambios.get("voicebot_id"))
+    for field, value in cambios.items():
         setattr(campaign, field, value)
     await session.commit()
     await session.refresh(campaign)

@@ -3,6 +3,7 @@ import socket
 from pathlib import Path
 
 import psutil
+from app.core.alcance import requiere_operador_global
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,10 @@ from app.services.gateways import nombre_gateway
 from app.workers.maintenance import maintenance
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+# diagnostics, maintenance, backup-now y recursos operan sobre TODA la plataforma
+# (el servidor, la base completa, el disco): solo con una empresa en la
+# instalación o para quien administra la plataforma (ver core/alcance.py).
 
 
 @router.get("/status")
@@ -61,7 +66,7 @@ async def _puerto_abierto(host: str, port: int, timeout: float = 3.0) -> bool:
         return False
 
 
-@router.get("/diagnostics")
+@router.get("/diagnostics", dependencies=[Depends(requiere_operador_global)])
 async def diagnostics(session: AsyncSession = Depends(get_session)):
     """Todo lo que hoy solo se podía ver entrando por consola a revisar
     logs y `sofia status`, en un solo vistazo: si FreeSWITCH responde, si
@@ -136,7 +141,7 @@ def _tamano_carpeta(carpeta: Path) -> tuple[int, int]:
     return cantidad, total
 
 
-@router.get("/maintenance")
+@router.get("/maintenance", dependencies=[Depends(requiere_operador_global)])
 async def maintenance_status(session: AsyncSession = Depends(get_session)):
     """Lo que antes no se podía ver sin entrar al servidor a mano: si el
     último respaldo salió bien, cuántos hay guardados, y cuánto disco
@@ -161,7 +166,7 @@ async def maintenance_status(session: AsyncSession = Depends(get_session)):
     }
 
 
-@router.post("/maintenance/backup-now")
+@router.post("/maintenance/backup-now", dependencies=[Depends(requiere_operador_global)])
 async def backup_now():
     """Respaldo manual, para antes de un cambio riesgoso — no hace falta
     esperar a la corrida automática ni a que pasen las 24 horas."""
@@ -233,7 +238,7 @@ def _leer_recursos() -> dict:
     }
 
 
-@router.get("/recursos")
+@router.get("/recursos", dependencies=[Depends(requiere_operador_global)])
 async def recursos():
     """CPU, RAM, swap y disco de la máquina que hospeda todo esto — lo
     que antes había que revisar entrando al servidor a mano (o al

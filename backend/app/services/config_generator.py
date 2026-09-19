@@ -54,7 +54,7 @@ def build_directory_xml(tenantes: list[dict]) -> str:
                 ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_name", "value": ext.caller_id_name})
             ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_number", "value": ext.number})
             ET.SubElement(v, "variable", attrib={"name": "user_context", "value": contexto})
-    return ET.tostring(root, encoding="unicode")
+    return validacion.limpiar_xml(ET.tostring(root, encoding="unicode"))
 
 
 def build_guest_directory_xml(username: str, password: str, domain: str, context_name: str) -> str:
@@ -85,7 +85,7 @@ def build_guest_directory_xml(username: str, password: str, domain: str, context
     ET.SubElement(v, "variable", attrib={"name": "user_context", "value": context_name})
     ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_name", "value": "Llamada web"})
     ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_number", "value": username})
-    return ET.tostring(root, encoding="unicode")
+    return validacion.limpiar_xml(ET.tostring(root, encoding="unicode"))
 
 
 def _decir(condition: ET.Element, prompt_key: str, texto_respaldo: str) -> None:
@@ -280,10 +280,12 @@ def _append_voicebot_routes(
         ET.SubElement(entry, "action", attrib={"application": "sleep", "data": "300"})
 
         if not menu:
-            if bot.greeting_audio_path:
-                ET.SubElement(entry, "action", attrib={"application": "playback", "data": bot.greeting_audio_path})
-            elif bot.welcome_message:
-                ET.SubElement(entry, "action", attrib={"application": "speak", "data": f"flite|kal|{bot.welcome_message}"})
+            saludo_audio = validacion.ruta_audio_segura(bot.greeting_audio_path)
+            saludo_texto = validacion.texto_hablado(bot.welcome_message)
+            if saludo_audio:
+                ET.SubElement(entry, "action", attrib={"application": "playback", "data": saludo_audio})
+            elif saludo_texto:
+                ET.SubElement(entry, "action", attrib={"application": "speak", "data": f"flite|kal|{saludo_texto}"})
             ET.SubElement(entry, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
             continue
 
@@ -293,12 +295,14 @@ def _append_voicebot_routes(
         # y cae al resguardo en inglés) — peor que el problema original.
         # Se reproduce por separado; sin terminadores en `read` (abajo),
         # que sí era una causa real y confirmada de pérdida del dígito.
-        if bot.greeting_audio_path:
-            ET.SubElement(entry, "action", attrib={"application": "playback", "data": bot.greeting_audio_path})
-        elif bot.welcome_message:
+        saludo_audio = validacion.ruta_audio_segura(bot.greeting_audio_path)
+        saludo_texto = validacion.texto_hablado(bot.welcome_message)
+        if saludo_audio:
+            ET.SubElement(entry, "action", attrib={"application": "playback", "data": saludo_audio})
+        elif saludo_texto:
             # mod_flite no trae voz en español (se oye con acento inglés);
             # es solo resguardo si no hay audio propio.
-            ET.SubElement(entry, "action", attrib={"application": "speak", "data": f"flite|kal|{bot.welcome_message}"})
+            ET.SubElement(entry, "action", attrib={"application": "speak", "data": f"flite|kal|{saludo_texto}"})
 
         # Valor por defecto ANTES de leer el dígito: si el que llama no
         # marca nada (timeout), la variable queda vacía — eso rompe el
@@ -371,7 +375,14 @@ def orden_troncales(trunks: list, principal_id: int | None = None) -> list:
     return [principal] + [t for t in habilitadas if t.id != principal_id]
 
 
-def _append_outbound_route(context: ET.Element, trunks: list, slug_por_tenant: dict[int, str]) -> None:
+def _append_outbound_route(
+    context: ET.Element,
+    trunks: list,
+    slug_por_tenant: dict[int, str],
+    permitir_internacional: bool = False,
+    tope_simultaneas: int = 0,
+    slug: str = "",
+) -> None:
     """Ruta de salida: números externos (7-15 dígitos) vía la cadena de
     troncales habilitadas, en serie (separadas por "|" en `bridge`, que es
     la sintaxis de FreeSWITCH para "probá la primera; si no contesta o la
@@ -387,7 +398,14 @@ def _append_outbound_route(context: ET.Element, trunks: list, slug_por_tenant: d
     if not cadena:
         return
     extension = ET.SubElement(context, "extension", attrib={"name": "Outbound_External", "continue": "false"})
-    condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": r"^(\d{7,15})$"})
+    # Sin permiso internacional: nada de prefijos 00/011 ni de más de 10
+    # dígitos (el fraude cae en destinos de ese tipo).
+    expresion = r"^(\d{7,15})$" if permitir_internacional else r"^(?!00|011)(\d{7,10})$"
+    condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": expresion})
+    # Tope de salientes simultáneas de la empresa: al superarlo se rechaza
+    # la llamada en vez de saturar la troncal (y el saldo).
+    if tope_simultaneas and tope_simultaneas > 0 and validacion.NOMBRE_RE.fullmatch(slug or ""):
+        ET.SubElement(condition, "action", attrib={"application": "limit", "data": f"hash outbound {slug} {int(tope_simultaneas)} !CALL_REJECTED"})
     nombres = " -> ".join(t.name for t in cadena)
     ET.SubElement(condition, "action", attrib={"application": "log", "data": f"Llamada saliente vía {nombres}"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
@@ -413,6 +431,11 @@ def _append_queue_routes(context: ET.Element, queues: list, dominio: str) -> Non
     app/services/queues_sync.py)."""
     for queue in queues:
         if not queue.enabled:
+            continue
+        if not validacion.NOMBRE_RE.fullmatch(queue.name or ""):
+            # Guardada antes de existir la validación: el nombre entra en el
+            # dato de la acción `callcenter`, no se arriesga.
+            logger.error("Cola %s omitida en el dialplan: nombre %r no válido", queue.id, queue.name)
             continue
         qkey = f"{queue.name}@{dominio}"
         extension = ET.SubElement(context, "extension", attrib={"name": f"queue_{queue.name}", "continue": "false"})
@@ -650,7 +673,14 @@ def build_dialplan_xml(
         ET.SubElement(c, "action", attrib={"application": "answer"})
         ET.SubElement(c, "action", attrib={"application": "echo"})
 
-        _append_outbound_route(context, trunks, slugs)
+        _append_outbound_route(
+            context,
+            trunks,
+            slugs,
+            t.get("allow_international", False),
+            t.get("max_concurrent", 0),
+            slugs.get(t["tenant_id"], t.get("slug", "")),
+        )
 
         webcall_queue = t.get("webcall_queue")
         if webcall_queue is not None:
@@ -665,4 +695,4 @@ def build_dialplan_xml(
         _append_recording_hook(public_context)
     _append_inbound_routes(public_context, routes or [], contextos, dominios)
 
-    return ET.tostring(root, encoding="unicode")
+    return validacion.limpiar_xml(ET.tostring(root, encoding="unicode"))

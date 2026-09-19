@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import validacion
+from app.core import alcance, validacion
 from app.core.database import get_session
 from app.models import InboundRoute
 from app.schemas import InboundRouteCreate, InboundRouteOut, InboundRouteUpdate
@@ -17,11 +18,34 @@ async def list_routes(session: AsyncSession = Depends(get_session)):
     return result.scalars().all()
 
 
+async def _validar_comodin(session: AsyncSession, did: str | None) -> None:
+    """El comodín "any" recibe TODA llamada que no coincida con ningún DID, y el
+    contexto de entrada es compartido por todas las empresas: con varias, una que
+    lo reclame se queda con las llamadas de las demás. Solo se permite cuando la
+    instalación tiene una única empresa."""
+    if did == "any" and not await alcance.instalacion_unica(session):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El comodín \"any\" captura las llamadas de todas las empresas; pídele a quien "
+            "administra la plataforma que te asigne números concretos.",
+        )
+
+
+async def _guardar(session: AsyncSession) -> None:
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        # El número entrante es único en toda la plataforma (ver InboundRoute).
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ese número entrante ya está asignado a una ruta")
+
+
 @router.post("", response_model=InboundRouteOut, status_code=status.HTTP_201_CREATED)
 async def create_route(payload: InboundRouteCreate, session: AsyncSession = Depends(get_session)):
+    await _validar_comodin(session, payload.did_pattern)
     route = InboundRoute(**payload.model_dump())
     session.add(route)
-    await session.commit()
+    await _guardar(session)
     await session.refresh(route)
     try:
         await reloadxml()
@@ -56,9 +80,10 @@ async def update_route(route_id: int, payload: InboundRouteUpdate, session: Asyn
             status_code=422,
             detail="El destino no corresponde al tipo: extensión (dígitos), cola (número) o voizbot (bot_N)",
         )
+    await _validar_comodin(session, cambios.get("did_pattern"))
     for field, value in cambios.items():
         setattr(route, field, value)
-    await session.commit()
+    await _guardar(session)
     await session.refresh(route)
     try:
         await reloadxml()

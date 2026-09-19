@@ -60,6 +60,8 @@ def _tenantes(
                 "queues": colas,
                 "record_all": bool(ajustes.record_all_calls) if ajustes else False,
                 "max_call_minutes": ajustes.max_call_duration_minutes if ajustes else 60,
+                "allow_international": bool(ajustes.allow_international) if ajustes else False,
+                "max_concurrent": ajustes.max_concurrent_calls if ajustes else 20,
                 # Números con la app móvil registrada (ver DeviceToken) —
                 # solo a esos se les dispara el push de aviso antes de
                 # timbrar (ver config_generator._append_mobile_push_hook).
@@ -103,7 +105,9 @@ async def fs_directory(request: Request, session: AsyncSession = Depends(get_adm
         )
 
     extensions = (await session.execute(select(Extension).where(Extension.enabled.is_(True)))).scalars().all()
-    tenantes_rows = (await session.execute(select(Tenant))).scalars().all()
+    # Una empresa desactivada (falta de pago, baja) no debe poder registrar
+    # teléfonos ni recibir llamadas: antes seguía sirviéndose completa.
+    tenantes_rows = (await session.execute(select(Tenant).where(Tenant.enabled.is_(True)))).scalars().all()
     ajustes_rows = (await session.execute(select(SystemSettings))).scalars().all()
     ajustes_por_tenant = {r.tenant_id: r for r in ajustes_rows}
     por_tenant: dict[int, list] = {}
@@ -138,11 +142,13 @@ async def fs_dialplan(session: AsyncSession = Depends(get_admin_session)):
     push_por_tenant: dict[int, set] = {}
     for tenant_id, numero in push_rows:
         push_por_tenant.setdefault(tenant_id, set()).add(numero)
-    tenantes_rows = (await session.execute(select(Tenant))).scalars().all()
+    tenantes_rows = (await session.execute(select(Tenant).where(Tenant.enabled.is_(True)))).scalars().all()
     ajustes_rows = (await session.execute(select(SystemSettings))).scalars().all()
     ajustes_por_tenant = {r.tenant_id: r for r in ajustes_rows}
     dominios = await dominios_tenants(session)
     contextos = {t.id: t.dialplan_context for t in tenantes_rows}
+    # Las rutas de una empresa desactivada no se enrutan (caerían en "default").
+    inbound_routes = [r for r in inbound_routes if r.tenant_id in contextos]
     slugs = {t.id: t.slug for t in tenantes_rows}
 
     def _agrupar(filas):

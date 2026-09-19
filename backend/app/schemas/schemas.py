@@ -49,8 +49,14 @@ def _nombre_visible(v: str) -> str:
     return v
 
 
+def _moh(v: str) -> str:
+    if not val.moh_valido(v):
+        raise ValueError("Música en espera no válida: usa la de fábrica, local_stream://nombre o un archivo de sonidos")
+    return v
+
+
 def _sin_control(v: str) -> str:
-    if re.search(r"[\x00-\x1f\x7f]", v):
+    if re.search(r"[\x00-\x1f\x7f\ud800-\udfff\ufffe\uffff]", v):
         raise ValueError('No se permiten caracteres de control')
     return v
 
@@ -62,6 +68,7 @@ HostSip = Annotated[str, Field(min_length=1, max_length=255), AfterValidator(_ho
 Codecs = Annotated[str, Field(min_length=1, max_length=255), AfterValidator(_codecs)]
 NombreVisible = Annotated[str, Field(min_length=1, max_length=100), AfterValidator(_nombre_visible)]
 TextoSinControl = Annotated[str, Field(max_length=255), AfterValidator(_sin_control)]
+MusicaEspera = Annotated[str, Field(max_length=200), AfterValidator(_moh)]
 
 
 class TrunkBase(BaseModel):
@@ -167,8 +174,29 @@ class VoiceBotNodeTtsRequest(BaseModel):
 
 
 class VoiceBotFlowUpdate(BaseModel):
-    nodes: list[dict] = Field(default_factory=list)
-    edges: list[dict] = Field(default_factory=list)
+    # Topes: un flujo real tiene decenas de nodos; sin límite, un solo PUT
+    # podía generar un dialplan gigante para todas las empresas.
+    nodes: list[dict] = Field(default_factory=list, max_length=200)
+    edges: list[dict] = Field(default_factory=list, max_length=600)
+
+    @model_validator(mode="after")
+    def _flujo_seguro(self):
+        # Los textos hablados NO se rechazan aquí (se limpian al generar el
+        # dialplan, ver validacion.texto_hablado); sí la estructura, porque
+        # los ids y las rutas de audio terminan en nombres y comandos.
+        for n in self.nodes:
+            if not val.id_nodo_valido(n.get("id", "")):
+                raise ValueError("Cada nodo necesita un id de letras, números, guion o guion bajo (máx. 40)")
+            datos = n.get("data")
+            if datos is None:
+                continue
+            if not isinstance(datos, dict):
+                raise ValueError("El contenido de un nodo debe ser un objeto")
+            for clave in ("audio_path", "whisper_audio_path"):
+                ruta = datos.get(clave)
+                if ruta and not val.ruta_audio_segura(ruta):
+                    raise ValueError("Ruta de audio no permitida: solo archivos generados por el editor")
+        return self
 
 
 class CallRequest(BaseModel):
@@ -261,6 +289,7 @@ class SystemSettingsOut(BaseModel):
     ai_llm_api_key: Optional[str] = None
     deepgram_api_key: Optional[str] = None
     record_all_calls: bool = False
+    allow_international: bool = False
     ai_stt_provider: str = "elevenlabs"
     ai_voice_provider: str = "elevenlabs"
     ai_voice_id: str = "Xb7hH8MSUJpSbSDYk0k2"
@@ -285,6 +314,10 @@ class SystemSettingsOut(BaseModel):
     ari_user: Optional[str] = None
     ari_password: Optional[str] = None
     ari_app: str = "nspbx"
+
+    # False cuando la instalación tiene varias empresas: el panel oculta los
+    # ajustes globales (Event Socket, disco, respaldos) que no son de una empresa.
+    puede_infraestructura: bool = True
 
     webcall_enabled: bool = False
     webcall_queue_id: Optional[int] = None
@@ -317,6 +350,7 @@ class SystemSettingsUpdate(BaseModel):
     deepgram_api_key: Optional[str] = None
 
     record_all_calls: Optional[bool] = None
+    allow_international: Optional[bool] = None
     ai_stt_provider: Optional[str] = Field(default=None, pattern="^(elevenlabs|deepgram)$")
     ai_voice_provider: Optional[str] = Field(default=None, pattern="^(edge|elevenlabs|deepgram)$")
     ai_voice_id: Optional[str] = None
@@ -538,7 +572,7 @@ class QueueBase(BaseModel):
         default="ring-all",
         pattern="^(ring-all|round-robin|top-down|longest-idle-agent|agent-with-least-talk-time|agent-with-fewest-calls|sequentially-by-agent-order|random)$",
     )
-    moh_sound: str = "$${hold_music}"
+    moh_sound: MusicaEspera = "$${hold_music}"
     agents: list[Extension] = Field(default_factory=list)
     max_wait_time: int = Field(default=0, ge=0)
     max_wait_time_with_no_agent: int = Field(default=0, ge=0)
@@ -559,7 +593,7 @@ class QueueUpdate(BaseModel):
     name: Optional[NombreTecnico] = None
     extension: Optional[Telefono] = None
     strategy: Optional[str] = Field(default=None, pattern="^(ring-all|round-robin|top-down|longest-idle-agent|agent-with-least-talk-time|agent-with-fewest-calls|sequentially-by-agent-order|random)$")
-    moh_sound: Optional[str] = None
+    moh_sound: Optional[MusicaEspera] = None
     agents: Optional[list[Extension]] = None
     max_wait_time: Optional[int] = Field(default=None, ge=0)
     max_wait_time_with_no_agent: Optional[int] = Field(default=None, ge=0)

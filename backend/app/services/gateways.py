@@ -101,7 +101,7 @@ def write_gateway_file(trunk, slug: str) -> Path:
     lines.append('    <param name="context" value="public"/>')
     lines.append('  </gateway>')
     lines.append('</include>')
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text(validacion.limpiar_xml("\n".join(lines) + "\n"), encoding="utf-8")
     logger.info("Gateway %s escrito en %s (register=%s)", gw_name, path, should_register)
     return path
 

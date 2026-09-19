@@ -1,10 +1,11 @@
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session
+from app.core.database import async_session, get_session
 from app.models import Queue, Tenant
 from app.schemas import QueueCreate, QueueUpdate
 from app.services import esl
@@ -40,19 +41,29 @@ async def _dominio_de(session: AsyncSession, tenant_id: int) -> str:
     return tenant.sip_domain if tenant else "nspbx.local"
 
 
+# Dos empresas guardando una cola a la vez pisaban el mismo archivo.
+_escritura_conf = asyncio.Lock()
+
+
 async def _rewrite_conf_file(session: AsyncSession) -> None:
     """Regenera callcenter.conf.xml completo (necesario porque los agentes
     se declaran ahí con todos sus parámetros) y refresca el árbol XML en
     memoria de FreeSWITCH. `reloadxml` NO reinicia mod_callcenter ni
     afecta colas ya cargadas — solo actualiza qué vería un `queue
     load/reload` posterior."""
-    rows = (await session.execute(select(Queue))).scalars().all()
-    dominios = await dominios_tenants(session)
-    write_callcenter_conf(rows, dominios)
-    try:
-        await esl.api("reloadxml")
-    except Exception:
-        pass
+    # callcenter.conf.xml es UN archivo para TODAS las empresas. La sesión de la
+    # petición está atada a una sola (aislamiento por empresa) y solo ve SUS colas:
+    # regenerarlo con ella borraba las de todas las demás hasta el siguiente
+    # reinicio. Se lee con la sesión del DUEÑO, que ve todas.
+    async with _escritura_conf:
+        async with async_session() as admin:
+            rows = (await admin.execute(select(Queue))).scalars().all()
+            dominios = await dominios_tenants(admin)
+        write_callcenter_conf(rows, dominios)
+        try:
+            await esl.api("reloadxml")
+        except Exception:
+            pass
 
 
 @router.get("")

@@ -144,6 +144,14 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
     if not usuario or not usuario.enabled:
         raise _NO_AUTENTICADO
 
+    # Desactivar una empresa tiene que cortar el acceso de TODOS sus usuarios
+    # ya mismo: antes solo dejaba de servirse el dialplan y el panel seguía
+    # funcionando con sus sesiones abiertas.
+    if usuario.tenant_id is not None:
+        empresa = await session.get(Tenant, usuario.tenant_id)
+        if not empresa or not empresa.enabled:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La empresa está desactivada")
+
     request.state.usuario = usuario
 
 

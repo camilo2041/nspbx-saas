@@ -27,6 +27,13 @@ def parse_flow(flow_json: str | None) -> dict | None:
     edges = data.get("edges")
     if not isinstance(nodes, list) or not isinstance(edges, list) or not nodes:
         return None
+    # El id de cada nodo termina en nombres de contexto, variables de canal y
+    # datos de `transfer`: solo se aceptan ids simples. Un nodo con otro id
+    # (nadie los escribe a mano: el editor los genera) se descarta.
+    nodes = [n for n in nodes if isinstance(n, dict) and validacion.id_nodo_valido(n.get("id", ""))]
+    edges = [e for e in edges if isinstance(e, dict)]
+    if not nodes:
+        return None
     return {"nodes": nodes, "edges": edges}
 
 
@@ -85,8 +92,8 @@ def _start_node(flow: dict) -> dict | None:
 
 def _node_audio_action(node: dict) -> ET.Element | None:
     data = node.get("data", {})
-    audio_path = data.get("audio_path")
-    tts_text = data.get("tts_text")
+    audio_path = validacion.ruta_audio_segura(data.get("audio_path"))
+    tts_text = validacion.texto_hablado(data.get("tts_text"))
     if audio_path:
         return ET.Element("action", attrib={"application": "playback", "data": audio_path})
     if tts_text:
@@ -116,7 +123,7 @@ def build_voicebot_flow_routes(
     flow = parse_flow(bot.flow_json)
     if not flow:
         return False
-    nodes_by_id = {str(n["id"]): n for n in flow["nodes"]}
+    nodes_by_id = {str(n["id"]): n for n in flow["nodes"]}  # parse_flow ya garantiza que todos traen id seguro
     start = _start_node(flow)
     if not start:
         return False
@@ -311,8 +318,8 @@ def _append_target_actions(cond: ET.Element, target: dict, bot_id: int, dominio:
             )
             ET.SubElement(cond, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
             return
-        whisper_audio = data.get("whisper_audio_path")
-        whisper_text = data.get("whisper_text")
+        whisper_audio = validacion.ruta_audio_segura(data.get("whisper_audio_path"))
+        whisper_text = validacion.texto_hablado(data.get("whisper_text"))
         if whisper_audio:
             ET.SubElement(cond, "action", attrib={"application": "set", "data": "bridge_pre_execute_bleg_app=playback"})
             ET.SubElement(cond, "action", attrib={"application": "set", "data": f"bridge_pre_execute_bleg_data={whisper_audio}"})

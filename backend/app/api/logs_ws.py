@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import permissions
+from app.core import alcance, permissions
 from app.core.config import settings
 from app.core.database import async_session, fijar_tenant, get_session
 from app.core.runtime_settings import runtime_settings
@@ -87,8 +87,18 @@ async def logs_websocket(websocket: WebSocket, session: AsyncSession = Depends(g
     # Mismo permiso que troncales/extensiones: quien puede ver esto puede
     # ver el tráfico SIP completo, así que es tan sensible como las
     # credenciales de una troncal.
-    if not usuario or not permissions.puede(usuario.role, permissions.TELEFONIA_GESTIONAR):
+    if not usuario or not (
+        permissions.puede(usuario.role, permissions.TELEFONIA_GESTIONAR)
+        or permissions.puede(usuario.role, permissions.EMPRESAS_GESTIONAR)
+    ):
         await websocket.close(code=4401)
+        return
+
+    # El log de FreeSWITCH mezcla el tráfico SIP de TODAS las empresas (números,
+    # nombres, contraseñas en cabeceras de depuración). Un administrador de
+    # empresa solo lo ve si es la única de la instalación (ver core/alcance.py).
+    if not await alcance.es_operador_global(usuario, session):
+        await websocket.close(code=4403)
         return
 
     level = websocket.query_params.get("level", "info")

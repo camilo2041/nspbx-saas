@@ -118,6 +118,10 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_admin
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario o contraseña incorrectos")
     if not usuario.enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Esta cuenta está desactivada")
+    if usuario.tenant_id is not None:
+        empresa = await session.get(Tenant, usuario.tenant_id)
+        if not empresa or not empresa.enabled:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La empresa está desactivada")
 
     usuario.last_login_at = datetime.utcnow()
     await session.commit()
@@ -177,6 +181,10 @@ async def refrescar(payload: RefreshRequest, session: AsyncSession = Depends(get
     usuario = await session.get(User, fila.user_id)
     if not usuario or not usuario.enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Esta cuenta está desactivada")
+    if usuario.tenant_id is not None:
+        empresa = await session.get(Tenant, usuario.tenant_id)
+        if not empresa or not empresa.enabled:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La empresa está desactivada")
 
     fila.revoked_at = ahora
     nuevo = await _nuevo_refresh_token(session, usuario.id, fila.platform)

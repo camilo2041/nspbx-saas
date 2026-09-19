@@ -149,6 +149,8 @@ async def upload_node_audio(bot_id: int, node_id: str, file: UploadFile, session
     bot = await session.get(VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
+    if not validacion.id_nodo_valido(node_id):
+        raise HTTPException(status_code=422, detail="Id de nodo no válido")
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Archivo vacío")
@@ -166,6 +168,8 @@ async def generate_node_tts(
     bot = await session.get(VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
+    if not validacion.id_nodo_valido(node_id):
+        raise HTTPException(status_code=422, detail="Id de nodo no válido")
     try:
         audio, ext = await _synthesize(payload.text, payload.voice, payload.provider, session)
         suffix = "whisper" if payload.kind == "whisper" else "audio"
@@ -178,7 +182,14 @@ async def generate_node_tts(
 
 
 @router.delete("/{bot_id}/flow/nodes/{node_id}/audio")
-async def delete_node_audio(bot_id: int, node_id: str):
+async def delete_node_audio(bot_id: int, node_id: str, session: AsyncSession = Depends(get_session)):
+    # Sin esta comprobación cualquier empresa podía borrar los audios de un bot
+    # AJENO: los archivos están fuera de la base y no los cubre el aislamiento
+    # por empresa; `session.get` sí (devuelve None si el bot es de otra).
+    if not await session.get(VoiceBot, bot_id):
+        raise HTTPException(status_code=404, detail="Bot no encontrado")
+    if not validacion.id_nodo_valido(node_id):
+        raise HTTPException(status_code=422, detail="Id de nodo no válido")
     greetings.remove_audio(bot_id, node_id=node_id)
     return {"ok": True}
 
@@ -212,6 +223,8 @@ async def generate_greeting_tts(
     bot = await session.get(VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
+    if not validacion.id_nodo_valido(node_id):
+        raise HTTPException(status_code=422, detail="Id de nodo no válido")
     try:
         audio, ext = await _synthesize(payload.text, payload.voice, payload.provider, session)
         path = greetings.save_greeting(bot_id, f"greeting.{ext}", audio)

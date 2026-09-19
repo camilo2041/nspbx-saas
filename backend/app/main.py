@@ -47,6 +47,7 @@ _COLUMN_PATCHES = [
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS agent_webhook_secret VARCHAR(255)",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS deepseek_api_key VARCHAR(255)",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS record_all_calls BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS allow_international BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ai_voice_provider VARCHAR(20) NOT NULL DEFAULT 'elevenlabs'",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ai_voice_id VARCHAR(100) NOT NULL DEFAULT 'Xb7hH8MSUJpSbSDYk0k2'",
     "ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS uuid VARCHAR(64)",
@@ -511,7 +512,10 @@ async def lifespan(app: FastAPI):
             fila_ajustes = await settings_api.get_or_create_settings(session, t.id)
             dominios[t.id] = fila_ajustes.fs_domain or t.sip_domain
             slugs[t.id] = t.slug
-            settings_api.apply_to_runtime(fila_ajustes)
+            # Con varias empresas cada una tiene su fila y la última reconfiguraba el
+            # Event Socket de todas. Solo con una se aplica (ver core/alcance.py).
+            if len(tenantes_rows) == 1:
+                settings_api.apply_to_runtime(fila_ajustes)
         trunks_rows = (await session.execute(select(Trunk))).scalars().all()
         sync_gateways(trunks_rows, slugs)
         # mod_callcenter guarda colas/agentes en memoria — se pierden en cada

@@ -61,6 +61,13 @@ class Settings(BaseSettings):
 
     fs_domain: str = "nspbx.local"
 
+    # Topes de la PLATAFORMA (no de una empresa): disco de grabaciones y de
+    # respaldos, y llamadas simultáneas máximas en toda la central. Con varias
+    # empresas ninguna puede fijarlos; con una sola, sus Ajustes los sobrescriben.
+    recordings_max_gb: float = 20.0
+    backups_max_gb: float = 5.0
+    max_concurrent_calls_global: int = 200
+
     # Zona horaria del negocio. La agenda (horario de atención, "hoy",
     # "mañana", si un cupo ya pasó) se interpreta siempre en esta zona,
     # sin importar en qué zona corra el contenedor. Ver app/core/clock.py.

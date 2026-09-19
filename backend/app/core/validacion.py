@@ -26,7 +26,7 @@ HOST_RE = re.compile(r"^[A-Za-z0-9._-]{1,255}$")
 CODECS_RE = re.compile(r"^[A-Za-z0-9_,.-]{1,255}$")
 # Nombre a mostrar (caller ID): texto legible sin caracteres de control ni
 # los que rompen comillas/XML/ESL.
-NOMBRE_VISIBLE_RE = re.compile(r"^[^\x00-\x1f\x7f'\"<>&{}|\\]{1,100}$")
+NOMBRE_VISIBLE_RE = re.compile(r"^[^\x00-\x1f\x7f\ud800-\udfff\ufffe\uffff'\"<>&{}|\\]{1,100}$")
 
 PATRON_TELEFONO = TELEFONO_RE.pattern
 PATRON_EXTENSION = EXTENSION_RE.pattern
@@ -76,3 +76,66 @@ def destino_valido(tipo: str, valor: str | None) -> bool:
     if tipo == "voicebot":
         return bool(BOT_RE.fullmatch(valor))
     return False
+
+
+# --- Flujos del voizbot -------------------------------------------------
+# Todo lo que un flujo (flow_json) o un saludo mete en el dialplan pasa por
+# estos filtros. El motivo es concreto: FreeSWITCH expande `${...}` DENTRO de
+# los datos de cada acción al momento de la llamada, y `${system(cmd)}` o
+# `${api_comando(...)}` ejecuta código. Escapar el XML no lo evita (eso solo
+# impide romper el documento): el texto llega intacto al motor. Por eso los
+# textos hablados solo pueden llevar letras, números y puntuación simple; no
+# `$`, `{`, `}`, comillas ni barras invertidas.
+
+# Ids de nodo: entran en nombres de contexto y variables de canal.
+NODE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+# Audios de bots: solo archivos sueltos dentro de la carpeta de sonidos de bots.
+RUTA_AUDIO_RE = re.compile(r"^/usr/share/freeswitch/sounds/bots/[A-Za-z0-9_.-]{1,120}$")
+
+# Lo único que puede llevar un texto hablado (unicode: acentos y ñ incluidos).
+_NO_PERMITIDO_EN_TEXTO = re.compile(r"[^\w\s.,;:!?¿¡()\-%/+]")
+
+
+def ruta_audio_segura(ruta: str | None) -> str | None:
+    """La ruta si es un archivo de la carpeta de audios de bots; si no, None."""
+    if isinstance(ruta, str) and RUTA_AUDIO_RE.fullmatch(ruta) and ".." not in ruta:
+        return ruta
+    return None
+
+
+def texto_hablado(valor: str | None, maximo: int = 500) -> str:
+    """Texto listo para `speak`/flite: sin caracteres que FreeSWITCH interprete.
+
+    Se descartan (no se rechazan) porque el texto solo alimenta el respaldo de
+    voz sintética; la llamada no debe fallar por un símbolo. El audio de buena
+    calidad se genera aparte, con el texto original, y no pasa por acá."""
+    limpio = _NO_PERMITIDO_EN_TEXTO.sub("", str(valor or ""))
+    return re.sub(r"\s+", " ", limpio).strip()[:maximo]
+
+
+# XML 1.0 solo admite algunos caracteres. Uno fuera de rango (por ejemplo
+# U+FFFE o un byte de control) hace que libxml2 rechace el DOCUMENTO ENTERO:
+# /fs/dialplan y /fs/directory sirven a TODAS las empresas, así que un solo
+# nombre con ese carácter dejaba sin llamadas a todas. Se quitan al serializar.
+_XML_ILEGAL = re.compile("[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
+
+def limpiar_xml(texto: str) -> str:
+    return _XML_ILEGAL.sub("", texto)
+
+
+def id_nodo_valido(valor) -> bool:
+    return bool(NODE_ID_RE.fullmatch(str(valor)))
+
+
+# Música en espera de una cola: la de fábrica, un stream local por nombre o un
+# archivo dentro de la carpeta de sonidos. Nada de URL ni de `${...}`.
+MOH_POR_DEFECTO = "$${hold_music}"
+_MOH_RE = re.compile(r"^(local_stream://[A-Za-z0-9_.-]{1,60}|/usr/share/freeswitch/sounds/[A-Za-z0-9_./-]{1,150})$")
+
+
+def moh_valido(valor: str | None) -> bool:
+    if valor == MOH_POR_DEFECTO:
+        return True
+    return bool(isinstance(valor, str) and _MOH_RE.fullmatch(valor) and ".." not in valor)

@@ -59,7 +59,10 @@ async def get_or_create_settings(
             fs_domain=dominio or "nspbx.local",
             fs_esl_host=env_settings.fs_esl_host,
             fs_esl_port=env_settings.fs_esl_port,
-            fs_esl_password=env_settings.fs_esl_password,
+            # Vacía a propósito: copiar la contraseña real a la fila de CADA empresa
+            # la dejaba visible para todos sus administradores. La conexión usa la
+            # del entorno (ver core/runtime_settings.py).
+            fs_esl_password="",
             fs_http_base=env_settings.fs_http_base,
             sip_ws_url=env_settings.sip_ws_url,
             sip_server_ip=env_settings.sip_server_ip,

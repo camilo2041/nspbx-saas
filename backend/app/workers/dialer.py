@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import select, update
 
 from app.core.clock import fecha_en_palabras
+from app.core.config import settings
 from app.core.database import async_session
 from app.models import Campaign, CampaignNumber, SystemSettings, Tenant, Trunk, VoiceBot
 from app.services import esl, licensing, templating
@@ -74,23 +75,45 @@ class CampaignDialer:
             # llamada bridgeada, no solo las de campañas), no contra un
             # contador propio que podría desincronizarse.
             #
-            # Ahora el tope es por EMPRESA, pero el canal es un recurso
-            # compartido del PBX: se usa el tope más restrictivo de las
-            # empresas que están marcando, que es el que protege la troncal
-            # contra todas.
+            # El tope es POR EMPRESA (lo que su licencia y sus Ajustes permiten)
+            # y además hay uno de la PLATAFORMA para el conjunto. Antes se usaba
+            # el más restrictivo de todas las empresas que estuvieran marcando:
+            # una sola con tope 1 frenaba las campañas de las demás. Ahora cada
+            # empresa se limita a lo suyo y solo el tope de la plataforma
+            # (entorno) protege a la troncal compartida.
             ajustes_rows = (await session.execute(select(SystemSettings))).scalars().all()
             ajustes_por_tenant = {r.tenant_id: r for r in ajustes_rows}
+            tenants_activos = {
+                t.id for t in (await session.execute(select(Tenant))).scalars().all() if t.enabled
+            }
             result = await session.execute(
                 select(Campaign).where(Campaign.status == "running")
             )
-            campaigns = result.scalars().all()
-            # Tope por campaña efectivo: el que la licencia permite, sin
-            # pasar del configurado en Ajustes.
-            tops = []
-            for c in campaigns:
-                cap = ajustes_por_tenant[c.tenant_id].max_concurrent_calls if c.tenant_id in ajustes_por_tenant else 20
-                tops.append(await licensing.tope_concurrentes(session, c.tenant_id, cap))
-            tope_global = min(tops) if tops else 20
+            campaigns = []
+            topes_por_tenant: dict[int, int] = {}
+            for c in result.scalars().all():
+                # Una empresa desactivada o con la licencia vencida/suspendida no
+                # marca: la API ya le impide operar, pero una campaña que quedó
+                # "running" antes seguía llamando por su cuenta.
+                if c.tenant_id not in tenants_activos:
+                    continue
+                if c.tenant_id not in topes_por_tenant:
+                    lic = await licensing.obtener(session, c.tenant_id)
+                    if licensing.estado(lic) != "ok":
+                        topes_por_tenant[c.tenant_id] = 0
+                    else:
+                        fila = ajustes_por_tenant.get(c.tenant_id)
+                        cap = fila.max_concurrent_calls if fila else 20
+                        topes_por_tenant[c.tenant_id] = await licensing.tope_concurrentes(session, c.tenant_id, cap)
+                if topes_por_tenant[c.tenant_id] > 0:
+                    campaigns.append(c)
+            # Lo máximo que pueden marcar TODAS juntas: la suma de lo que cada una tiene
+            # permitido, sin pasar del tope de la plataforma. (Con el máximo, una
+            # empresa marcando le quitaba margen a otra que aún estaba bajo su tope.)
+            tope_global = min(
+                sum(topes_por_tenant.values()) or 20, settings.max_concurrent_calls_global
+            )
+            lanzados_por_tenant: dict[int, int] = {}
 
             try:
                 estado = await esl.status()
@@ -107,7 +130,16 @@ class CampaignDialer:
                 if margen_global <= 0:
                     break
                 active = self._active.get(campaign.id, 0)
-                slots = min(campaign.max_concurrency - active, margen_global)
+                # Lo que la empresa ya tiene marcando (en todas sus campañas) más
+                # lo lanzado en este mismo ciclo, que aún no figura en _active.
+                activas_empresa = sum(
+                    self._active.get(x.id, 0) for x in campaigns if x.tenant_id == campaign.tenant_id
+                ) + lanzados_por_tenant.get(campaign.tenant_id, 0)
+                slots = min(
+                    campaign.max_concurrency - active,
+                    margen_global,
+                    topes_por_tenant.get(campaign.tenant_id, 0) - activas_empresa,
+                )
                 if slots <= 0:
                     continue
                 numbers = await session.execute(
@@ -120,6 +152,7 @@ class CampaignDialer:
                 )
                 numbers_list = list(numbers.scalars().all())
                 margen_global -= len(numbers_list)
+                lanzados_por_tenant[campaign.tenant_id] = lanzados_por_tenant.get(campaign.tenant_id, 0) + len(numbers_list)
                 for number in numbers_list:
                     number.status = "dialing"
                     number.attempts += 1
@@ -136,6 +169,14 @@ class CampaignDialer:
                 fresh = await s.get(Campaign, campaign.id)
                 trunk = await s.get(Trunk, fresh.trunk_id) if fresh.trunk_id else None
                 bot = await s.get(VoiceBot, fresh.voicebot_id) if fresh.voicebot_id else None
+                # Esta sesión es la del DUEÑO (sin aislamiento por empresa): un
+                # trunk_id o voicebot_id que apunte a la troncal o al bot de OTRA
+                # empresa se resolvería igual, y la campaña marcaría por su troncal
+                # (y con su identificador de llamada). Se exige la misma empresa.
+                if trunk and trunk.tenant_id != fresh.tenant_id:
+                    trunk = None
+                if bot and bot.tenant_id != fresh.tenant_id:
+                    bot = None
                 # SOLO las troncales de la empresa de la campaña: con la
                 # sesión del dueño, un SELECT sin filtro traería las de
                 # TODAS las empresas y una campaña podría marcar por la

@@ -31,6 +31,20 @@ from app.services import webcall
 
 logger = logging.getLogger(__name__)
 
+
+def _topes_de_disco(filas: list) -> tuple[float, float]:
+    """(tope de respaldos, tope de grabaciones) en GB, para TODA la plataforma.
+
+    El disco es uno solo. Antes se tomaba el MÍNIMO entre las empresas: un
+    administrador que fijaba 0,5 GB (el mínimo que aceptaba el formulario)
+    hacía que el siguiente ciclo borrara las grabaciones y respaldos más
+    viejos de TODAS. Con varias empresas ninguna lo controla y se usa el valor
+    de la plataforma (entorno); con una sola, valen sus Ajustes.
+    """
+    if len(filas) == 1:
+        return filas[0].backups_max_gb, filas[0].recordings_max_gb
+    return settings.backups_max_gb, settings.recordings_max_gb
+
 _NOMBRE_BACKUP = re.compile(r"^nspbx-\d{8}-\d{6}\.sql\.gz$")
 
 
@@ -100,9 +114,8 @@ class MaintenanceWorker:
                 for f in filas
             )
             retencion_backup = max(f.backup_retention_days for f in filas)
-            tope_backup_gb = min(f.backups_max_gb for f in filas)
             retencion_grabaciones = max(f.recordings_retention_days for f in filas)
-            tope_gb = min(f.recordings_max_gb for f in filas)
+            tope_backup_gb, tope_gb = _topes_de_disco(filas)
 
         if necesita_backup:
             await self._respaldar_postgres(retencion_backup, tope_backup_gb)
@@ -116,7 +129,7 @@ class MaintenanceWorker:
         async with async_session() as session:
             filas = (await session.execute(select(SystemSettings))).scalars().all()
             retencion = max((f.backup_retention_days for f in filas), default=14)
-            tope_gb = min((f.backups_max_gb for f in filas), default=5.0)
+            tope_gb, _ = _topes_de_disco(filas)
         await self._respaldar_postgres(retencion, tope_gb)
 
     async def _respaldar_postgres(self, retencion_dias: int, tope_gb: float) -> None:
