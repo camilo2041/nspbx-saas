@@ -213,6 +213,9 @@ def _append_local_extension_route(context: ET.Element, extensions: list, dominio
     # el que se encarga de contestarla en ese momento, no antes.
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "continue_on_fail=true"})
+    # Tono de "llamando" para quien marca (425 Hz, 1 s sí / 4 s no) como audio previo a
+    # la respuesta: sin él, la pata de quien llama timbra en silencio.
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": "ringback=%(1000,4000,425)"})
     # El dominio literal de la EMPRESA y no $${domain} (variable global):
     # con varias empresas, $${domain} no puede ser el de todas a la vez y
     # `user/<ext>@$${domain}` terminaría buscando el contacto en el dominio
@@ -409,6 +412,11 @@ def _append_outbound_route(
     nombres = " -> ".join(t.name for t in cadena)
     ET.SubElement(condition, "action", attrib={"application": "log", "data": f"Llamada saliente vía {nombres}"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
+    # Tono de "está llamando" (425 Hz, 1 s sí / 4 s no, el de Colombia) para quien
+    # marca: FreeSWITCH lo envía como audio previo a la respuesta (183) mientras el
+    # proveedor no mande el suyo. Sin esto, si el proveedor solo manda "180 Ringing"
+    # sin audio, quien llama oye silencio hasta que le contestan.
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": "ringback=%(1000,4000,425)"})
     # El gateway en sofia lleva el slug de la empresa como prefijo (ver
     # app/services/gateways.py) — sin él, la ruta apuntaría a un gateway
     # que no existe o al de otra empresa.
