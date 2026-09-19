@@ -94,7 +94,13 @@ def crear_token(user_id: int, rol: str, tenant_id: int | None = None) -> tuple[s
     """
     vence = datetime.now(timezone.utc) + timedelta(hours=HORAS_DE_SESION)
     token = jwt.encode(
-        {"sub": str(user_id), "rol": rol, "tid": tenant_id, "exp": vence},
+        {
+            "sub": str(user_id),
+            "rol": rol,
+            "tid": tenant_id,
+            "exp": vence,
+            "iat": int(datetime.now(timezone.utc).timestamp()),
+        },
         _clave(),
         algorithm=ALGORITMO,
     )

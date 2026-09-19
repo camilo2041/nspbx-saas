@@ -4,13 +4,13 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
 
-from app.core import permissions
+from app.core import limitador, permissions
 from app.core.auth import usuario_actual
 from app.core.database import get_admin_session, get_session
 from app.core.security import (
@@ -31,6 +31,11 @@ from app.schemas import (
     UserOut,
 )
 from app.services import esl, turn
+from app.services.sesiones import revocar_sesiones
+
+# Un refresh token recién rotado puede llegar dos veces por una carrera legítima
+# (doble toque, reintento de red); pasado este margen se considera robo.
+REUSO_TOLERANCIA_S = 30
 from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
@@ -87,7 +92,7 @@ async def _nuevo_refresh_token(
 
 
 @router.post("/login", response_model=SesionOut)
-async def login(payload: LoginRequest, session: AsyncSession = Depends(get_admin_session)):
+async def login(payload: LoginRequest, request: Request, session: AsyncSession = Depends(get_admin_session)):
     """Única puerta que consulta `users` sin estar atada a una empresa.
 
     Usa la sesión del DUEÑO, que no pasa por Row-Level Security, porque
@@ -100,8 +105,12 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_admin
     Es una excepción deliberada y acotada: busca por `username`, que es
     único en toda la plataforma, y no expone ningún dato de negocio.
     """
+    nombre = payload.username.strip().lower()[:100]
+    ip = limitador.ip_cliente(request)
+    # Antes de tocar la base o gastar un PBKDF2: quien ya está bloqueado no obtiene ni una pista.
+    limitador.exigir_libre(ip, nombre)
     usuario = (
-        (await session.execute(select(User).where(User.username == payload.username.strip().lower())))
+        (await session.execute(select(User).where(User.username == nombre)))
         .unique()
         .scalar_one_or_none()
     )
@@ -114,8 +123,10 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_admin
     correcta = await asyncio.to_thread(verificar_password, payload.password, hash_referencia)
 
     if not usuario or not correcta:
-        logger.info("Intento de acceso fallido para '%s'", payload.username)
+        limitador.registrar_fallo(ip, nombre)
+        logger.info("Intento de acceso fallido para '%s' desde %s", payload.username[:100], ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario o contraseña incorrectos")
+    limitador.registrar_exito(ip, nombre)
     if not usuario.enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Esta cuenta está desactivada")
     if usuario.tenant_id is not None:
@@ -171,10 +182,24 @@ async def refrescar(payload: RefreshRequest, session: AsyncSession = Depends(get
     """
     token_hash = hash_refresh_token(payload.refresh_token)
     fila = (
-        await session.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+        # FOR UPDATE: dos renovaciones simultáneas con el mismo token se
+        # serializan; la segunda ve el token ya revocado en vez de sacar otro
+        # par válido (antes las dos pasaban y el token viejo "se duplicaba").
+        await session.execute(
+            select(RefreshToken).where(RefreshToken.token_hash == token_hash).with_for_update()
+        )
     ).scalar_one_or_none()
 
     ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+    if fila and fila.revoked_at is not None and (ahora - fila.revoked_at).total_seconds() > REUSO_TOLERANCIA_S:
+        # Un token ya rotado que vuelve a aparecer pasada la tolerancia: alguien
+        # lo copió. No se sabe quién, así que se cierran todas las sesiones de
+        # esa cuenta; el dueño legítimo vuelve a entrar con su contraseña.
+        dueno = await session.get(User, fila.user_id)
+        if dueno:
+            await revocar_sesiones(session, dueno)
+            await session.commit()
+            logger.warning("Refresh token reutilizado: sesiones de '%s' cerradas", dueno.username)
     if not fila or fila.revoked_at is not None or fila.expires_at < ahora:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión inválida o vencida")
 
@@ -218,7 +243,7 @@ async def yo(
     return _sesion(usuario, await _modulos_de(session, usuario))
 
 
-@router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/password", response_model=SesionOut)
 async def cambiar_password(
     payload: CambiarPasswordRequest,
     usuario: User = Depends(usuario_actual),
@@ -234,7 +259,14 @@ async def cambiar_password(
 
     fresco = await session.get(User, usuario.id)
     fresco.password_hash = await asyncio.to_thread(hash_password, payload.password_nueva)
+    # Cambiar la contraseña cierra las sesiones de TODOS los demás dispositivos
+    # (quien la tuviera robada pierde el acceso). El dispositivo actual sigue:
+    # recibe una sesión nueva en la respuesta.
+    await revocar_sesiones(session, fresco)
     await session.commit()
+    await session.refresh(fresco)
+    nuevo_refresh = await _nuevo_refresh_token(session, fresco.id)
+    return _sesion(fresco, await _modulos_de(session, fresco), refresh_token=nuevo_refresh)
 
 
 @router.get("/mi-entorno")

@@ -12,6 +12,7 @@ Dos capas separadas a propósito:
    hacer quien ya entró. Ver app/core/permissions.py.
 """
 
+from datetime import timezone
 import hmac
 import logging
 
@@ -143,6 +144,13 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
     # cambio hace efecto ya, sin esperar a que venza su sesión.
     if not usuario or not usuario.enabled:
         raise _NO_AUTENTICADO
+    # Contraseña cambiada / sesiones cerradas: un JWT anterior a ese instante ya
+    # no vale, aunque no haya vencido. Sin `iat` (token de antes de este cambio)
+    # se trata como el más viejo posible.
+    if usuario.sesiones_desde is not None:
+        corte = int(usuario.sesiones_desde.replace(tzinfo=timezone.utc).timestamp())
+        if int(datos.get("iat") or 0) < corte:
+            raise _NO_AUTENTICADO
 
     # Desactivar una empresa tiene que cortar el acceso de TODOS sus usuarios
     # ya mismo: antes solo dejaba de servirse el dialplan y el panel seguía

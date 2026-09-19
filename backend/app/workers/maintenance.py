@@ -21,12 +21,12 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.engine import make_url
 
 from app.core.config import settings
 from app.core.database import async_session
-from app.models import SystemSettings
+from app.models import RefreshToken, SystemSettings
 from app.services import webcall
 
 logger = logging.getLogger(__name__)
@@ -117,9 +117,27 @@ class MaintenanceWorker:
             retencion_grabaciones = max(f.recordings_retention_days for f in filas)
             tope_backup_gb, tope_gb = _topes_de_disco(filas)
 
+        await self._purgar_refresh_tokens()
         if necesita_backup:
             await self._respaldar_postgres(retencion_backup, tope_backup_gb)
         await self._limpiar_grabaciones(retencion_grabaciones, tope_gb)
+
+    async def _purgar_refresh_tokens(self) -> None:
+        """Borra refresh tokens vencidos o revocados hace más de una semana.
+        Sin esto la tabla crece con cada renovación de cada teléfono, para siempre."""
+        try:
+            corte = datetime.utcnow() - timedelta(days=7)
+            async with async_session() as session:
+                r = await session.execute(
+                    delete(RefreshToken).where(
+                        (RefreshToken.expires_at < corte) | (RefreshToken.revoked_at < corte)
+                    )
+                )
+                await session.commit()
+                if r.rowcount:
+                    logger.info("Refresh tokens purgados: %d", r.rowcount)
+        except Exception:
+            logger.exception("Error purgando refresh tokens")
 
     async def respaldar_ahora(self) -> None:
         """Respaldo a demanda (botón "Respaldar ahora" en Ajustes) — se

@@ -12,6 +12,7 @@ from app.core import permissions
 from app.core.auth import requiere, usuario_actual
 from app.core.database import get_session
 from app.core.security import hash_password
+from app.services.sesiones import revocar_sesiones
 from app.models import Extension, User
 from app.schemas import UserCreate, UserOut, UserUpdate
 
@@ -134,10 +135,16 @@ async def actualizar(
     await _validar_extension(session, rol_final, ext_final)
     await _extension_libre(session, ext_final, excepto=user_id)
 
+    cerrar_sesiones = False
     if "password" in cambios:
         usuario.password_hash = await asyncio.to_thread(hash_password, cambios.pop("password"))
+        cerrar_sesiones = True  # restablecer la clave corta todas sus sesiones
+    if cambios.get("enabled") is False and usuario.enabled:
+        cerrar_sesiones = True
     for campo, valor in cambios.items():
         setattr(usuario, campo, valor)
+    if cerrar_sesiones:
+        await revocar_sesiones(session, usuario)
 
     try:
         await session.commit()

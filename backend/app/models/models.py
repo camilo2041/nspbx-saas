@@ -690,6 +690,9 @@ class User(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Para saber quién dejó de usar el sistema antes de borrarle la cuenta.
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Todo JWT emitido antes de este instante ya no sirve (cambio de contraseña,
+    # cuenta desactivada, refresh token reutilizado). Ver services/sesiones.py.
+    sesiones_desde: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     extension: Mapped["Extension | None"] = relationship(lazy="joined")
