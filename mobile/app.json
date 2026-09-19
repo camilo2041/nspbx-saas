@@ -30,7 +30,8 @@
         "RECORD_AUDIO",
         "MODIFY_AUDIO_SETTINGS",
         "POST_NOTIFICATIONS"
-      ]
+      ],
+      "allowBackup": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -46,8 +47,19 @@
           "microphonePermission": "$(PRODUCT_NAME) necesita el micrófono para hacer y recibir llamadas."
         }
       ],
-      "expo-secure-store",
-      "expo-router"
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "NSPBX usa Face ID para guardar y proteger tu contraseña."
+        }
+      ],
+      "expo-router",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "NSPBX usa Face ID para desbloquear la app."
+        }
+      ]
     ],
     "extra": {
       "router": {},

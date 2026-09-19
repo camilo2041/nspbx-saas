@@ -18,7 +18,12 @@ const CLAVES = {
 } as const;
 
 export async function guardar(clave: keyof typeof CLAVES, valor: string): Promise<void> {
-  await SecureStore.setItemAsync(CLAVES[clave], valor);
+  // THIS_DEVICE_ONLY: no viaja en copias de seguridad ni a otro dispositivo.
+  // AFTER_FIRST_UNLOCK (y no WHEN_UNLOCKED): una llamada que despierta la app
+  // con el teléfono bloqueado necesita leer el token para atenderse.
+  await SecureStore.setItemAsync(CLAVES[clave], valor, {
+    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+  });
 }
 
 export async function leer(clave: keyof typeof CLAVES): Promise<string | null> {
