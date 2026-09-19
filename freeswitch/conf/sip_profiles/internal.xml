@@ -143,9 +143,10 @@
     <!-- Sin esto FreeSWITCH usa "wan.auto" y elige el primer candidato del
          navegador, que suele ser un host privado (172.x/10.x) inalcanzable
          -> el DTLS se manda a una IP que no existe y el answer queda en
-         EARLY. Con wan_v4.auto descarta los privados y usa el srflx público
-         (o el relay de TURN si no hay ninguno público). -->
-    <param name="apply-candidate-acl" value="wan_v4.auto"/>
+         EARLY. Con public_only (ver acl.conf.xml) descarta los rangos
+         privados y usa el srflx público (o el relay de TURN si no hay
+         ninguno público). -->
+    <param name="apply-candidate-acl" value="public_only"/>
     <!--<param name="apply-register-acl" value="domains"/>-->
     <!--<param name="dtmf-type" value="info"/>-->
 

@@ -42,6 +42,21 @@
       <!-- <node type="allow" cidr="192.168.0.0/24"/> -->
     </list>
 
+    <!-- Solo direcciones públicas: se usa como apply-candidate-acl en el perfil
+         "internal" (ver sip_profiles/internal.xml). Con local-network-acl=never_local
+         FreeSWITCH considera TODO como WAN, así que wan_v4.auto NO descarta los
+         hosts privados (172.x/10.x) que ofrece el navegador y los elige para el
+         DTLS -> media inalcanzable. Este ACL niega los rangos privados y deja
+         pasar el resto, de modo que se use el candidato srflx (IP pública del
+         visitante) o el relay de TURN. -->
+    <list name="public_only" default="allow">
+      <node type="deny" cidr="10.0.0.0/8"/>
+      <node type="deny" cidr="172.0.0.0/8"/>
+      <node type="deny" cidr="192.168.0.0/16"/>
+      <node type="deny" cidr="169.254.0.0/16"/>
+      <node type="deny" cidr="127.0.0.0/8"/>
+    </list>
+
   </network-lists>
 </configuration>
 
