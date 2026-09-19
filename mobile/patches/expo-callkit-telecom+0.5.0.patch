@@ -1,0 +1,29 @@
+diff --git a/node_modules/expo-callkit-telecom/android/src/main/java/expo/modules/callkittelecom/managers/VoIPPushManager.kt b/node_modules/expo-callkit-telecom/android/src/main/java/expo/modules/callkittelecom/managers/VoIPPushManager.kt
+index b164d75..75c710b 100644
+--- a/node_modules/expo-callkit-telecom/android/src/main/java/expo/modules/callkittelecom/managers/VoIPPushManager.kt
++++ b/node_modules/expo-callkit-telecom/android/src/main/java/expo/modules/callkittelecom/managers/VoIPPushManager.kt
+@@ -24,12 +24,18 @@ object VoIPPushManager {
+ 
+     /** Registers for FCM push tokens by fetching the current token. */
+     fun register() {
+-        FirebaseMessaging.getInstance()
+-            .token
+-            .addOnSuccessListener { newToken -> updateToken(newToken) }
+-            .addOnFailureListener { error ->
+-                Log.e(TAG, "Failed to get FCM token: ${error.message}", error)
+-            }
++        // Sin google-services.json (Firebase sin configurar) getInstance() lanza
++        // IllegalStateException; como esto corre al cargar el módulo, tumbaba la app.
++        try {
++            FirebaseMessaging.getInstance()
++                .token
++                .addOnSuccessListener { newToken -> updateToken(newToken) }
++                .addOnFailureListener { error ->
++                    Log.e(TAG, "Failed to get FCM token: ${error.message}", error)
++                }
++        } catch (e: Exception) {
++            Log.e(TAG, "FCM no disponible (¿falta google-services.json?): ${e.message}", e)
++        }
+     }
+ 
+     /**

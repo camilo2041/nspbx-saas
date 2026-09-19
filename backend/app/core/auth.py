@@ -61,7 +61,10 @@ def verificar_secreto_fs(secret: str | None = None) -> None:
 #   - /api/webcall/*: las usa el navegador de un visitante anónimo en el
 #     sitio web de un cliente; se defienden con Turnstile + rate-limit +
 #     horario + tope global (ver app/api/webcall.py), no con sesión.
-_ABIERTAS = ("/api/auth/login",)
+# /refresh y /logout se autentican con el refresh token del cuerpo, no con
+# el JWT: si exigieran un JWT vigente, el refresh no serviría justo cuando
+# hace falta (JWT vencido).
+_ABIERTAS = ("/api/auth/login", "/api/auth/refresh", "/api/auth/logout")
 _ABIERTAS_PREFIJO = ("/api/appointments/agent/", "/api/webcall/")
 
 _NO_AUTENTICADO = HTTPException(

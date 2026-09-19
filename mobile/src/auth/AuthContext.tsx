@@ -73,7 +73,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Antes de cerrar sesión: si no se borra el token de push del
     // backend, alguien que cerró sesión seguiría recibiendo el push de
     // "te está entrando una llamada" — sin sesión para hacer nada con él.
-    const voip = getVoIPPushToken();
+    let voip: ReturnType<typeof getVoIPPushToken> = null;
+    try {
+      voip = getVoIPPushToken();
+    } catch {
+      // sin Firebase/push configurado: no hay token que borrar
+    }
     if (voip) {
       const platform = voip.type === "APNS_VOIP" ? "ios" : "android";
       await peticion(`/api/auth/dispositivo/${platform}`, { method: "DELETE" }).catch(() => {});

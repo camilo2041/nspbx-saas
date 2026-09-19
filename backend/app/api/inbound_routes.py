@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import validacion
 from app.core.database import get_session
 from app.models import InboundRoute
 from app.schemas import InboundRouteCreate, InboundRouteOut, InboundRouteUpdate
@@ -42,7 +43,20 @@ async def update_route(route_id: int, payload: InboundRouteUpdate, session: Asyn
     route = await session.get(InboundRoute, route_id)
     if not route:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    cambios = payload.model_dump(exclude_unset=True)
+    # Un PUT parcial puede cambiar solo el tipo o solo el valor: lo que
+    # importa es que el resultado FINAL sea coherente (ej. pasar a "cola"
+    # dejando un "bot_3" de voizbot).
+    tipo_final = cambios.get("destination_type", route.destination_type)
+    valor_final = cambios.get("destination_value", route.destination_value)
+    if tipo_final == "hangup":
+        cambios["destination_value"] = None
+    elif not validacion.destino_valido(tipo_final, valor_final):
+        raise HTTPException(
+            status_code=422,
+            detail="El destino no corresponde al tipo: extensión (dígitos), cola (número) o voizbot (bot_N)",
+        )
+    for field, value in cambios.items():
         setattr(route, field, value)
     await session.commit()
     await session.refresh(route)

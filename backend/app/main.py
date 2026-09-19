@@ -551,10 +551,18 @@ app = FastAPI(
     dependencies=[Depends(sesion_obligatoria)],
 )
 
+# Origen abierto pero SIN credenciales. La sesión viaja en la cabecera
+# Authorization (nunca en cookies), así que ninguna web ajena puede usar la
+# sesión de nadie por CORS; lo que sí necesita ser abierto es el widget de
+# llamada web (/api/webcall), que se incrusta en sitios de los clientes.
+# Antes era `allow_credentials=True` junto con "*": Starlette lo resuelve
+# devolviendo el origen que pida cada petición con credenciales permitidas,
+# que equivale a autorizar a cualquier sitio y es justo lo que hay que evitar
+# el día que alguien agregue una cookie.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

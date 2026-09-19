@@ -153,7 +153,12 @@ else
   if [ -z "$IP_PUB" ]; then
     read -rp "  No pude detectar la IP pública. Escribila a mano: " IP_PUB
   fi
-  sed "s|REEMPLAZAR_POR_IP_PUBLICA|${IP_PUB}|g" freeswitch/conf/vars.xml.example > freeswitch/conf/vars.xml
+  # default_password: FreeSWITCH la usa como contraseña de cualquier cuenta o
+  # módulo que no defina la suya. Su valor de fábrica ("ClueCon") es el
+  # primero que prueba cualquier escáner de Internet.
+  sed -e "s|REEMPLAZAR_POR_IP_PUBLICA|${IP_PUB}|g" \
+      -e "s|REEMPLAZAR_POR_DEFAULT_PASSWORD|$(gen 32)|g" \
+      freeswitch/conf/vars.xml.example > freeswitch/conf/vars.xml
   echo "  vars.xml generado con IP pública ${IP_PUB}."
 fi
 

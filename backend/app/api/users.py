@@ -68,7 +68,10 @@ async def roles():
             "requiere_extension": rol in permissions.REQUIERE_EXTENSION,
             "permisos": sorted(permissions.permisos_de(rol)),
         }
+        # "plataforma" no se ofrece: no es asignable desde un panel de empresa
+        # (ver _ROLES_PATRON en los esquemas).
         for rol in permissions.ROLES
+        if rol != permissions.PLATAFORMA
     ]
 
 

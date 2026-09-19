@@ -16,7 +16,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import verificar_secreto_fs
+from fastapi import HTTPException
+
+from app.core import validacion
+from app.core.firmas import firma_push_valida
 from app.core.database import get_admin_session
 from app.models import DeviceToken, Extension, Tenant
 from app.services import push
@@ -26,9 +29,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["freeswitch-push"])
 
 
-@router.post("/fs/push/{secret}/{slug}/{extension}")
+# GET y POST: el `curl` del dialplan (mod_curl) hace GET por omisión.
+@router.api_route("/fs/push/{firma}/{slug}/{extension}", methods=["GET", "POST"])
 async def avisar_llamada_entrante(
-    secret: str,
+    firma: str,
     slug: str,
     extension: str,
     caller_id_number: str = "",
@@ -40,7 +44,17 @@ async def avisar_llamada_entrante(
     por SIP en cualquier softphone ya registrado — nunca hay que dejar que
     un error de push tumbe o demore la llamada real más de lo necesario.
     """
-    verificar_secreto_fs(secret)
+    # La firma solo vale para ESTA empresa y ESTA extensión (core/firmas.py):
+    # quien la vea en un log no puede avisar llamadas de otras extensiones
+    # ni usarla en /fs/directory o /fs/cdr.
+    if not firma_push_valida(firma, slug, extension):
+        raise HTTPException(status_code=403, detail="No autorizado")
+    if not validacion.EXTENSION_RE.fullmatch(extension):
+        raise HTTPException(status_code=422, detail="Extensión inválida")
+    # Vienen del caller ID de quien llama (controlado por un tercero).
+    caller_id_number = caller_id_number[:40]
+    caller_id_name = caller_id_name[:100]
+    call_uuid = call_uuid[:64]
 
     tenant = (await session.execute(select(Tenant).where(Tenant.slug == slug))).scalar_one_or_none()
     if not tenant:

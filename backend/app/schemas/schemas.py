@@ -1,23 +1,81 @@
+import re
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core import validacion as val
 from app.core.clock import a_hora_local
 
 
+def _telefono(v: str) -> str:
+    # Se aceptan los separadores habituales al escribir un número a mano
+    # (espacios, guiones, paréntesis, puntos) y se quitan; lo que quede
+    # tiene que ser solo teclado telefónico. Un salto de línea o una
+    # comilla aquí terminaba dentro de un comando de FreeSWITCH.
+    limpio = re.sub(r"[ \-().]", "", v.strip())
+    if not val.TELEFONO_RE.fullmatch(limpio):
+        raise ValueError('Número inválido: solo dígitos, +, * y #')
+    return limpio
+
+
+def _extension(v: str) -> str:
+    if not val.EXTENSION_RE.fullmatch(v):
+        raise ValueError('La extensión solo puede tener dígitos (hasta 20)')
+    return v
+
+
+def _nombre(v: str) -> str:
+    if not val.NOMBRE_RE.fullmatch(v):
+        raise ValueError('Solo letras, números, punto, guion y guion bajo (sin espacios)')
+    return v
+
+
+def _host(v: str) -> str:
+    if not val.HOST_RE.fullmatch(v):
+        raise ValueError('Host o dominio inválido')
+    return v
+
+
+def _codecs(v: str) -> str:
+    if not val.CODECS_RE.fullmatch(v):
+        raise ValueError('Lista de códecs inválida (ej. PCMU,PCMA)')
+    return v
+
+
+def _nombre_visible(v: str) -> str:
+    if not val.NOMBRE_VISIBLE_RE.fullmatch(v):
+        raise ValueError('Nombre con caracteres no permitidos')
+    return v
+
+
+def _sin_control(v: str) -> str:
+    if re.search(r"[\x00-\x1f\x7f]", v):
+        raise ValueError('No se permiten caracteres de control')
+    return v
+
+
+Telefono = Annotated[str, Field(min_length=1, max_length=40), AfterValidator(_telefono)]
+Extension = Annotated[str, Field(min_length=1, max_length=20), AfterValidator(_extension)]
+NombreTecnico = Annotated[str, Field(min_length=1, max_length=100), AfterValidator(_nombre)]
+HostSip = Annotated[str, Field(min_length=1, max_length=255), AfterValidator(_host)]
+Codecs = Annotated[str, Field(min_length=1, max_length=255), AfterValidator(_codecs)]
+NombreVisible = Annotated[str, Field(min_length=1, max_length=100), AfterValidator(_nombre_visible)]
+TextoSinControl = Annotated[str, Field(max_length=255), AfterValidator(_sin_control)]
+
+
 class TrunkBase(BaseModel):
-    name: str
-    gateway_host: str
-    gateway_port: int = 5060
-    username: Optional[str] = None
-    password: Optional[str] = None
-    from_domain: Optional[str] = None
+    name: NombreTecnico
+    gateway_host: HostSip
+    gateway_port: int = Field(default=5060, ge=1, le=65535)
+    username: Optional[TextoSinControl] = None
+    password: Optional[TextoSinControl] = None
+    from_domain: Optional[HostSip] = None
     register_enabled: bool = True
-    caller_id_number: Optional[str] = None
+    caller_id_number: Optional[Telefono] = None
     transport: str = Field(default="udp", pattern="^(udp|tcp|tls)$")
     ping: Optional[int] = Field(default=None, ge=5, le=300)
-    codec_prefs: Optional[str] = None
+    codec_prefs: Optional[Codecs] = None
     enabled: bool = True
 
 
@@ -26,31 +84,47 @@ class TrunkCreate(TrunkBase):
 
 
 class TrunkUpdate(BaseModel):
-    name: Optional[str] = None
-    gateway_host: Optional[str] = None
-    gateway_port: Optional[int] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
-    from_domain: Optional[str] = None
+    name: Optional[NombreTecnico] = None
+    gateway_host: Optional[HostSip] = None
+    gateway_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    username: Optional[TextoSinControl] = None
+    password: Optional[TextoSinControl] = None
+    from_domain: Optional[HostSip] = None
     register_enabled: Optional[bool] = None
-    caller_id_number: Optional[str] = None
+    caller_id_number: Optional[Telefono] = None
     transport: Optional[str] = Field(default=None, pattern="^(udp|tcp|tls)$")
     ping: Optional[int] = Field(default=None, ge=5, le=300)
-    codec_prefs: Optional[str] = None
+    codec_prefs: Optional[Codecs] = None
     enabled: Optional[bool] = None
 
 
-class TrunkOut(TrunkBase):
+# La salida usa tipos simples a propósito: las reglas estrictas de TrunkBase
+# son para lo que ENTRA. Si la salida las heredara, una troncal guardada
+# antes de existir la validación (ej. con espacios en el nombre) haría
+# fallar el listado completo en vez de mostrarse para poder corregirla.
+class TrunkOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    name: str
+    gateway_host: str
+    gateway_port: int = 5060
+    username: Optional[str] = None
+    password: Optional[str] = None
+    from_domain: Optional[str] = None
+    register_enabled: bool = True
+    caller_id_number: Optional[str] = None
+    transport: str = "udp"
+    ping: Optional[int] = None
+    codec_prefs: Optional[str] = None
+    enabled: bool = True
     created_at: datetime
 
 
 class ExtensionBase(BaseModel):
-    number: str
-    password: str
-    caller_id_name: Optional[str] = None
+    number: Extension
+    password: TextoSinControl
+    caller_id_name: Optional[NombreVisible] = None
     voicemail: bool = True
     enabled: bool = True
 
@@ -60,17 +134,22 @@ class ExtensionCreate(ExtensionBase):
 
 
 class ExtensionUpdate(BaseModel):
-    number: Optional[str] = None
-    password: Optional[str] = None
-    caller_id_name: Optional[str] = None
+    number: Optional[Extension] = None
+    password: Optional[TextoSinControl] = None
+    caller_id_name: Optional[NombreVisible] = None
     voicemail: Optional[bool] = None
     enabled: Optional[bool] = None
 
 
-class ExtensionOut(ExtensionBase):
+class ExtensionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    number: str
+    password: str
+    caller_id_name: Optional[str] = None
+    voicemail: bool = True
+    enabled: bool = True
     created_at: datetime
 
 
@@ -93,7 +172,7 @@ class VoiceBotFlowUpdate(BaseModel):
 
 
 class CallRequest(BaseModel):
-    destination: str = Field(..., min_length=1, max_length=30)
+    destination: Telefono
     trunk_id: Optional[int] = None
 
 
@@ -302,7 +381,7 @@ class CallLogOut(BaseModel):
 
 
 class CampaignNumberRow(BaseModel):
-    phone: str = Field(..., min_length=1, max_length=30)
+    phone: Telefono
     # Variables para esta llamada puntual (ej. {"cliente": "...", "fecha":
     # "2026-08-21 09:00"}) — rellenan Campaign.message_template. Si trae
     # "cliente" y "fecha", además se usa para cargar/actualizar la cita en
@@ -315,17 +394,49 @@ class CampaignNumberIn(BaseModel):
 
 
 class CampaignNumberUpdate(BaseModel):
-    phone: str = Field(..., min_length=1, max_length=30)
+    phone: Telefono
     vars: Optional[dict[str, str]] = None
 
 
+def _did(v: str) -> str:
+    # El DID va dentro de una expresión regular del dialplan: solo se
+    # aceptan dígitos exactos (o el comodín "any"), nunca un patrón propio.
+    # Un ".*" o "5.*" con prioridad baja capturaba las llamadas de OTRAS
+    # empresas, porque el contexto de entrada `public` es compartido.
+    v = v.strip()
+    if v.lower() == "any":
+        return "any"
+    if not val.DID_RE.fullmatch(v):
+        raise ValueError('El número entrante debe tener solo dígitos, +, * o # (o "any")')
+    return v
+
+
+def _destino(v: str) -> str:
+    if not val.DESTINO_RE.fullmatch(v):
+        raise ValueError("Destino con caracteres no permitidos")
+    return v
+
+
+DidEntrante = Annotated[str, Field(min_length=1, max_length=100), AfterValidator(_did)]
+DestinoRuta = Annotated[str, Field(min_length=1, max_length=50), AfterValidator(_destino)]
+
+
 class InboundRouteBase(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    did_pattern: str = Field(..., min_length=1, max_length=100)
+    name: NombreVisible
+    did_pattern: DidEntrante
     destination_type: str = Field(..., pattern="^(extension|queue|voicebot|hangup)$")
-    destination_value: Optional[str] = None
+    destination_value: Optional[DestinoRuta] = None
     priority: int = Field(default=10, ge=0, le=1000)
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def _destino_coherente(self):
+        if not val.destino_valido(self.destination_type, self.destination_value):
+            raise ValueError(
+                "El destino no corresponde al tipo: extensión (dígitos), cola (número) "
+                "o voizbot (bot_N)"
+            )
+        return self
 
 
 class InboundRouteCreate(InboundRouteBase):
@@ -333,18 +444,26 @@ class InboundRouteCreate(InboundRouteBase):
 
 
 class InboundRouteUpdate(BaseModel):
-    name: Optional[str] = None
-    did_pattern: Optional[str] = None
+    name: Optional[NombreVisible] = None
+    did_pattern: Optional[DidEntrante] = None
     destination_type: Optional[str] = Field(default=None, pattern="^(extension|queue|voicebot|hangup)$")
-    destination_value: Optional[str] = None
+    destination_value: Optional[DestinoRuta] = None
     priority: Optional[int] = Field(default=None, ge=0, le=1000)
     enabled: Optional[bool] = None
 
 
-class InboundRouteOut(InboundRouteBase):
+class InboundRouteOut(BaseModel):
+    # Sin las reglas estrictas de la entrada: una ruta guardada antes de que
+    # existieran no debe romper el listado (ver TrunkOut).
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    name: str
+    did_pattern: str
+    destination_type: str
+    destination_value: Optional[str] = None
+    priority: int = 10
+    enabled: bool = True
     created_at: datetime
 
 
@@ -413,21 +532,21 @@ class AgentRescheduleRequest(BaseModel):
 
 
 class QueueBase(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    extension: str = Field(..., min_length=1, max_length=30)
+    name: NombreTecnico
+    extension: Telefono
     strategy: str = Field(
         default="ring-all",
         pattern="^(ring-all|round-robin|top-down|longest-idle-agent|agent-with-least-talk-time|agent-with-fewest-calls|sequentially-by-agent-order|random)$",
     )
     moh_sound: str = "$${hold_music}"
-    agents: list[str] = Field(default_factory=list)
+    agents: list[Extension] = Field(default_factory=list)
     max_wait_time: int = Field(default=0, ge=0)
     max_wait_time_with_no_agent: int = Field(default=0, ge=0)
     agent_ring_timeout: int = Field(default=20, ge=3, le=120)
     max_no_answer: int = Field(default=3, ge=0, le=20)
     wrap_up_time: int = Field(default=10, ge=0, le=600)
     record: bool = False
-    failover_extension: Optional[str] = None
+    failover_extension: Optional[Telefono] = None
     announce_position: bool = False
     enabled: bool = True
 
@@ -437,18 +556,18 @@ class QueueCreate(QueueBase):
 
 
 class QueueUpdate(BaseModel):
-    name: Optional[str] = None
-    extension: Optional[str] = None
+    name: Optional[NombreTecnico] = None
+    extension: Optional[Telefono] = None
     strategy: Optional[str] = Field(default=None, pattern="^(ring-all|round-robin|top-down|longest-idle-agent|agent-with-least-talk-time|agent-with-fewest-calls|sequentially-by-agent-order|random)$")
     moh_sound: Optional[str] = None
-    agents: Optional[list[str]] = None
+    agents: Optional[list[Extension]] = None
     max_wait_time: Optional[int] = Field(default=None, ge=0)
     max_wait_time_with_no_agent: Optional[int] = Field(default=None, ge=0)
     agent_ring_timeout: Optional[int] = Field(default=None, ge=3, le=120)
     max_no_answer: Optional[int] = Field(default=None, ge=0, le=20)
     wrap_up_time: Optional[int] = Field(default=None, ge=0, le=600)
     record: Optional[bool] = None
-    failover_extension: Optional[str] = None
+    failover_extension: Optional[Telefono] = None
     announce_position: Optional[bool] = None
     enabled: Optional[bool] = None
 
@@ -653,7 +772,11 @@ class PaymentPromiseOut(BaseModel):
 
 # ---------- Usuarios y sesión ----------
 
-_ROLES_PATRON = "^(admin|supervisor|coordinador|asesor|plataforma)$"
+# "plataforma" NO está: es el rol que administra todas las empresas y lo
+# crea el arranque del sistema (main.py:_asegurar_plataforma), nunca un
+# formulario. Si un admin de empresa pudiera asignárselo, dejaría de estar
+# limitado a su empresa.
+_ROLES_PATRON = "^(admin|supervisor|coordinador|asesor)$"
 
 
 class UserBase(BaseModel):

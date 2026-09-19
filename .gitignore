@@ -29,6 +29,14 @@ freeswitch/conf/sip_profiles/external/gw_*.xml
 # Certificado y clave privada del WebSocket seguro (softphone).
 freeswitch/certs/
 
+# Claves privadas que FreeSWITCH se autogenera en su carpeta de conf
+# (wss.pem, dtls-srtp.pem, agent.pem...). Estuvieron versionadas por
+# accidente: cualquiera con acceso al repo tenía la clave. Si faltan,
+# FreeSWITCH crea unas nuevas al arrancar.
+freeswitch/conf/tls/
+*.pem
+*.key
+
 # --- DATOS: privados y pesados --------------------------------------
 # Grabaciones de llamadas reales de pacientes (dato de salud).
 freeswitch/recordings/

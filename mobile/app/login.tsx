@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +13,7 @@ import {
 } from "react-native";
 
 import { useAuth } from "@/src/auth/AuthContext";
+import { colores } from "@/src/tema";
 
 export default function LoginScreen() {
   const { usuario, login } = useAuth();
@@ -41,67 +43,81 @@ export default function LoginScreen() {
       style={styles.contenedor}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <Text style={styles.titulo}>NSPBX</Text>
-      <Text style={styles.subtitulo}>Iniciá sesión con tu extensión</Text>
+      <ScrollView contentContainerStyle={styles.contenido} keyboardShouldPersistTaps="handled">
+        <Text style={styles.titulo}>NSPBX</Text>
+        <Text style={styles.subtitulo}>Iniciá sesión con tu extensión</Text>
 
-      <TextInput
-        style={styles.input}
-        placeholder="URL de tu empresa (ej. miempresa.pbx.midominio.com)"
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="url"
-        value={urlEmpresa}
-        onChangeText={setUrlEmpresa}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Usuario"
-        autoCapitalize="none"
-        autoCorrect={false}
-        value={username}
-        onChangeText={setUsername}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Contraseña"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
+        <Text style={styles.etiqueta}>Dirección de tu empresa</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="miempresa.pbx.midominio.com"
+          placeholderTextColor={colores.placeholder}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          value={urlEmpresa}
+          onChangeText={setUrlEmpresa}
+        />
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+        <Text style={styles.etiqueta}>Usuario</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="tu usuario"
+          placeholderTextColor={colores.placeholder}
+          autoCapitalize="none"
+          autoCorrect={false}
+          value={username}
+          onChangeText={setUsername}
+        />
 
-      <Pressable
-        style={[styles.boton, cargando && styles.botonDeshabilitado]}
-        onPress={entrar}
-        disabled={cargando || !urlEmpresa || !username || !password}
-      >
-        {cargando ? <ActivityIndicator color="#fff" /> : <Text style={styles.botonTexto}>Entrar</Text>}
-      </Pressable>
+        <Text style={styles.etiqueta}>Contraseña</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="tu contraseña"
+          placeholderTextColor={colores.placeholder}
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+        />
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        <Pressable
+          style={[styles.boton, (cargando || !urlEmpresa || !username || !password) && styles.botonDeshabilitado]}
+          onPress={entrar}
+          disabled={cargando || !urlEmpresa || !username || !password}
+        >
+          {cargando ? <ActivityIndicator color="#fff" /> : <Text style={styles.botonTexto}>Entrar</Text>}
+        </Pressable>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  contenedor: { flex: 1, backgroundColor: "#fff", padding: 24, justifyContent: "center", gap: 12 },
-  titulo: { fontSize: 32, fontWeight: "700", textAlign: "center" },
-  subtitulo: { fontSize: 15, color: "#666", textAlign: "center", marginBottom: 12 },
+  contenedor: { flex: 1, backgroundColor: colores.fondo },
+  contenido: { flexGrow: 1, padding: 24, justifyContent: "center", gap: 6 },
+  titulo: { fontSize: 32, fontWeight: "700", textAlign: "center", color: colores.texto },
+  subtitulo: { fontSize: 15, color: colores.textoSecundario, textAlign: "center", marginBottom: 16 },
+  etiqueta: { fontSize: 14, fontWeight: "600", color: colores.texto, marginTop: 10 },
   input: {
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: colores.borde,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
+    color: colores.texto,
+    backgroundColor: colores.fondo,
   },
   boton: {
-    backgroundColor: "#1c6dd0",
+    backgroundColor: colores.primario,
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: "center",
-    marginTop: 8,
+    marginTop: 18,
   },
-  botonDeshabilitado: { opacity: 0.6 },
+  botonDeshabilitado: { opacity: 0.5 },
   botonTexto: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  error: { color: "#c0392b", textAlign: "center" },
+  error: { color: colores.error, textAlign: "center", marginTop: 8 },
 });

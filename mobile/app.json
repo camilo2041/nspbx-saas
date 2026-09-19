@@ -11,7 +11,10 @@
       "supportsTablet": false,
       "bundleIdentifier": "co.com.gsco.nspbx",
       "infoPlist": {
-        "UIBackgroundModes": ["voip", "audio"]
+        "UIBackgroundModes": [
+          "voip",
+          "audio"
+        ]
       }
     },
     "android": {
@@ -23,7 +26,11 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS", "POST_NOTIFICATIONS"]
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -41,6 +48,12 @@
       ],
       "expo-secure-store",
       "expo-router"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8f5d3e8f-2b9b-4bcc-be96-00d839369b42"
+      }
+    }
   }
 }

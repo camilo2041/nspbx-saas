@@ -3,6 +3,7 @@ import logging
 import re
 from urllib.parse import quote
 
+from app.core import validacion
 from app.core.runtime_settings import runtime_settings
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,14 @@ class ESLClient:
         self.connected = False
 
     async def _send(self, data: str):
+        # Un salto de línea dentro de un comando ES otro comando: el
+        # protocolo ESL termina cada uno con una línea en blanco, así que
+        # "originate ...<salto><salto>api system <cmd>" ejecuta <cmd> en el
+        # servidor de FreeSWITCH. Ningún comando legítimo lleva saltos, de
+        # modo que se rechazan todos acá, sin importar quién armó el texto:
+        # es la barrera final si alguna validación de entrada falla.
+        if "\n" in data or "\r" in data or "\x00" in data:
+            raise ValueError("Comando ESL con caracteres de control")
         self._writer.write(data.encode() + b"\n\n")
         await self._writer.drain()
 
@@ -297,6 +306,7 @@ async def internal_profile_ip() -> str | None:
 
 async def gateway_status(name: str) -> dict:
     """Consulta el estado real de una troncal (gateway) vía ESL."""
+    validacion.exigir(validacion.NOMBRE_RE, name, "Nombre de troncal")
     body = await api(f"sofia status gateway {name}")
     out: dict = {"state": None, "status": None, "ping_ms": None, "contact_ip": None}
     if "Invalid Gateway" in body or not body.strip():
@@ -328,6 +338,7 @@ async def dnd_status(extension: str) -> bool:
     (ver app/services/config_generator.py:_append_dnd_hook), así que esto
     siempre refleja el estado real, nunca uno guardado aparte que se
     pueda desincronizar."""
+    validacion.exigir(validacion.EXTENSION_RE, extension, "Extensión")
     body = await api(f"db select/dnd/{extension}")
     return body.strip() == "on"
 
@@ -336,6 +347,7 @@ async def dnd_set(extension: str, enabled: bool) -> None:
     """Prende o apaga el DND de una extensión. Es lo mismo que hace
     marcar *78/*79 desde un teléfono — un botón en la app es solo otra
     forma de llegar al mismo estado."""
+    validacion.exigir(validacion.EXTENSION_RE, extension, "Extensión")
     if enabled:
         await api(f"db insert/dnd/{extension}/on")
     else:
@@ -402,6 +414,16 @@ async def originate(
     ver docs/arquitectura-multitenant.md); quien origina para una empresa
     tiene que pasarlo, o el "XML default" de antes quedaba apuntando a un
     contexto que ya no existe."""
+    # Todo lo que se interpola en el comando se valida acá y no solo en el
+    # esquema de entrada: este es el punto donde un valor malicioso se
+    # vuelve un comando de FreeSWITCH (ver también ESLClient._send).
+    validacion.exigir(validacion.TELEFONO_RE, dest, "Destino")
+    if exten:
+        validacion.exigir(validacion.NOMBRE_RE, exten, "Extensión de destino")
+    validacion.exigir(validacion.NOMBRE_RE, contexto, "Contexto")
+    caller_id = validacion.limpiar_nombre_visible(caller_id)
+    if caller_id_number:
+        validacion.exigir(validacion.TELEFONO_RE, caller_id_number, "Caller ID")
     action = exten if exten else "&park()"
     endpoint_str = "|".join(endpoint) if isinstance(endpoint, list) else f"{endpoint}/{dest}"
     # safe="": por defecto quote() deja pasar "/" sin escapar (piensa que
@@ -441,7 +463,13 @@ async def originate_bridge(
     Uso típico (click-to-call): suena la extensión del agente y, cuando
     contesta, se conecta automáticamente con el destino (interno o vía troncal).
     """
-    safe_caller_id = caller_id.replace("'", "")
+    safe_caller_id = validacion.limpiar_nombre_visible(caller_id)
+    # bridge_target y from_endpoint van sin comillas dentro del comando:
+    # se restringen a lo que un destino real puede contener.
+    if not re.fullmatch(r"[A-Za-z0-9_.@:/+*#-]{1,255}", bridge_target or ""):
+        raise ValueError("Destino de puente con formato no permitido")
+    if not re.fullmatch(r"[A-Za-z0-9_.@:/+*#-]{1,255}", from_endpoint or ""):
+        raise ValueError("Origen con formato no permitido")
     cmd = (
         f"originate {{origination_caller_id_name='{safe_caller_id}',"
         f"origination_caller_id_number='{safe_caller_id}',"

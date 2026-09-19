@@ -12,13 +12,16 @@ central.
 
 import asyncio
 import logging
+import re
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import permissions
+from app.core.config import settings
 from app.core.database import async_session, fijar_tenant, get_session
+from app.core.runtime_settings import runtime_settings
 from app.core.security import leer_token
 from app.models import User
 from app.services import esl
@@ -26,6 +29,25 @@ from app.services import esl
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_FIRMAS_PUSH = re.compile(r"/fs/push/[0-9a-f]{64}/")
+
+
+def _ocultar_secretos(linea: str) -> str:
+    """Tapa las claves antes de mandar el log al navegador.
+
+    El log de FreeSWITCH es global (todas las empresas) y trae las URL que
+    llama el dialplan y las consultas de mod_xml_curl, que incluyen
+    FS_XML_SECRET. Con ese secreto /fs/directory devuelve la contraseña SIP
+    de TODAS las empresas: un administrador de una sola empresa podía leerlo
+    aquí y pasar a controlar las demás. Se ocultan también la clave de ESL y
+    las firmas de push (que solo valen para una extensión, pero no hay por
+    qué mostrarlas).
+    """
+    for secreto in (settings.fs_xml_secret, settings.fs_esl_password, runtime_settings.fs_esl_password):
+        if secreto and len(secreto) >= 6:
+            linea = linea.replace(secreto, "***")
+    return _FIRMAS_PUSH.sub("/fs/push/***/", linea)
 
 
 async def _usuario_del_token(token: str | None, session: AsyncSession) -> User | None:
@@ -73,7 +95,7 @@ async def logs_websocket(websocket: WebSocket, session: AsyncSession = Depends(g
     await websocket.accept()
     try:
         async for linea in esl.stream_logs(level):
-            await websocket.send_text(linea)
+            await websocket.send_text(_ocultar_secretos(linea))
     except WebSocketDisconnect:
         pass
     except (OSError, ConnectionError, asyncio.TimeoutError) as exc:

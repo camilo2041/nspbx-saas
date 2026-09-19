@@ -151,3 +151,23 @@ se guardan en la tabla `system_settings` y se aplican de inmediato al cliente ES
 - Detección real de estados de llamada (answered/busy/noanswer) vía eventos ESL
 - Motor de voizbot IA (Whisper + LLM + TTS) en `workers/`
 - Autenticación / gestión de usuarios del panel de administración
+
+## Seguridad de la instalación
+
+- **Sin contraseñas de fábrica.** `POSTGRES_PASSWORD` y `POSTGRES_APP_PASSWORD` son
+  obligatorias: si faltan en `.env`, `docker compose up` se niega a arrancar.
+  `bash scripts/setup.sh` genera todos los secretos (incluida la contraseña por
+  defecto de FreeSWITCH) y los deja sincronizados.
+- **Puertos.** Solo salen a Internet SIP (5060 TCP/UDP), 15080/UDP y el rango RTP.
+  El SIP sobre WebSocket (5066/7443) queda en `127.0.0.1`: en producción el
+  softphone entra por Traefik (`/sip`) a través de la red interna de Docker.
+  El puerto de control ESL (8021) nunca se publica.
+- **Fuerza bruta SIP.** FreeSWITCH registra los intentos fallidos
+  (`log-auth-failures`); para bloquear las IPs hay que instalar fail2ban en el
+  servidor con los archivos de `deploy/fail2ban/` (instrucciones dentro del jail).
+- **Claves TLS de FreeSWITCH.** `freeswitch/conf/tls/` no se versiona: FreeSWITCH
+  las regenera solo. Para rotarlas: borra `wss.pem` y `dtls-srtp.pem` de esa
+  carpeta y ejecuta `docker compose restart freeswitch`.
+- **Rotar secretos** (`FS_XML_SECRET`, `FS_ESL_PASSWORD`): cámbialos en `.env` y
+  vuelve a correr `bash scripts/setup.sh`, que reescribe los XML de FreeSWITCH
+  para que coincidan; después `docker compose up -d --build`.

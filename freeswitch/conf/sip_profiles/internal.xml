@@ -81,7 +81,7 @@
     <param name="watchdog-step-timeout" value="30000"/>
     <param name="watchdog-event-timeout" value="30000"/>
 
-    <param name="log-auth-failures" value="false"/>
+    <param name="log-auth-failures" value="true"/>
     <param name="forward-unsolicited-mwi-notify" value="false"/>
 
     <param name="context" value="public"/>
@@ -140,6 +140,12 @@
          "red local" y nunca anunciaría ext-rtp-ip en el SDP/ICE -> sin audio.
          Forzamos never_local para que TODO se trate como externo. -->
     <param name="local-network-acl" value="never_local"/>
+    <!-- Sin esto FreeSWITCH usa "wan.auto" y elige el primer candidato del
+         navegador, que suele ser un host privado (172.x/10.x) inalcanzable
+         -> el DTLS se manda a una IP que no existe y el answer queda en
+         EARLY. Con wan_v4.auto descarta los privados y usa el srflx público
+         (o el relay de TURN si no hay ninguno público). -->
+    <param name="apply-candidate-acl" value="wan_v4.auto"/>
     <!--<param name="apply-register-acl" value="domains"/>-->
     <!--<param name="dtmf-type" value="info"/>-->
 

@@ -4,6 +4,7 @@ import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { peticion } from "@/src/api/client";
 import type { AiUsageSummary, CallLogOut, CallStats } from "@/src/api/types";
 import { useAuth } from "@/src/auth/AuthContext";
+import { colores } from "@/src/tema";
 
 function Tarjeta({ etiqueta, valor }: { etiqueta: string; valor: string | number }) {
   return (
@@ -113,16 +114,16 @@ export default function MetricsScreen() {
 }
 
 const styles = StyleSheet.create({
-  lista: { flex: 1, backgroundColor: "#fff" },
+  lista: { flex: 1, backgroundColor: colores.fondo },
   contenido: { padding: 16, gap: 8 },
   centro: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  info: { textAlign: "center", color: "#666", fontSize: 15 },
-  seccion: { fontSize: 17, fontWeight: "700", marginTop: 16, marginBottom: 8 },
+  info: { textAlign: "center", color: colores.textoSecundario, fontSize: 15 },
+  seccion: { fontSize: 17, fontWeight: "700", marginTop: 16, marginBottom: 8, color: colores.texto },
   fila: { flexDirection: "row", gap: 8, marginBottom: 8 },
   tarjeta: { flex: 1, backgroundColor: "#f5f5f7", borderRadius: 10, padding: 12, alignItems: "center" },
-  tarjetaValor: { fontSize: 20, fontWeight: "700" },
-  tarjetaEtiqueta: { fontSize: 12, color: "#666", textAlign: "center" },
+  tarjetaValor: { fontSize: 20, fontWeight: "700", color: colores.texto },
+  tarjetaEtiqueta: { fontSize: 12, color: colores.textoSecundario, textAlign: "center" },
   llamada: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#eee" },
-  llamadaNumero: { fontSize: 15, fontWeight: "600" },
-  llamadaDetalle: { fontSize: 13, color: "#666" },
+  llamadaNumero: { fontSize: 15, fontWeight: "600", color: colores.texto },
+  llamadaDetalle: { fontSize: 13, color: colores.textoSecundario },
 });

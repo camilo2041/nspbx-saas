@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-nspbx}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nspbx_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}
       POSTGRES_DB: ${POSTGRES_DB:-nspbx}
     volumes:
       - pg_data:/var/lib/postgresql/data
@@ -66,8 +66,11 @@ services:
       # Para inspeccionarlo a mano en desarrollo: `docker exec -it
       # nspbx_freeswitch fs_cli` (corre DENTRO del contenedor, no necesita
       # el puerto publicado).
-      - "5066:5066"       # SIP sobre WebSocket sin cifrar (queda de respaldo)
-      - "7443:7443"       # SIP sobre WebSocket CIFRADO (wss://) — softphone del navegador
+      # Solo loopback: publicados en 0.0.0.0 daban acceso directo desde Internet al
+      # registro SIP (fuerza bruta de contraseñas) sin pasar por el proxy. En
+      # producción el softphone entra por Traefik (/sip -> nspbx_freeswitch:7443).
+      - "127.0.0.1:5066:5066"   # SIP sobre WebSocket sin cifrar (solo desarrollo local)
+      - "127.0.0.1:7443:7443"   # SIP sobre WebSocket CIFRADO (wss://); Traefik lo alcanza por la red interna
       - "16384-16584:16384-16584/udp"  # RTP (audio WebRTC del softphone)
     labels:
       - "traefik.enable=true"
@@ -118,15 +121,17 @@ services:
     build: ./backend
     image: nspbx-backend:latest
     container_name: nspbx_backend
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:-nspbx_secret}@postgres:5432/${POSTGRES_DB:-nspbx}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}@postgres:5432/${POSTGRES_DB:-nspbx}
       # Rol restringido con el que se atiende la operación normal. Es lo
       # que hace que el aislamiento por empresa (RLS) se aplique de
       # verdad: el usuario de arriba es dueño de las tablas y se saltea
       # las políticas. Sin esta variable el backend arranca igual, avisa
       # por log y NO aísla nada — ver app/core/database.py.
-      DATABASE_URL_APP: postgresql+asyncpg://nspbx_app:${POSTGRES_APP_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-nspbx}
+      DATABASE_URL_APP: postgresql+asyncpg://nspbx_app:${POSTGRES_APP_PASSWORD:?Definí POSTGRES_APP_PASSWORD en .env porque sin él el aislamiento por empresa queda apagado}@postgres:5432/${POSTGRES_DB:-nspbx}
       FS_ESL_HOST: freeswitch
       FS_ESL_PORT: "8021"
       # Sin valor de respaldo a propósito: `:?` hace que falle el arranque
@@ -233,16 +238,18 @@ services:
     build: ./backend
     image: nspbx-backend:latest
     container_name: nspbx_voicebot
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     command: ["uvicorn", "app.voicebot_server:app", "--host", "0.0.0.0", "--port", "8090"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:-nspbx_secret}@postgres:5432/${POSTGRES_DB:-nspbx}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}@postgres:5432/${POSTGRES_DB:-nspbx}
       # Rol restringido con el que se atiende la operación normal. Es lo
       # que hace que el aislamiento por empresa (RLS) se aplique de
       # verdad: el usuario de arriba es dueño de las tablas y se saltea
       # las políticas. Sin esta variable el backend arranca igual, avisa
       # por log y NO aísla nada — ver app/core/database.py.
-      DATABASE_URL_APP: postgresql+asyncpg://nspbx_app:${POSTGRES_APP_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-nspbx}
+      DATABASE_URL_APP: postgresql+asyncpg://nspbx_app:${POSTGRES_APP_PASSWORD:?Definí POSTGRES_APP_PASSWORD en .env porque sin él el aislamiento por empresa queda apagado}@postgres:5432/${POSTGRES_DB:-nspbx}
       FS_SOUNDS_DIR: /freeswitch-sounds
     volumes:
       # Solo el de sonidos: acá se escribe el audio de "tecleo" y las
@@ -271,6 +278,8 @@ services:
   frontend:
     build: ./frontend
     container_name: nspbx_frontend
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     ports:
       # Solo desde este servidor. Con Traefik delante ya no hace falta
@@ -319,6 +328,8 @@ services:
   coturn:
     image: coturn/coturn:4.6-alpine
     container_name: nspbx_coturn
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     # No arranca con un `docker compose up` normal: hay que pedirlo con
     # `docker compose --profile turn up -d`. Sin esto quedaba levantado
@@ -348,6 +359,19 @@ services:
       # nadie use el relay para alcanzar servicios internos del servidor.
       - --no-multicast-peers
       - --denied-peer-ip=127.0.0.1
+      # Redes privadas y link-local (incluye 169.254.169.254, el servicio de
+      # metadatos de la nube, que entrega credenciales). NO se veta 172.16/12
+      # porque es donde vive FreeSWITCH en la red de Docker, el destino real del
+      # relay. Cerrar también ese rango exige fijar la subred de nspbx_net y
+      # permitir solo la IP de FreeSWITCH (--allowed-peer-ip).
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      # Tope de asignaciones por usuario y en total: sin esto, una credencial
+      # TURN válida puede agotar los puertos del relay.
+      - --user-quota=12
+      - --total-quota=1000
       - --no-cli
       - --no-tlsv1
       - --no-tlsv1_1

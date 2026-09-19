@@ -1,9 +1,15 @@
 import json
+import logging
+import re
 import xml.etree.ElementTree as ET
 
+from app.core import validacion
 from app.core.config import settings
+from app.core.firmas import firma_push
 from app.services import voice_prompts
 from app.services.flow_engine import build_voicebot_flow_routes
+
+logger = logging.getLogger(__name__)
 
 
 def _e(tag: str, text: str | None = None, attrib: dict | None = None) -> ET.Element:
@@ -160,23 +166,33 @@ def _append_mobile_push_hook(context: ET.Element, extensions: list, push_numbers
     ver _append_inbound_routes, que transfiere acá con el dialplan-hunt
     completo, por eso alcanza con este único hook por contexto).
 
-    Sin `FS_XML_SECRET` configurado no se agrega nada: el mismo secreto
-    protege este webhook (ver core.auth.verificar_secreto_fs), así que sin
-    él el aviso no tendría con qué autenticarse.
+    La URL NO lleva `FS_XML_SECRET` sino una firma HMAC atada a esta
+    extensión concreta (ver core/firmas.py): el XML del dialplan y los logs
+    de FreeSWITCH —que un admin de empresa puede ver desde la consola web—
+    dejan de contener la llave maestra. Por eso hay una regla por extensión
+    en vez de una sola con todos los números: cada una firma la suya.
+
+    Los datos de quien llama van con url_encode: un nombre con `&`, `#` o
+    espacios podía inyectar parámetros propios (`call_uuid`, `caller_id_number`)
+    o argumentos de mod_curl.
     """
     numbers = sorted(e.number for e in extensions if e.number in push_numbers)
     if not numbers or not settings.fs_xml_secret:
         return
-    patron = "|".join(numbers)
-    extension = ET.SubElement(context, "extension", attrib={"name": "nspbx_mobile_push", "continue": "true"})
-    condition = ET.SubElement(
-        extension, "condition", attrib={"field": "destination_number", "expression": f"^({patron})$"}
-    )
-    url = (
-        f"http://backend:8000/fs/push/{settings.fs_xml_secret}/{slug}/${{destination_number}}"
-        "?caller_id_number=${caller_id_number}&caller_id_name=${caller_id_name}&call_uuid=${uuid} get"
-    )
-    ET.SubElement(condition, "action", attrib={"application": "curl", "data": url})
+    for numero in numbers:
+        extension = ET.SubElement(
+            context, "extension", attrib={"name": f"nspbx_mobile_push_{numero}", "continue": "true"}
+        )
+        condition = ET.SubElement(
+            extension, "condition", attrib={"field": "destination_number", "expression": f"^{re.escape(numero)}$"}
+        )
+        url = (
+            f"http://backend:8000/fs/push/{firma_push(slug, numero)}/{slug}/{numero}"
+            "?caller_id_number=${url_encode(${caller_id_number})}"
+            "&caller_id_name=${url_encode(${caller_id_name})}"
+            "&call_uuid=${uuid} get"
+        )
+        ET.SubElement(condition, "action", attrib={"application": "curl", "data": url})
 
 
 def _append_local_extension_route(context: ET.Element, extensions: list, dominio: str) -> None:
@@ -226,7 +242,10 @@ def _parse_bot_menu(config_json: str | None) -> dict[str, str]:
     for digit, target in menu.items():
         digit = str(digit).strip()
         target = str(target).strip()
-        if len(digit) == 1 and digit in "0123456789*#" and target:
+        # El destino va en `transfer "<destino> XML <contexto>"`: con un
+        # espacio, "1000 XML ctx_otra" mandaba la llamada al contexto de otra
+        # empresa. Solo un token sin espacios.
+        if len(digit) == 1 and digit in "0123456789*#" and validacion.DESTINO_RE.fullmatch(target):
             out[digit] = target
     return out
 
@@ -401,7 +420,7 @@ def _append_queue_routes(context: ET.Element, queues: list, dominio: str) -> Non
         ET.SubElement(condition, "action", attrib={"application": "answer"})
         ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=false"})
         ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})
-        if queue.failover_extension:
+        if queue.failover_extension and validacion.DESTINO_RE.fullmatch(queue.failover_extension):
             ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML {context.get('name')}"})
         else:
             ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
@@ -432,10 +451,28 @@ def _append_inbound_routes(
     tag_cond = ET.SubElement(tag_ext, "condition")
     ET.SubElement(tag_cond, "action", attrib={"application": "set", "data": "outside_call=true"})
 
-    ordered = sorted((r for r in routes if r.enabled), key=lambda r: r.priority)
+    def _es_comodin(r) -> bool:
+        return r.did_pattern.strip().lower() in ("any", "*", "")
+
+    # Los comodines van SIEMPRE al final, sin importar su prioridad. Este
+    # contexto es compartido por todas las empresas: un comodín con
+    # prioridad 0 quedaba antes de los DID exactos de las demás y les
+    # robaba TODAS las llamadas entrantes, sin ningún error visible.
+    ordered = sorted((r for r in routes if r.enabled), key=lambda r: (_es_comodin(r), r.priority, r.id))
     for route in ordered:
         pattern = route.did_pattern.strip()
-        expression = ".*" if pattern.lower() in ("any", "*", "") else f"^{pattern}$"
+        # re.escape: el DID es un número exacto, no una expresión. Con datos
+        # guardados antes de validarlos, un "5.*" seguía funcionando como
+        # regex y capturaba números ajenos.
+        expression = ".*" if _es_comodin(route) else f"^{re.escape(pattern)}$"
+        if route.destination_type != "hangup" and not validacion.destino_valido(
+            route.destination_type, route.destination_value
+        ):
+            logger.error(
+                "Ruta entrante %s omitida: destino %r no válido para el tipo %r",
+                route.id, route.destination_value, route.destination_type,
+            )
+            continue
         destino_ctx = contextos.get(route.tenant_id) or "default"
         extension = ET.SubElement(public_context, "extension", attrib={"name": f"did_{route.id}_{route.name}", "continue": "false"})
         condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": expression})

@@ -1,7 +1,9 @@
+import html
 import logging
 import os
 from pathlib import Path
 
+from app.core import validacion
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -28,11 +30,42 @@ def nombre_gateway(nombre: str, slug: str) -> str:
     return f"{slug}_{nombre}"
 
 
+def _attr(valor) -> str:
+    """Valor listo para ir dentro de un atributo XML entre comillas.
+
+    Sin esto, una comilla en la contraseña o el usuario cierra el atributo
+    y el resto del texto pasa a ser XML propio: se pueden agregar
+    parámetros al gateway (por ejemplo cambiar su `context` al de otra
+    empresa). Escapar es lo correcto para contraseñas, que pueden llevar
+    cualquier símbolo; el resto de los campos además se restringen abajo.
+    """
+    return html.escape(str(valor), quote=True)
+
+
+def _ruta_segura(gw_name: str) -> Path:
+    """Ruta del archivo del gateway, garantizando que queda DENTRO de la
+    carpeta de gateways: un nombre con `../` escribiría o borraría
+    archivos en cualquier parte del volumen de configuración."""
+    validacion.exigir(validacion.NOMBRE_RE, gw_name, "Nombre de gateway")
+    base = _gateways_path().resolve()
+    path = (base / f"gw_{gw_name}.xml").resolve()
+    if path.parent != base:
+        raise ValueError("Ruta de gateway fuera de la carpeta permitida")
+    return path
+
+
 def write_gateway_file(trunk, slug: str) -> Path:
     """Escribe/actualiza el gateway de una troncal en la config de FreeSWITCH."""
     ensure_dirs()
+    validacion.exigir(validacion.NOMBRE_RE, slug, "Identificador de empresa")
+    validacion.exigir(validacion.NOMBRE_RE, trunk.name, "Nombre de troncal")
+    validacion.exigir(validacion.HOST_RE, trunk.gateway_host, "Host de la troncal")
+    if trunk.from_domain:
+        validacion.exigir(validacion.HOST_RE, trunk.from_domain, "Dominio de origen")
+    if getattr(trunk, "codec_prefs", None):
+        validacion.exigir(validacion.CODECS_RE, trunk.codec_prefs, "Códecs")
     gw_name = nombre_gateway(trunk.name, slug)
-    path = _gateways_path() / f"gw_{gw_name}.xml"
+    path = _ruta_segura(gw_name)
 
     has_credentials = bool(trunk.username and trunk.password)
     # Solo se registra si hay credenciales Y la troncal lo tiene habilitado.
@@ -47,24 +80,24 @@ def write_gateway_file(trunk, slug: str) -> Path:
 
     lines = [
         '<include>',
-        f'  <gateway name="{gw_name}">',
-        f'    <param name="proxy" value="{proxy}"/>',
+        f'  <gateway name="{_attr(gw_name)}">',
+        f'    <param name="proxy" value="{_attr(proxy)}"/>',
     ]
     if trunk.username:
-        lines.append(f'    <param name="username" value="{trunk.username}"/>')
+        lines.append(f'    <param name="username" value="{_attr(trunk.username)}"/>')
     if trunk.password:
-        lines.append(f'    <param name="password" value="{trunk.password}"/>')
+        lines.append(f'    <param name="password" value="{_attr(trunk.password)}"/>')
     if trunk.from_domain:
-        lines.append(f'    <param name="from-domain" value="{trunk.from_domain}"/>')
+        lines.append(f'    <param name="from-domain" value="{_attr(trunk.from_domain)}"/>')
     lines.append(f'    <param name="register" value="{"true" if should_register else "false"}"/>')
     if transport != "udp":
-        lines.append(f'    <param name="register-transport" value="{transport}"/>')
+        lines.append(f'    <param name="register-transport" value="{_attr(transport)}"/>')
     ping = getattr(trunk, "ping", None)
     if ping:
-        lines.append(f'    <param name="ping" value="{ping}"/>')
+        lines.append(f'    <param name="ping" value="{_attr(ping)}"/>')
     codec_prefs = getattr(trunk, "codec_prefs", None)
     if codec_prefs:
-        lines.append(f'    <param name="codec-prefs" value="{codec_prefs}"/>')
+        lines.append(f'    <param name="codec-prefs" value="{_attr(codec_prefs)}"/>')
     lines.append('    <param name="context" value="public"/>')
     lines.append('  </gateway>')
     lines.append('</include>')
@@ -75,7 +108,11 @@ def write_gateway_file(trunk, slug: str) -> Path:
 
 def remove_gateway_file(gw_name: str):
     ensure_dirs()
-    path = _gateways_path() / f"gw_{gw_name}.xml"
+    try:
+        path = _ruta_segura(gw_name)
+    except ValueError:
+        logger.warning("Gateway con nombre no permitido, no se elimina: %r", gw_name)
+        return
     if path.exists():
         path.unlink()
         logger.info("Gateway %s eliminado", gw_name)
@@ -100,4 +137,10 @@ def sync_gateways(trunks: list, slug_por_tenant: dict[int, str]):
     clean_gateways(validos)
     for trunk in trunks:
         if trunk.enabled:
-            write_gateway_file(trunk, slug_por_tenant.get(trunk.tenant_id, "x"))
+            # Una troncal guardada antes de existir la validación (ej. con
+            # espacios en el nombre) no debe impedir que arranque el sistema
+            # ni que se escriban las demás: se omite y queda registrada.
+            try:
+                write_gateway_file(trunk, slug_por_tenant.get(trunk.tenant_id, "x"))
+            except ValueError as exc:
+                logger.error("Troncal %s omitida: %s. Corrígela desde el panel.", trunk.id, exc)

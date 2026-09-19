@@ -500,6 +500,29 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entorno]);
 
+  // El WebSocket de SIP se cae cuando el navegador suspende la pestaña
+  // (cambio de app en móvil, pestaña en segundo plano, equipo en reposo) y
+  // FreeSWITCH deja de ver la extensión registrada. Al volver el foco, si la
+  // extensión quedó sin registrar, se reconecta sola: el agente sigue
+  // disponible sin importar en qué pantalla esté ni cuánto tiempo estuvo
+  // fuera.
+  useEffect(() => {
+    if (!usuario || !entorno?.extension?.enabled) return;
+    const reasegurar = () => {
+      if (document.visibilityState !== "visible") return;
+      const reg = registererRef.current;
+      if (!reg || reg.state !== RegistererState.Registered) {
+        connectRef.current();
+      }
+    };
+    document.addEventListener("visibilitychange", reasegurar);
+    window.addEventListener("focus", reasegurar);
+    return () => {
+      document.removeEventListener("visibilitychange", reasegurar);
+      window.removeEventListener("focus", reasegurar);
+    };
+  }, [usuario, entorno]);
+
   const activarDnd = useCallback(
     async (activar: boolean) => {
       if (!entorno?.extension) return;

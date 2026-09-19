@@ -117,7 +117,15 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   // Registro de push VoIP: una vez al montar. El token en sí se manda al
   // backend más abajo, apenas aparece (o cambia).
   useEffect(() => {
-    registerVoIPPush();
+    // En Android esto falla si el proyecto no tiene google-services.json
+    // (Firebase sin configurar, ver SETUP.md). Sin el try/catch, esa
+    // excepción nativa cerraba la app al abrirla; así la app funciona
+    // igual, solo sin push en segundo plano.
+    try {
+      registerVoIPPush();
+    } catch (e) {
+      console.warn("Push de voz no disponible:", e);
+    }
   }, []);
 
   useEffect(() => {

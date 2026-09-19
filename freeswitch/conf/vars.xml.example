@@ -12,7 +12,7 @@
 
        WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
   -->
-  <X-PRE-PROCESS cmd="set" data="default_password=ClueCon"/>
+  <X-PRE-PROCESS cmd="set" data="default_password=REEMPLAZAR_POR_DEFAULT_PASSWORD"/>
   <X-PRE-PROCESS cmd="set" data="disable_system_api_commands=false"/>
   <!-- Did you change it yet? -->
   <!--
@@ -461,7 +461,7 @@
 
      default: tlsv1,tlsv1.1,tlsv1.2
   -->
-  <X-PRE-PROCESS cmd="set" data="sip_tls_version=tlsv1,tlsv1.1,tlsv1.2"/>
+  <X-PRE-PROCESS cmd="set" data="sip_tls_version=tlsv1.2"/>
 
   <!--
      TLS cipher suite: default ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH

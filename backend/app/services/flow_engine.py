@@ -1,7 +1,9 @@
 import json
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from app.core import validacion
 from app.core.config import settings
 
 # Ruta que ve FreeSWITCH para los audios de bots.
@@ -277,6 +279,11 @@ def _append_target_actions(cond: ET.Element, target: dict, bot_id: int, dominio:
 
     if ttype == "transfer":
         extension = str(data.get("extension", "")).strip()
+        # Va dentro de `bridge user/<ext>@<dominio-de-la-empresa>`: solo dígitos.
+        # Con "1000@otro.dominio" el bridge llamaba a un teléfono de OTRA
+        # empresa. "ai_agent" es el único valor especial que se acepta.
+        if extension != "ai_agent" and not validacion.EXTENSION_RE.fullmatch(extension):
+            extension = ""
         if not extension:
             ET.SubElement(cond, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
             return
@@ -287,7 +294,7 @@ def _append_target_actions(cond: ET.Element, target: dict, bot_id: int, dominio:
             # sin esto el bot no sabía qué tecla marcó la persona y tenía
             # que preguntarle otra vez. Ver app/services/ai_intents.py.
             intent = str(data.get("ai_intent", "") or "").strip().lower()
-            if intent:
+            if intent and re.fullmatch(r"[a-z_]{1,30}", intent):
                 ET.SubElement(cond, "action", attrib={"application": "set", "data": f"nspbx_ai_intent={intent}"})
             # La empresa viaja igual: el motor de IA necesita saber de
             # qué tenant es la llamada para leer sus ajustes (API keys)
