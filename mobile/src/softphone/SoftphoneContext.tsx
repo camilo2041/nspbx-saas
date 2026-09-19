@@ -28,7 +28,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { AppState, PermissionsAndroid, Platform } from "react-native";
+import { AppState, PermissionsAndroid, Platform, Vibration } from "react-native";
 import {
   Invitation,
   Inviter,
@@ -111,6 +111,30 @@ async function pedirNotificaciones(): Promise<void> {
 
 const OPCIONES_AUDIO = { sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } };
 const RETRASO_MAX_RECONEXION_MS = 60_000;
+// Si la red no vuelve en este tiempo durante una llamada, se da por perdida
+// (sin esto quedaría una llamada "fantasma" sin audio).
+const ESPERA_RECUPERAR_LLAMADA_MS = 45_000;
+
+/** Texto para el usuario según la respuesta SIP con que la central rechazó la llamada. */
+function mensajeRechazo(codigo: number, frase: string): string {
+  switch (codigo) {
+    case 404:
+    case 484:
+      return "No hay ruta para ese número. Revisa que esté completo (si es internacional, un administrador debe activar las llamadas internacionales).";
+    case 486:
+    case 600:
+      return "El número está ocupado.";
+    case 480:
+    case 503:
+      return "El destino no está disponible en este momento.";
+    case 603:
+      return "La llamada fue rechazada.";
+    case 403:
+      return "La central no permite llamar a ese destino.";
+    default:
+      return `La central no completó la llamada (${codigo} ${frase}).`;
+  }
+}
 
 export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { usuario, puede } = useAuth();
@@ -141,6 +165,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const apagadoRef = useRef(true);
   const generacionRef = useRef(0);
   const intentosRef = useRef(0);
+  // Temporizador que corta una llamada si la conexión no se recupera a tiempo.
+  const vigiaLlamadaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Puente entre CallKit/Telecom (ids de sesión del sistema) y sip.js (la
   // sesión SIP real). Se maneja UNA llamada a la vez a propósito: es el
@@ -207,6 +233,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   const limpiarLlamada = useCallback(() => {
     stopTimer();
+    if (vigiaLlamadaRef.current) clearTimeout(vigiaLlamadaRef.current);
+    vigiaLlamadaRef.current = null;
+    Vibration.cancel();
     temporizadoresRef.current.forEach((t) => clearTimeout(t));
     temporizadoresRef.current.clear();
     aceptandoRef.current = null;
@@ -309,7 +338,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           caller: { id: numero, displayName: nombre, phoneNumber: numero },
         }).catch(() => {
           // Sin UI nativa la llamada sigue viva por SIP: quedan los botones
-          // Contestar/Rechazar dentro de la app.
+          // Contestar/Rechazar dentro de la app. Como tampoco habrá timbre del
+          // sistema, al menos se hace vibrar el teléfono hasta que conteste.
+          Vibration.vibrate([0, 700, 900], true);
         });
       }
     },
@@ -317,6 +348,11 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   );
   const manejarInviteRef = useRef(manejarInvite);
   manejarInviteRef.current = manejarInvite;
+
+  const hayLlamadaActiva = () => {
+    const activa = sessionRef.current;
+    return !!activa && activa.state !== SessionState.Terminated;
+  };
 
   const programarReconexion = useCallback(() => {
     if (reconnectTimerRef.current || apagadoRef.current) return;
@@ -336,6 +372,33 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     const ext = env?.extension;
     if (!env || !ext || !env.fs_domain) return;
     apagadoRef.current = false;
+
+    // Con una llamada en curso NO se crea un UserAgent nuevo: detener el viejo
+    // colgaría la llamada. Se reconecta su transporte, se vuelve a registrar y
+    // se renegocia el audio (ICE restart), que es lo que hace falta si el
+    // teléfono cambió de red (Wi‑Fi ↔ datos).
+    const uaVivo = userAgentRef.current;
+    if (uaVivo && hayLlamadaActiva()) {
+      try {
+        await uaVivo.reconnect();
+        await registererRef.current?.register();
+        const activa = sessionRef.current;
+        if (activa && activa.state === SessionState.Established) {
+          activa
+            .invite({
+              sessionDescriptionHandlerOptions: {
+                constraints: { audio: true, video: false },
+                offerOptions: { iceRestart: true },
+              },
+            } as never)
+            .catch(() => {});
+        }
+      } catch {
+        programarReconexion();
+      }
+      return;
+    }
+
     setConnState("connecting");
     setConnError("");
     const miGeneracion = ++generacionRef.current;
@@ -382,8 +445,29 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           onInvite: (invitation: Invitation) => manejarInviteRef.current(invitation),
           onDisconnect: () => {
             if (apagadoRef.current || !esVigente()) return;
-            setConnState("error");
-            setConnError("Se perdió la conexión con la central. Reconectando…");
+            if (hayLlamadaActiva()) {
+              // El audio viaja aparte de la señalización: un corte del WebSocket
+              // no tiene por qué cortar la llamada. Se intenta recuperar la
+              // conexión SIN tocar la sesión, con un plazo para no dejar una
+              // llamada muda para siempre.
+              setConnState("connecting");
+              setConnError("Conexión inestable: intentando recuperar la llamada…");
+              if (!vigiaLlamadaRef.current) {
+                vigiaLlamadaRef.current = setTimeout(() => {
+                  vigiaLlamadaRef.current = null;
+                  const activa = sessionRef.current;
+                  if (!activa || activa.state === SessionState.Terminated) return;
+                  setConnError("Se perdió la conexión y la llamada no se pudo recuperar.");
+                  const id = idNativoRef.current;
+                  if (id) reportCallEnded(id, "failed").catch(() => {});
+                  activa.bye().catch(() => {});
+                  limpiarLlamada();
+                }, ESPERA_RECUPERAR_LLAMADA_MS);
+              }
+            } else {
+              setConnState("error");
+              setConnError("Se perdió la conexión con la central. Reconectando…");
+            }
             programarReconexion();
           },
         },
@@ -404,6 +488,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       registerer.stateChange.addListener((state) => {
         if (!esVigente()) return;
         if (state === RegistererState.Registered) {
+          if (vigiaLlamadaRef.current) {
+            clearTimeout(vigiaLlamadaRef.current);
+            vigiaLlamadaRef.current = null;
+          }
           intentosRef.current = 0;
           setConnState("registered");
           setConnError("");
@@ -424,7 +512,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       setConnError(e instanceof Error ? e.message : "No se pudo conectar con la central");
       programarReconexion();
     }
-  }, [programarReconexion]);
+  }, [programarReconexion, limpiarLlamada]);
 
   const connectRef = useRef<() => void>(() => {});
   connectRef.current = connect;
@@ -553,7 +641,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       if (!ua) throw new Error("Sin conexión con la central");
       const target = UserAgent.makeURI(`sip:${pendiente.destino}@${env.fs_domain}`);
       if (!target) throw new Error("Destino inválido");
-      const inviter = new Inviter(ua, target, OPCIONES_AUDIO);
+      // earlyMedia: sin esto sip.js descarta el audio previo a la respuesta (el tono
+      // de "llamando" de la central o del proveedor) y se oye silencio hasta que contestan.
+      const inviter = new Inviter(ua, target, { ...OPCIONES_AUDIO, earlyMedia: true });
       bindSession(inviter, pendiente.destino, false);
       inviter.stateChange.addListener((state) => {
         if (state === SessionState.Established) reportOutgoingCallConnected(id).catch(() => {});
@@ -564,7 +654,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
             // La central respondió con un error (ruta inexistente, ocupado, sin permiso…).
             onReject: (respuesta) => {
               const { statusCode, reasonPhrase } = respuesta.message;
-              setConnError(`La central no completó la llamada (${statusCode} ${reasonPhrase}).`);
+              // 487 = la llamada se canceló (colgaste tú, o el otro lado antes de
+              // contestar): no es un fallo de la central y no debe mostrarse como tal.
+              if (statusCode === 487) return;
+              setConnError(mensajeRechazo(statusCode ?? 0, reasonPhrase ?? ""));
             },
           },
         })
