@@ -439,7 +439,7 @@ def _append_queue_routes(context: ET.Element, queues: list, dominio: str) -> Non
             continue
         qkey = f"{queue.name}@{dominio}"
         extension = ET.SubElement(context, "extension", attrib={"name": f"queue_{queue.name}", "continue": "false"})
-        condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": f"^{queue.extension}$"})
+        condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": f"^{re.escape(str(queue.extension))}$"})
         ET.SubElement(condition, "action", attrib={"application": "answer"})
         ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=false"})
         ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})

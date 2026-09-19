@@ -7,6 +7,7 @@ llenaba: no había forma de ver el historial en la app.
 """
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -35,6 +36,21 @@ router = APIRouter(tags=["calls"])
 RECORDINGS_DIR = settings.recordings_dir
 
 
+_RUTA_GRABACION_RE = re.compile(r"^[A-Za-z0-9_./-]{1,300}$")
+
+
+def _ruta_grabacion_valida(ruta: str | None) -> str | None:
+    """La ruta llega en el CDR de FreeSWITCH: se guarda solo si es de la carpeta
+    de grabaciones, sin `..` y con caracteres normales."""
+    if not ruta:
+        return None
+    prefijo = settings.fs_recordings_dir.rstrip("/") + "/"
+    if not ruta.startswith(prefijo) or ".." in ruta or not _RUTA_GRABACION_RE.fullmatch(ruta):
+        logger.warning("CDR con ruta de grabación rechazada: %r", ruta[:200])
+        return None
+    return ruta
+
+
 def _local_recording_path(recording_path: str) -> Path:
     """`recording_path` trae la ruta tal como la ve FreeSWITCH
     ($${recordings_dir}/AAAA/MM/DD/llamada_uuid.wav, o solo
@@ -45,7 +61,14 @@ def _local_recording_path(recording_path: str) -> Path:
     la reproducción/descarga en cuanto la ruta pasó a tener subcarpetas."""
     prefijo = settings.fs_recordings_dir.rstrip("/") + "/"
     relativa = recording_path[len(prefijo):] if recording_path.startswith(prefijo) else Path(recording_path).name
-    return Path(RECORDINGS_DIR) / relativa
+    base = Path(RECORDINGS_DIR).resolve()
+    candidata = (base / relativa).resolve()
+    # Un `..` o un enlace simbólico en la ruta guardada no puede sacar la lectura
+    # de la carpeta de grabaciones (se serviría, p. ej., /etc/passwd como "audio").
+    if base not in candidata.parents or candidata.suffix.lower() != ".wav":
+        logger.warning("Ruta de grabación fuera de la carpeta permitida: %r", recording_path[:200])
+        return base / ".no-valida"
+    return candidata
 
 # Los internos de FreeSWITCH (bot_N, contextos del IVR, la cola) no son
 # "el número al que se llamó" desde el punto de vista del usuario.
@@ -217,7 +240,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         duration=int(variables.get("duration") or 0),
         billsec=billsec,
         hangup_cause=cause,
-        recording_path=variables.get("nspbx_recording"),
+        recording_path=_ruta_grabacion_valida(variables.get("nspbx_recording")),
         started_at=_epoch_us_to_dt(variables.get("start_uepoch")),
         answered_at=_epoch_us_to_dt(variables.get("answer_uepoch")),
         ended_at=_epoch_us_to_dt(variables.get("end_uepoch")),

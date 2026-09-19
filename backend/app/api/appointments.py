@@ -1,3 +1,4 @@
+import hmac
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -7,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import permissions
 from app.core.auth import requiere
 from app.core.clock import now_local
-from app.core.database import get_session
-from app.models import AiCallUsage, Appointment
+from app.core.database import app_session, async_session, fijar_tenant, get_session
+from app.models import AiCallUsage, Appointment, SystemSettings
 from app.schemas import (
     AgentBookRequest,
     AgentCancelRequest,
@@ -143,20 +144,46 @@ async def get_availability(day: str, session: AsyncSession = Depends(get_session
 # directamente la plataforma de IA, no un navegador logueado.
 
 
-async def _check_agent_secret(session: AsyncSession, x_agent_secret: str | None) -> None:
-    row = await ajustes_de(session)
-    expected = row.agent_webhook_secret if row else None
-    if not expected:
-        raise HTTPException(status_code=503, detail="Configura primero el secreto del agente en Ajustes")
-    if x_agent_secret != expected:
+async def sesion_agente(x_agent_secret: str | None = Header(default=None)):
+    """Sesión atada a la empresa dueña del secreto del agente.
+
+    Estos endpoints no llevan sesión de usuario, así que nada dice de qué
+    empresa es la petición: el SECRETO lo dice (cada empresa tiene el suyo en
+    Ajustes). Se busca con la sesión del dueño y se ata la sesión normal a esa
+    empresa, de modo que RLS limita todo lo que sigue. Antes se leían los
+    ajustes con una sesión sin empresa (RLS no devolvía filas) y el secreto se
+    comparaba con `!=`, que filtra por tiempo cuántos caracteres acertó quien
+    lo probaba.
+
+    Si dos empresas tuvieran el MISMO secreto no se sabe de cuál es la petición:
+    se rechaza en vez de adivinar."""
+    if not x_agent_secret:
         raise HTTPException(status_code=401, detail="Secreto de agente inválido")
+    dado = x_agent_secret.encode()
+    async with async_session() as admin:
+        filas = (
+            await admin.execute(
+                select(SystemSettings.tenant_id, SystemSettings.agent_webhook_secret).where(
+                    SystemSettings.agent_webhook_secret.is_not(None), SystemSettings.agent_webhook_secret != ""
+                )
+            )
+        ).all()
+    # Se recorren TODAS las filas sin cortar al primer acierto: el tiempo no debe
+    # depender de cuál empresa coincide.
+    coinciden = [tid for tid, secreto in filas if hmac.compare_digest(secreto.encode(), dado)]
+    if not filas:
+        raise HTTPException(status_code=503, detail="Configura primero el secreto del agente en Ajustes")
+    if len(coinciden) != 1:
+        raise HTTPException(status_code=401, detail="Secreto de agente inválido")
+    async with app_session() as session:
+        fijar_tenant(session, coinciden[0])
+        yield session
 
 
 @router.get("/agent/availability")
 async def agent_availability(
-    day: str, session: AsyncSession = Depends(get_session), x_agent_secret: str | None = Header(default=None)
+    day: str, session: AsyncSession = Depends(sesion_agente)
 ):
-    await _check_agent_secret(session, x_agent_secret)
     try:
         d = parse_date(day)
     except ValueError:
@@ -169,9 +196,8 @@ async def agent_availability(
 
 @router.post("/agent/book")
 async def agent_book(
-    payload: AgentBookRequest, session: AsyncSession = Depends(get_session), x_agent_secret: str | None = Header(default=None)
+    payload: AgentBookRequest, session: AsyncSession = Depends(sesion_agente)
 ):
-    await _check_agent_secret(session, x_agent_secret)
     try:
         start = datetime.combine(parse_date(payload.date), parse_time(payload.time))
     except ValueError:
@@ -196,9 +222,8 @@ async def agent_book(
 
 @router.post("/agent/cancel")
 async def agent_cancel(
-    payload: AgentCancelRequest, session: AsyncSession = Depends(get_session), x_agent_secret: str | None = Header(default=None)
+    payload: AgentCancelRequest, session: AsyncSession = Depends(sesion_agente)
 ):
-    await _check_agent_secret(session, x_agent_secret)
     on_date = parse_date(payload.date) if payload.date else None
     appt = await find_next_appointment(session, payload.phone, on_date)
     if not appt:
@@ -210,9 +235,8 @@ async def agent_cancel(
 
 @router.post("/agent/reschedule")
 async def agent_reschedule(
-    payload: AgentRescheduleRequest, session: AsyncSession = Depends(get_session), x_agent_secret: str | None = Header(default=None)
+    payload: AgentRescheduleRequest, session: AsyncSession = Depends(sesion_agente)
 ):
-    await _check_agent_secret(session, x_agent_secret)
     old_date = parse_date(payload.old_date) if payload.old_date else None
     appt = await find_next_appointment(session, payload.phone, old_date)
     if not appt:
