@@ -4,7 +4,7 @@ from typing import Annotated, Optional
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core import validacion as val
+from app.core import urls, validacion as val
 from app.core.clock import a_hora_local
 
 
@@ -346,6 +346,17 @@ class SystemSettingsUpdate(BaseModel):
     ai_llm_base_url: Optional[str] = None
     ai_llm_model: Optional[str] = None
     ai_llm_api_key: Optional[str] = None
+
+    @field_validator("ai_llm_base_url")
+    @classmethod
+    def _llm_url_publica(cls, v):
+        # Evita que una empresa apunte el servidor a la red interna (SSRF).
+        if v in (None, ""):
+            return v
+        try:
+            return urls.validar_url_https(v)
+        except urls.UrlNoPermitida as exc:
+            raise ValueError(str(exc))
 
     deepgram_api_key: Optional[str] = None
 

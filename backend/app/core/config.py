@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     recordings_max_gb: float = 20.0
     backups_max_gb: float = 5.0
     max_concurrent_calls_global: int = 200
+    # Solo para desarrollo o un modelo propio dentro de tu red: deja que las URLs
+    # que fijan las empresas (modelo de IA) apunten a direcciones privadas.
+    permitir_urls_privadas: bool = False
 
     # Zona horaria del negocio. La agenda (horario de atención, "hoy",
     # "mañana", si un cupo ya pasó) se interpreta siempre en esta zona,

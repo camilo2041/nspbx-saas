@@ -9,6 +9,8 @@ import json
 
 import httpx
 
+from app.core import urls
+
 TOOLS = [
     {
         "type": "function",
@@ -142,17 +144,20 @@ async def chat(
     tenga algo que decir al final del turno (ver `_llm_turn`)."""
     if not api_key:
         raise ValueError("Falta configurar la API key del modelo de lenguaje en Ajustes")
+    # SSRF: la URL la fija la empresa y la petición sale desde el servidor.
+    base_url = await urls.exigir_destino_publico(base_url)
+    herramientas = tools if tools is not None else TOOLS
+    cuerpo: dict = {"model": model, "messages": messages, "temperature": 0.1}
+    # Sin herramientas no se manda ni "tools" ni "tool_choice": varios
+    # proveedores rechazan una lista vacía.
+    if herramientas:
+        cuerpo["tools"] = herramientas
+        cuerpo["tool_choice"] = tool_choice
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             f"{base_url.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": model,
-                "messages": messages,
-                "tools": tools if tools is not None else TOOLS,
-                "tool_choice": tool_choice,
-                "temperature": 0.1,
-            },
+            json=cuerpo,
         )
     if resp.status_code == 401:
         raise ValueError("API key del modelo de lenguaje inválida")
