@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # Solo para desarrollo o un modelo propio dentro de tu red: deja que las URLs
     # que fijan las empresas (modelo de IA) apunten a direcciones privadas.
     permitir_urls_privadas: bool = False
+    # Proxies inversos delante del backend (Traefik = 1). Define de dónde se toma la
+    # IP real del cliente; 0 = sin proxy, se usa la conexión directa.
+    proxies_confiables: int = 1
 
     # Zona horaria del negocio. La agenda (horario de atención, "hoy",
     # "mañana", si un cupo ya pasó) se interpreta siempre en esta zona,

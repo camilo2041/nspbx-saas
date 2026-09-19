@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import limitador
 from app.core.database import get_admin_session
 from app.models import Queue, SystemSettings, Tenant
 from app.services import turn, turnstile, webcall
@@ -44,10 +45,8 @@ _TENANT_ID = 1
 
 
 def _cliente_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "?"
+    # Nunca la primera entrada de X-Forwarded-For: la escribe el visitante.
+    return limitador.ip_cliente(request)
 
 
 class SesionRequest(BaseModel):
