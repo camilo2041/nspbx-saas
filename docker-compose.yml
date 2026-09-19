@@ -163,6 +163,12 @@ services:
       # Push de voz a la app móvil (ver mobile/SETUP.md). Vacío = push
       # desactivado: la app sigue sirviendo con ella abierta, solo no
       # despierta en segundo plano (app/services/push.py).
+      # Topes de la PLATAFORMA (ver backend/app/core/alcance.py). Con varias
+      # empresas ninguna puede fijarlos desde el panel; con una sola, sus Ajustes
+      # tienen prioridad sobre estos valores.
+      RECORDINGS_MAX_GB: ${RECORDINGS_MAX_GB:-20}
+      BACKUPS_MAX_GB: ${BACKUPS_MAX_GB:-5}
+      MAX_CONCURRENT_CALLS_GLOBAL: ${MAX_CONCURRENT_CALLS_GLOBAL:-200}
       APNS_KEY_ID: ${APNS_KEY_ID:-}
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
       APNS_AUTH_KEY: ${APNS_AUTH_KEY:-}

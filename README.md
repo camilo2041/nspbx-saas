@@ -165,6 +165,19 @@ se guardan en la tabla `system_settings` y se aplican de inmediato al cliente ES
 - **Fuerza bruta SIP.** FreeSWITCH registra los intentos fallidos
   (`log-auth-failures`); para bloquear las IPs hay que instalar fail2ban en el
   servidor con los archivos de `deploy/fail2ban/` (instrucciones dentro del jail).
+- **Respaldos**: el backend vuelca Postgres cada día en `backups/`. Para
+  sacarlo del servidor (con grabaciones y audios de bots, cifrado AES-256):
+  `bash scripts/backup-offsite.sh` (configuración y cron en su cabecera).
+  Restaurar: `bash scripts/restore.sh backups/nspbx-….sql.gz[.enc]`. Guarda la
+  clave de cifrado también fuera del servidor y prueba una restauración
+  periódicamente.
+- **Fraude telefónico**: cada empresa solo marca números nacionales (7–10
+  dígitos, sin 00/011) salvo que active «Permitir llamadas internacionales» en
+  Ajustes, y tiene un tope de salientes simultáneas (`max_concurrent_calls`).
+  El puerto 15080/udp (perfil `external`) recibe llamadas de las troncales: si
+  tu proveedor te da sus IP de origen, restringe ese puerto a ellas en el
+  firewall del servidor (`ufw`/`DOCKER-USER`); las llamadas entrantes sin ruta
+  ya se cuelgan en el contexto `public`.
 - **Claves TLS de FreeSWITCH.** `freeswitch/conf/tls/` no se versiona: FreeSWITCH
   las regenera solo. Para rotarlas: borra `wss.pem` y `dtls-srtp.pem` de esa
   carpeta y ejecuta `docker compose restart freeswitch`.

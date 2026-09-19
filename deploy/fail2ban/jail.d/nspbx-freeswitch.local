@@ -29,5 +29,7 @@ port     = 5060,15080
 protocol = all
 chain    = DOCKER-USER
 banaction = iptables-allports
-# Direcciones que nunca se bloquean: agrega aquí la IP de tu oficina.
-ignoreip = 127.0.0.1/8 ::1
+# Direcciones que nunca se bloquean: agrega aquí la IP de tu oficina. Los
+# rangos de Docker van siempre: el navegador entra por Traefik y coturn, y
+# FreeSWITCH puede ver esa IP interna; bloquearla dejaría a TODOS sin softphone.
+ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
