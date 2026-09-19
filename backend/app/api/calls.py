@@ -349,6 +349,41 @@ async def calls_por_dia(
     return [{"dia": r.dia, "total": r.total} for r in rows]
 
 
+@router.get("/api/calls/serie")
+async def calls_serie(
+    dias: int = 7,
+    session: AsyncSession = Depends(get_session),
+    usuario: User = _VER,
+):
+    """Llamadas por día de los últimos `dias` (7-30), con días sin datos en cero,
+    para la gráfica del dashboard. Mismo recorte por rol que el historial."""
+    from datetime import timedelta
+
+    from app.core.clock import now_local
+
+    dias = max(1, min(dias, 30))
+    hoy = now_local().date()
+    desde = hoy - timedelta(days=dias - 1)
+    clave_dia = func.to_char(CallLog.started_at, "YYYY-MM-DD")
+    query = (
+        _acotar(select(clave_dia.label("dia"), CallLog.status, func.count().label("n")), _solo_suyas(usuario))
+        .where(CallLog.started_at >= datetime.combine(desde, datetime.min.time()))
+        .group_by(clave_dia, CallLog.status)
+    )
+    por_dia: dict[str, dict[str, int]] = {}
+    for fila in (await session.execute(query)).all():
+        d = por_dia.setdefault(fila.dia, {"total": 0, "answered": 0})
+        d["total"] += fila.n
+        if fila.status == "answered":
+            d["answered"] += fila.n
+    serie = []
+    for i in range(dias):
+        dia = (desde + timedelta(days=i)).isoformat()
+        d = por_dia.get(dia, {"total": 0, "answered": 0})
+        serie.append({"dia": dia, "total": d["total"], "answered": d["answered"], "missed": d["total"] - d["answered"]})
+    return serie
+
+
 @router.get("/api/calls/stats")
 async def call_stats(session: AsyncSession = Depends(get_session), usuario: User = _VER):
     propia = _solo_suyas(usuario)

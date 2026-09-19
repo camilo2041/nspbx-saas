@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ReactNode, useEffect, useState } from "react";
 
+import { DashboardCalls } from "@/components/dashboard-calls";
 import {
   Card,
   CardBody,
@@ -299,6 +300,8 @@ export default function DashboardPage() {
               ))}
             </div>
           )}
+
+          {veLlamadas && <DashboardCalls stats={callStats} />}
 
           {(muestraMotor || muestraCampanas || muestraRecursos || muestraAccesos) && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
