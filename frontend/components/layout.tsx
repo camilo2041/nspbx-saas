@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 
+import { AssistantWidget } from "@/components/assistant-widget";
+import { CommandPalette } from "@/components/command-palette";
 import { FloatingCallWidget } from "@/components/floating-call-widget";
 import { IncomingCallBanner } from "@/components/incoming-call-banner";
 import { ThemeToggle } from "@/components/theme";
@@ -303,6 +305,7 @@ export default function SidebarLayout({ children }: { children: ReactNode }) {
       <SoftphoneProvider>
         <IncomingCallBanner />
         <FloatingCallWidget />
+        <AssistantWidget />
         <Marco>{children}</Marco>
       </SoftphoneProvider>
     </AuthProvider>
@@ -530,6 +533,9 @@ function Marco({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
+      <CommandPalette
+        comandos={grupos.flatMap((g) => g.items.map((i) => ({ href: i.href, label: i.label, grupo: g.title, icon: i.icon })))}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="glass sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-line bg-surface/75 px-4 sm:px-6">
           <button
@@ -550,6 +556,18 @@ function Marco({ children }: { children: ReactNode }) {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event("nspbx:paleta"))}
+              className="press hidden items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-[13px] text-faint transition-colors hover:border-line-strong hover:text-fg-soft sm:flex"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
+                <circle cx="11" cy="11" r="7" />
+                <path strokeLinecap="round" d="M20 20l-3.5-3.5" />
+              </svg>
+              Buscar
+              <kbd className="rounded-md border border-line px-1.5 text-[10px]">Ctrl K</kbd>
+            </button>
             <ThemeToggle />
           </div>
         </header>

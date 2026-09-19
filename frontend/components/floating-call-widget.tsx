@@ -23,7 +23,7 @@ export function FloatingCallWidget() {
   const enLlamada = phase === "in-call";
 
   return (
-    <div className="fixed bottom-5 right-5 z-[100]">
+    <div className="fixed bottom-24 right-5 z-[100]">
       <div
         className={`animate-pop flex items-center gap-3 rounded-2xl border-2 bg-surface py-2.5 pl-4 pr-2.5 shadow-[var(--shadow-3)] ${
           enLlamada ? "border-ok" : "border-info"

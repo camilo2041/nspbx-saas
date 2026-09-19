@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import permissions
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
@@ -651,6 +651,7 @@ app.include_router(appointments_api.router)  # permisos por endpoint: el agente 
 app.include_router(calls_api.router)  # permisos por endpoint: /fs/cdr lo llama FreeSWITCH
 # La lista de exclusión de app/core/auth.py deja pasar /api/webcall/.
 app.include_router(webcall_api.router)
+app.include_router(assistant.router)  # solo lectura; recorta por rol dentro
 app.include_router(ai_usage.router, **_con(permissions.CONSUMO_IA_VER))
 
 # Ajustes y estado del sistema: API keys de los proveedores y control de
