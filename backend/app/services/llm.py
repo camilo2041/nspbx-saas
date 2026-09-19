@@ -11,6 +11,11 @@ import httpx
 
 from app.core import urls
 
+_NOMBRE_PACIENTE = {
+    "type": "string",
+    "description": "Nombre completo del paciente, tal como lo dijo quien llama (verificación de identidad).",
+}
+
 TOOLS = [
     {
         "type": "function",
@@ -46,17 +51,17 @@ TOOLS = [
             "name": "confirmar_cita",
             "description": (
                 "Deja registrado que el paciente confirmó que SÍ va a asistir a su próxima cita. "
-                "Usala apenas lo diga; no hace falta pedirle más datos."
+                "Usala apenas lo diga. En una llamada entrante pide antes su nombre completo y pásalo en nombre_paciente."
             ),
-            "parameters": {"type": "object", "properties": {}},
+            "parameters": {"type": "object", "properties": {"nombre_paciente": _NOMBRE_PACIENTE}},
         },
     },
     {
         "type": "function",
         "function": {
             "name": "cancelar_cita",
-            "description": "Cancela la próxima cita confirmada del paciente que llama.",
-            "parameters": {"type": "object", "properties": {}},
+            "description": "Cancela la próxima cita confirmada del paciente que llama. En una llamada entrante pide antes su nombre completo y pásalo en nombre_paciente.",
+            "parameters": {"type": "object", "properties": {"nombre_paciente": _NOMBRE_PACIENTE}},
         },
     },
     {
@@ -69,6 +74,7 @@ TOOLS = [
                 "properties": {
                     "new_date": {"type": "string", "description": "YYYY-MM-DD"},
                     "new_time": {"type": "string", "description": "HH:MM, 24h"},
+                    "nombre_paciente": _NOMBRE_PACIENTE,
                 },
                 "required": ["new_date", "new_time"],
             },

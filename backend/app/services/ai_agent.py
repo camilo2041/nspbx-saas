@@ -33,7 +33,9 @@ from app.services.usage import UsageMeter
 from app.services.appointments import (
     available_slots,
     business_hours_error,
+    condicion_telefono,
     find_next_appointment,
+    nombre_coincide,
     is_slot_free,
     parse_date,
     parse_time,
@@ -414,18 +416,32 @@ async def _buscar_deuda(session, caller_phone: str, tenant_id: int) -> Debt | No
     """La deuda activa de este teléfono en la empresa de la llamada. Se
     busca por teléfono (últimos 10 dígitos, igual que las citas: el mismo
     número llega en formatos distintos) y se cae al saldo pendiente."""
-    digits = "".join(c for c in caller_phone if c.isdigit())
-    suffix = digits[-10:] if len(digits) >= 10 else digits
+    cond_tel = condicion_telefono(Debt.phone, caller_phone)
+    if cond_tel is None:
+        return None  # sin un teléfono que identifique a alguien no se le muestra ninguna deuda
     query = select(Debt).where(
         Debt.tenant_id == tenant_id,
         Debt.status.in_(("open", "promised", "overdue")),
+        cond_tel,
     )
-    if suffix:
-        query = query.where(Debt.phone.like(f"%{suffix}"))
-    else:
-        query = query.where(Debt.phone == caller_phone)
     query = query.order_by(Debt.updated_at.desc())
     return (await session.execute(query)).scalars().first()
+
+
+_PIDE_NOMBRE = (
+    "No pude verificar que seas el paciente de esa cita. Pídele su nombre completo "
+    "y vuelve a intentarlo con el nombre que te dé en nombre_paciente."
+)
+
+
+def _sin_verificar(appt, args: dict, appointment_id: int | None) -> bool:
+    """Una llamada ENTRANTE llega identificada solo por el caller-ID, que se
+    puede falsear. Antes de mover o cancelar la cita de un número hay que oír de
+    quien llama el nombre del paciente. Las llamadas de campaña (cita fijada
+    de antemano) ya salen hacia el número del paciente y no lo necesitan."""
+    if appointment_id or appt is None:
+        return False
+    return not nombre_coincide(args.get("nombre_paciente"), appt.patient_name)
 
 
 async def _run_tool(
@@ -500,6 +516,8 @@ async def _run_tool(
             appt = await _buscar_cita(session, caller_phone, appointment_id, tenant_id)
             if not appt:
                 return False, "No encontré una cita para confirmar.", None
+            if _sin_verificar(appt, args, appointment_id):
+                return False, _PIDE_NOMBRE, None
             cuando = f"{fecha_en_palabras(appt.appointment_date.date())} a las {hora_en_palabras(appt.appointment_date)}"
             appt.confirmed_at = now_local()
             await session.commit()
@@ -509,6 +527,8 @@ async def _run_tool(
             appt = await _buscar_cita(session, caller_phone, appointment_id, tenant_id)
             if not appt:
                 return False, "No encontré una cita para cancelar.", None
+            if _sin_verificar(appt, args, appointment_id):
+                return False, _PIDE_NOMBRE, None
             cuando = f"{fecha_en_palabras(appt.appointment_date.date())} a las {appt.appointment_date.strftime('%H:%M')}"
             appt.status = "cancelled"
             await session.commit()
@@ -520,6 +540,8 @@ async def _run_tool(
             appt = await _buscar_cita(session, caller_phone, appointment_id, tenant_id)
             if not appt:
                 return False, "No encontré una cita para reagendar.", None
+            if _sin_verificar(appt, args, appointment_id):
+                return False, _PIDE_NOMBRE, None
             new_start = dt.combine(parse_date(args["new_date"]), parse_time(args["new_time"]))
             motivo = business_hours_error(new_start, appt.duration_minutes)
             if motivo:
@@ -1048,11 +1070,24 @@ async def handle_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
             if intencion.key != "cobranza":
                 if cita:
                     cuando = f"{fecha_en_palabras(cita.appointment_date.date())} a las {hora_en_palabras(cita.appointment_date)}"
-                    messages[0]["content"] += (
-                        f"\n\nLa persona que llama tiene una cita agendada para el {cuando}"
-                        f" a nombre de {cita.patient_name}. Ya se la mencionaste al saludar, "
-                        "así que no la repitas como si fuera nueva."
-                    )
+                    if appointment_id_fijo:
+                        messages[0]["content"] += (
+                            f"\n\nLa persona que llama tiene una cita agendada para el {cuando}"
+                            f" a nombre de {cita.patient_name}. Ya se la mencionaste al saludar, "
+                            "así que no la repitas como si fuera nueva."
+                        )
+                    else:
+                        # Llamada entrante: solo se sabe el número (caller-ID), que se
+                        # puede falsear. Los datos de la cita son confidenciales.
+                        messages[0]["content"] += (
+                            "\n\nHay una cita agendada para el número de quien llama — CONFIDENCIAL. NO reveles "
+                            "el nombre del paciente, la fecha ni la hora hasta que la persona diga el nombre del "
+                            "paciente y coincida. Para confirmar, cancelar o mover la cita pídele primero su "
+                            "nombre completo y pásalo en nombre_paciente. Si dice no ser el paciente, no des "
+                            "ningún dato y termina con cortesía.\n"
+                            f"- Paciente (no lo digas): {cita.patient_name}\n"
+                            f"- Cita (no la digas todavía): {cuando}\n"
+                        )
                 elif intencion.requiere_cita:
                     # La gestión no tiene sentido sin cita (confirmar, mover o
                     # cancelar algo que no existe). Se avisa y se corta, en vez
@@ -1101,7 +1136,16 @@ async def handle_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
                         "¿Me confirmas si hablo con el titular de la cuenta?"
                     )
             else:
-                greeting = saludo_campana or intencion.saludo(cita)
+                if saludo_campana or appointment_id_fijo or not cita:
+                    greeting = saludo_campana or intencion.saludo(cita)
+                else:
+                    # Llamada entrante: la cita se encontró solo por el caller-ID, que
+                    # cualquiera puede falsear. El saludo no nombra ni la fecha ni el
+                    # paciente hasta que la persona se identifique.
+                    greeting = (
+                        "¡Hola! Te habla la asistente virtual del Centro Odontológico. "
+                        "Para ayudarte con tu cita, ¿me dices tu nombre completo, por favor?"
+                    )
             await _decir_respuesta(session, decir, greeting, bridge, f"{call_id}_greeting")
             messages.append({"role": "assistant", "content": greeting})
 

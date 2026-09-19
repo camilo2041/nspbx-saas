@@ -7,9 +7,12 @@ que hacer configurable desde Ajustes.
 Las horas de acá son hora LOCAL del negocio; el "ahora" se toma de
 `now_local()` y nunca de `utcnow()` (ver app/core/clock.py)."""
 
+import difflib
+import re
+import unicodedata
 from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_local
@@ -86,6 +89,47 @@ def business_hours_error(start: datetime, duration_minutes: int = SLOT_MINUTES) 
     return None
 
 
+MIN_DIGITOS_TELEFONO = 7
+
+
+def solo_digitos(texto: str | None) -> str:
+    return "".join(c for c in (texto or "") if c.isdigit())
+
+
+def condicion_telefono(columna, phone: str | None):
+    """Condición SQL "esta columna es el teléfono `phone`", o None si `phone`
+    no sirve para identificar a nadie.
+
+    Compara los ÚLTIMOS 10 DÍGITOS del número guardado (sin espacios, + ni
+    guiones): el mismo teléfono llega como "3011321381", "573011321381" o
+    "+57 301 132 1381". Un número de menos de 7 dígitos (una extensión interna, un
+    "anonymous", un ANI vacío) NO identifica a nadie: antes se buscaba con
+    `LIKE '%<lo que haya>'`, y un caller-ID de un solo dígito coincidía con
+    cualquier teléfono que terminara igual — el bot le contaba a cualquiera la
+    cita o la deuda de otra persona."""
+    d = solo_digitos(phone)
+    if len(d) < MIN_DIGITOS_TELEFONO:
+        return None
+    guardado = func.regexp_replace(columna, "[^0-9]", "", "g")
+    return guardado.like("%" + d[-10:])
+
+
+def _quitar_tildes(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s or "") if unicodedata.category(c) != "Mn")
+
+
+def nombre_coincide(dicho: str | None, real: str | None) -> bool:
+    """¿El nombre que dijo quien llama corresponde al del paciente?
+
+    El caller-ID lo puede falsear cualquiera; el nombre es un segundo dato que
+    hay que conocer. Se acepta que alguno de los nombres o apellidos dichos
+    (de 3 letras o más) se parezca a alguno del paciente: el reconocimiento de
+    voz no escribe siempre igual ("Andrés"/"Andres", "Jimena"/"Ximena")."""
+    a = {t for t in re.split(r"\W+", _quitar_tildes(dicho).lower()) if len(t) >= 3}
+    b = {t for t in re.split(r"\W+", _quitar_tildes(real).lower()) if len(t) >= 3}
+    return any(difflib.SequenceMatcher(None, x, y).ratio() >= 0.82 for x in a for y in b)
+
+
 async def find_next_appointment(
     session: AsyncSession,
     phone: str,
@@ -96,18 +140,16 @@ async def find_next_appointment(
     # mismo teléfono llega distinto según de dónde venga la llamada
     # ("3011321381", "573011321381", "+57 301 132 1381"), y una comparación
     # exacta hacía que el bot no encontrara la cita del paciente.
-    digits = "".join(c for c in phone if c.isdigit())
-    suffix = digits[-10:] if len(digits) >= 10 else digits
+    cond_tel = condicion_telefono(Appointment.phone, phone)
+    if cond_tel is None:
+        return None
 
     query = select(Appointment).where(Appointment.status == "confirmed")
     if tenant_id is not None:
         # Con la sesión del DUEÑO (voizbot) no hay RLS que filtre: sin esto
         # el bot encontraría las citas de CUALQUIER empresa para un número.
         query = query.where(Appointment.tenant_id == tenant_id)
-    if suffix:
-        query = query.where(Appointment.phone.like(f"%{suffix}"))
-    else:
-        query = query.where(Appointment.phone == phone)
+    query = query.where(cond_tel)
     if on_date:
         start = datetime.combine(on_date, time.min)
         end = datetime.combine(on_date, time.max)
