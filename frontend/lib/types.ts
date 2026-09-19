@@ -199,6 +199,8 @@ export interface Queue {
 }
 
 export interface SystemSettings {
+  // false con varias empresas: el backend oculta los ajustes globales (Event Socket, disco, respaldos).
+  puede_infraestructura?: boolean;
   app_name: string;
   fs_domain: string;
   fs_esl_host: string;
@@ -216,6 +218,7 @@ export interface SystemSettings {
   ai_llm_api_key: string | null;
   deepgram_api_key: string | null;
   record_all_calls: boolean;
+  allow_international: boolean;
   ai_stt_provider: "elevenlabs" | "deepgram";
   ai_voice_provider: "edge" | "elevenlabs" | "deepgram";
   ai_voice_id: string;

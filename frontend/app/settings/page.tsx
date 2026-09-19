@@ -64,6 +64,7 @@ const empty: SystemSettings = {
   ai_llm_api_key: "",
   deepgram_api_key: "",
   record_all_calls: false,
+  allow_international: false,
   ai_stt_provider: "elevenlabs",
   ai_voice_provider: "elevenlabs",
   ai_voice_id: "",
@@ -102,6 +103,8 @@ const empty: SystemSettings = {
 
 export default function SettingsPage() {
   const [form, setForm] = useState<SystemSettings>(empty);
+  // Con varias empresas, lo global (Event Socket, disco, respaldos, diagnóstico) no se muestra.
+  const infra = form.puede_infraestructura !== false;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -124,14 +127,17 @@ export default function SettingsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [st, m, qs] = await Promise.all([
+      const [st, qs] = await Promise.all([
         api.get<SystemSettings>("/api/system/settings"),
-        api.get<MaintenanceStatus>("/api/system/maintenance"),
         api.get<Queue[]>("/api/queues"),
       ]);
       setForm(st);
-      setMant(m);
       setQueues(qs);
+      // Respaldos y diagnóstico son de TODA la plataforma: el backend los
+      // rechaza (403) cuando la instalación tiene varias empresas.
+      if (st.puede_infraestructura !== false) {
+        setMant(await api.get<MaintenanceStatus>("/api/system/maintenance"));
+      }
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
@@ -157,8 +163,8 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    cargarDiagnostico();
-  }, [cargarDiagnostico]);
+    if (!loading && form.puede_infraestructura !== false) cargarDiagnostico();
+  }, [cargarDiagnostico, loading, form.puede_infraestructura]);
 
   const set = <K extends keyof SystemSettings>(key: K, value: SystemSettings[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -276,6 +282,7 @@ export default function SettingsPage() {
         </div>
       )}
 
+        {infra && (
       <Card className="mb-4">
         <CardHeader
           title="Diagnóstico"
@@ -363,13 +370,16 @@ export default function SettingsPage() {
           )}
         </CardBody>
       </Card>
+        )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card delay={0}>
           <CardHeader title="General" subtitle="Identidad del PBX y dominio SIP" />
           <CardBody className="space-y-4">
             <Input label="Nombre del PBX" value={form.app_name} onChange={(v) => set("app_name", v)} required />
+            {infra && (
             <Input label="Dominio SIP" value={form.fs_domain} onChange={(v) => set("fs_domain", v)} required mono />
+            )}
             <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
               <div>
                 <div className="text-sm text-fg-soft">Grabar todas las llamadas</div>
@@ -379,9 +389,19 @@ export default function SettingsPage() {
               </div>
               <Toggle checked={form.record_all_calls} onChange={(v) => set("record_all_calls", v)} />
             </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div>
+                <div className="text-sm text-fg-soft">Permitir llamadas internacionales</div>
+                <div className="mt-0.5 text-[11px] leading-snug text-faint">
+                  Apagado, solo se marcan números nacionales (hasta 10 dígitos, sin prefijos 00/011). Actívalo solo si lo necesitas: es el destino habitual del fraude telefónico.
+                </div>
+              </div>
+              <Toggle checked={form.allow_international} onChange={(v) => set("allow_international", v)} />
+            </div>
           </CardBody>
         </Card>
 
+        {infra && (
         <Card delay={80}>
           <CardHeader title="FreeSWITCH (ESL)" subtitle="Canal de control con el motor telefónico" />
           <CardBody className="space-y-4">
@@ -406,6 +426,7 @@ export default function SettingsPage() {
             />
           </CardBody>
         </Card>
+        )}
 
         <Card delay={160}>
           <CardHeader title="Softphones" subtitle="Datos que usan el navegador y los teléfonos de escritorio" />
@@ -599,6 +620,7 @@ export default function SettingsPage() {
           </CardBody>
         </Card>
 
+        {infra && (
         <Card delay={340} className="lg:col-span-2">
           <CardHeader
             title="Conector Issabel (ARI)"
@@ -644,6 +666,7 @@ export default function SettingsPage() {
             </div>
           </CardBody>
         </Card>
+        )}
 
         <Card delay={360}>
           <CardHeader
@@ -676,6 +699,7 @@ export default function SettingsPage() {
           </CardBody>
         </Card>
 
+        {infra && (
         <Card delay={390}>
           <CardHeader
             title="CPU y memoria — capacidad de la central"
@@ -711,7 +735,9 @@ export default function SettingsPage() {
             </Note>
           </CardBody>
         </Card>
+        )}
 
+        {infra && (
         <Card delay={400} className="lg:col-span-2">
           <CardHeader
             title="Espacio en disco — grabaciones y respaldos"
@@ -793,6 +819,7 @@ export default function SettingsPage() {
             </Button>
           </CardBody>
         </Card>
+        )}
       </div>
 
       <div className="mt-4">

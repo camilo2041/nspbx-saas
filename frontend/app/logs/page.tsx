@@ -19,7 +19,7 @@ const NIVELES = [
 // sin límite hasta comerse la memoria de la pestaña.
 const MAX_LINEAS = 4000;
 
-type Estado = "conectando" | "conectado" | "reconectando";
+type Estado = "conectando" | "conectado" | "reconectando" | "sin_acceso";
 
 /** Colorea por severidad, igual que uno lee `fs_cli` a simple vista. */
 function claseLinea(linea: string): string {
@@ -81,8 +81,14 @@ export default function LogsPage() {
       ws.onmessage = (ev) => {
         bufferRef.current.push(ev.data as string);
       };
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         if (cerrado) return;
+        // 4401/4403: el backend NIEGA el acceso (sin permiso, o los logs son de toda
+        // la plataforma y hay varias empresas). Reintentar cada 2 s no serviría de nada.
+        if (ev.code === 4401 || ev.code === 4403) {
+          setEstado("sin_acceso");
+          return;
+        }
         setEstado("reconectando");
         reintentoTimer = setTimeout(conectar, 2000);
       };
@@ -133,6 +139,7 @@ export default function LogsPage() {
     conectado: { label: "En vivo", color: "green" },
     conectando: { label: "Conectando…", color: "amber" },
     reconectando: { label: "Reconectando…", color: "amber" },
+    sin_acceso: { label: "Sin acceso", color: "red" },
   };
   const e = estadoInfo[estado];
 
@@ -199,7 +206,11 @@ export default function LogsPage() {
         >
           {visibles.length === 0 ? (
             <div className="py-10 text-center text-faint">
-              {estado === "conectado" ? "Esperando actividad…" : "Conectando con FreeSWITCH…"}
+              {estado === "conectado"
+                ? "Esperando actividad…"
+                : estado === "sin_acceso"
+                  ? "Los logs de FreeSWITCH incluyen el tráfico de todas las empresas de la plataforma, por eso no están disponibles para una empresa."
+                  : "Conectando con FreeSWITCH…"}
             </div>
           ) : (
             visibles.map((l, i) => (
