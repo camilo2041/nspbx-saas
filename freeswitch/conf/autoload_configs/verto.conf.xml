@@ -13,8 +13,8 @@
 
   <profiles>
     <profile name="default-v4">
-      <param name="bind-local" value="$${local_ip_v4}:5066"/>
-      <param name="bind-local" value="$${local_ip_v4}:7443" secure="true"/>
+      <param name="bind-local" value="$${local_ip_v4}:8081"/>
+      <param name="bind-local" value="$${local_ip_v4}:8082" secure="true"/>
       <param name="force-register-domain" value="$${domain}"/>
       <param name="secure-combined" value="$${certs_dir}/wss.pem"/>
       <param name="secure-chain" value="$${certs_dir}/wss.pem"/>
@@ -38,8 +38,8 @@
     </profile>
 
     <profile name="default-v6">
-      <param name="bind-local" value="[$${local_ip_v6}]:5066"/>
-      <param name="bind-local" value="[$${local_ip_v6}]:7443" secure="true"/>
+      <param name="bind-local" value="[$${local_ip_v6}]:8081"/>
+      <param name="bind-local" value="[$${local_ip_v6}]:8082" secure="true"/>
       <param name="force-register-domain" value="$${domain}"/>
       <param name="secure-combined" value="$${certs_dir}/wss.pem"/>
       <param name="secure-chain" value="$${certs_dir}/wss.pem"/>
