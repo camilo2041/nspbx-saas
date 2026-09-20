@@ -428,6 +428,52 @@ async def _buscar_deuda(session, caller_phone: str, tenant_id: int) -> Debt | No
     return (await session.execute(query)).scalars().first()
 
 
+def _bloque_deuda(deuda) -> str:
+    """Contexto de la deuda que se le da al modelo. Lo comparten la llamada real y el simulador de bots."""
+    monto = f"{int(deuda.amount):,}".replace(",", ".")
+    bloque = (
+        f"\n\nDEUDA DE LA PERSONA QUE LLAMA — CONFIDENCIAL. NO la reveles (monto, "
+        f"vencimiento, factura) hasta que la persona confirme que es "
+        f"{deuda.debtor_name} o una persona autorizada. Si quien contesta dice "
+        f"no ser el titular, no des ningún dato y termina la llamada con cortesía.\n"
+        f"- Titular: {deuda.debtor_name}\n"
+        f"- Monto adeudado: {monto} pesos\n"
+    )
+    if deuda.due_date:
+        bloque += f"- Vencimiento: {fecha_en_palabras(deuda.due_date.date())} ({deuda.due_date.date().isoformat()})\n"
+    if deuda.invoice_number:
+        bloque += f"- Factura / número de cuenta: {deuda.invoice_number}\n"
+    if deuda.notes:
+        bloque += f"- Nota: {deuda.notes}\n"
+    bloque += (
+        "\nYa conoces esta deuda: NO la leas de nuevo salvo que la persona lo pida. "
+        "Di los montos en pesos, de forma natural ('doscientos cincuenta mil pesos'), "
+        "nunca número por número."
+    )
+    return bloque
+
+
+def _bloque_cita(cita, fijo: bool) -> str:
+    """Contexto de la cita. `fijo` = llamada de campaña (se llamó al paciente); si no, es una
+    llamada entrante identificada solo por el caller-ID y los datos son confidenciales."""
+    cuando = f"{fecha_en_palabras(cita.appointment_date.date())} a las {hora_en_palabras(cita.appointment_date)}"
+    if fijo:
+        return (
+            f"\n\nLa persona que llama tiene una cita agendada para el {cuando}"
+            f" a nombre de {cita.patient_name}. Ya se la mencionaste al saludar, "
+            "así que no la repitas como si fuera nueva."
+        )
+    return (
+        "\n\nHay una cita agendada para el número de quien llama — CONFIDENCIAL. NO reveles "
+        "el nombre del paciente, la fecha ni la hora hasta que la persona diga el nombre del "
+        "paciente y coincida. Para confirmar, cancelar o mover la cita pídele primero su "
+        "nombre completo y pásalo en nombre_paciente. Si dice no ser el paciente, no des "
+        "ningún dato y termina con cortesía.\n"
+        f"- Paciente (no lo digas): {cita.patient_name}\n"
+        f"- Cita (no la digas todavía): {cuando}\n"
+    )
+
+
 _PIDE_NOMBRE = (
     "No pude verificar que seas el paciente de esa cita. Pídele su nombre completo "
     "y vuelve a intentarlo con el nombre que te dé en nombre_paciente."
@@ -1041,27 +1087,7 @@ async def handle_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
                 if intencion.key == "cobranza":
                     deuda = await _buscar_deuda(db, caller_phone, tenant_id)
                     if deuda:
-                        monto = f"{int(deuda.amount):,}".replace(",", ".")
-                        bloque_deuda = (
-                            f"\n\nDEUDA DE LA PERSONA QUE LLAMA — CONFIDENCIAL. NO la reveles (monto, "
-                            f"vencimiento, factura) hasta que la persona confirme que es "
-                            f"{deuda.debtor_name} o una persona autorizada. Si quien contesta dice "
-                            f"no ser el titular, no des ningún dato y termina la llamada con cortesía.\n"
-                            f"- Titular: {deuda.debtor_name}\n"
-                            f"- Monto adeudado: {monto} pesos\n"
-                        )
-                        if deuda.due_date:
-                            bloque_deuda += f"- Vencimiento: {fecha_en_palabras(deuda.due_date.date())} ({deuda.due_date.date().isoformat()})\n"
-                        if deuda.invoice_number:
-                            bloque_deuda += f"- Factura / número de cuenta: {deuda.invoice_number}\n"
-                        if deuda.notes:
-                            bloque_deuda += f"- Nota: {deuda.notes}\n"
-                        bloque_deuda += (
-                            "\nYa conoces esta deuda: NO la leas de nuevo salvo que la persona lo pida. "
-                            "Di los montos en pesos, de forma natural ('doscientos cincuenta mil pesos'), "
-                            "nunca número por número."
-                        )
-                        messages[0]["content"] += bloque_deuda
+                        messages[0]["content"] += _bloque_deuda(deuda)
                 else:
                     cita = await db.get(Appointment, appointment_id_fijo) if appointment_id_fijo else None
                     if cita is None:
@@ -1069,25 +1095,7 @@ async def handle_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 
             if intencion.key != "cobranza":
                 if cita:
-                    cuando = f"{fecha_en_palabras(cita.appointment_date.date())} a las {hora_en_palabras(cita.appointment_date)}"
-                    if appointment_id_fijo:
-                        messages[0]["content"] += (
-                            f"\n\nLa persona que llama tiene una cita agendada para el {cuando}"
-                            f" a nombre de {cita.patient_name}. Ya se la mencionaste al saludar, "
-                            "así que no la repitas como si fuera nueva."
-                        )
-                    else:
-                        # Llamada entrante: solo se sabe el número (caller-ID), que se
-                        # puede falsear. Los datos de la cita son confidenciales.
-                        messages[0]["content"] += (
-                            "\n\nHay una cita agendada para el número de quien llama — CONFIDENCIAL. NO reveles "
-                            "el nombre del paciente, la fecha ni la hora hasta que la persona diga el nombre del "
-                            "paciente y coincida. Para confirmar, cancelar o mover la cita pídele primero su "
-                            "nombre completo y pásalo en nombre_paciente. Si dice no ser el paciente, no des "
-                            "ningún dato y termina con cortesía.\n"
-                            f"- Paciente (no lo digas): {cita.patient_name}\n"
-                            f"- Cita (no la digas todavía): {cuando}\n"
-                        )
+                    messages[0]["content"] += _bloque_cita(cita, bool(appointment_id_fijo))
                 elif intencion.requiere_cita:
                     # La gestión no tiene sentido sin cita (confirmar, mover o
                     # cancelar algo que no existe). Se avisa y se corta, en vez

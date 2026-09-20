@@ -1,11 +1,16 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session
-from app.models import VoiceBot
+from app.core import limitador, validacion
+from app.core.auth import usuario_actual
+from app.core.database import get_session, tenant_de_sesion
+from app.core import permissions
+from app.core.clock import now_local
+from app.models import Appointment, Debt, User, VoiceBot
 from app.schemas import (
     VoiceBotCreate,
     VoiceBotFlowUpdate,
@@ -14,7 +19,7 @@ from app.schemas import (
     VoiceBotTtsRequest,
     VoiceBotUpdate,
 )
-from app.services import deepgram, greetings, tts, tts_elevenlabs
+from app.services import bot_sim, deepgram, greetings, tts, tts_elevenlabs
 from app.services.ajustes import ajustes_de
 from app.services.esl import reloadxml
 from app.services.flow_engine import legacy_flow_from_bot
@@ -223,8 +228,6 @@ async def generate_greeting_tts(
     bot = await session.get(VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
-    if not validacion.id_nodo_valido(node_id):
-        raise HTTPException(status_code=422, detail="Id de nodo no válido")
     try:
         audio, ext = await _synthesize(payload.text, payload.voice, payload.provider, session)
         path = greetings.save_greeting(bot_id, f"greeting.{ext}", audio)
@@ -257,3 +260,85 @@ async def voicebots_reload():
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"FreeSWITCH no disponible: {exc}")
     return {"ok": True, "output": out}
+
+
+class MensajePrueba(BaseModel):
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=bot_sim.MAX_CHARS)
+
+
+class PruebaBot(BaseModel):
+    """Un turno de la simulación. Menú: `nodo` + `tecla` (sin nodo = empezar).
+    IA: `mensajes` con la conversación hasta ahora."""
+
+    nodo: str | None = Field(default=None, max_length=60)
+    tecla: str | None = Field(default=None, max_length=1)
+    mensajes: list[MensajePrueba] = Field(default_factory=list, max_length=bot_sim.MAX_MENSAJES)
+    intencion: str = Field(default="general", max_length=30, pattern="^[a-z_]{1,30}$")
+    modo: str | None = Field(default=None, pattern="^(ivr|ia)$")
+    # Número desde el que "llama" quien prueba: con él el bot ve la cita o la deuda REALES
+    # de ese teléfono, igual que en una llamada entrante.
+    telefono: str | None = Field(default=None, max_length=30, pattern=r"^[0-9+ ()\-]{0,30}$")
+
+
+@router.get("/probar/datos")
+async def datos_para_probar(
+    session: AsyncSession = Depends(get_session),
+    usuario: User = Depends(usuario_actual),
+):
+    """Teléfonos con cita o deuda REALES para simular una llamada de cada uno (solo lo que el rol puede ver)."""
+    salida: dict = {"citas": [], "deudas": []}
+    if permissions.puede(usuario.role, permissions.CITAS_GESTIONAR):
+        filas = (
+            await session.execute(
+                select(Appointment)
+                .where(Appointment.status == "confirmed", Appointment.appointment_date >= now_local())
+                .order_by(Appointment.appointment_date)
+                .limit(8)
+            )
+        ).scalars().all()
+        salida["citas"] = [
+            {"telefono": a.phone, "nombre": a.patient_name, "cuando": a.appointment_date.strftime("%d/%m %H:%M")}
+            for a in filas
+        ]
+    if permissions.puede(usuario.role, permissions.CAMPANAS_GESTIONAR):
+        filas = (
+            await session.execute(
+                select(Debt).where(Debt.status.in_(("open", "promised", "overdue"))).order_by(Debt.updated_at.desc()).limit(8)
+            )
+        ).scalars().all()
+        salida["deudas"] = [{"telefono": d.phone, "nombre": d.debtor_name, "monto": int(d.amount)} for d in filas]
+    return salida
+
+
+@router.post("/{bot_id}/probar")
+async def probar_bot(
+    bot_id: int,
+    payload: PruebaBot,
+    session: AsyncSession = Depends(get_session),
+    usuario: User = Depends(usuario_actual),
+):
+    """Simula una conversación con el bot SIN llamar y SIN escribir en la agenda ni en la cobranza
+    (ver services/bot_sim.py)."""
+    bot = await session.get(VoiceBot, bot_id)
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot no encontrado")
+    limitador.limitar_uso(limitador.POR_SIMULADOR, f"sim:{usuario.id}")
+
+    modo = payload.modo or ("ia" if bot.bot_type == "ai" else "ivr")
+    if modo == "ivr":
+        return bot_sim.paso_ivr(bot, payload.nodo, payload.tecla)
+
+    if not payload.mensajes or payload.mensajes[-1].role != "user":
+        raise HTTPException(status_code=422, detail="Escribe un mensaje para el bot")
+    ajustes = await ajustes_de(session)
+    try:
+        return await bot_sim.turno_ia(
+            session, ajustes, tenant_de_sesion(session),
+            [{"role": m.role, "content": m.content} for m in payload.mensajes], payload.intencion,
+            payload.telefono or "",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=502, detail="El modelo de IA no respondió. Revisa la configuración en Ajustes.")
