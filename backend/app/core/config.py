@@ -144,6 +144,9 @@ class Settings(BaseSettings):
     fcm_project_id: str = ""
     # Contenido completo del JSON de la cuenta de servicio (no la ruta).
     fcm_service_account_json: str = ""
+    # Alternativa al JSON en una variable (multilínea, incómodo en un .env): ruta de un
+    # archivo montado en el contenedor, p. ej. /run/secrets/fcm.json.
+    fcm_service_account_file: str = ""
 
 
 settings = Settings()

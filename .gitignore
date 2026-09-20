@@ -86,3 +86,7 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# Claves privadas (Firebase, APNs): nunca al repositorio
+secrets/
+mobile/google-services.json

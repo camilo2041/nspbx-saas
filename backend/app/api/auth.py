@@ -2,16 +2,18 @@
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core import limitador, permissions
 from app.core.auth import usuario_actual
+from app.core.config import settings
 from app.core.database import get_admin_session, get_session
 from app.core.security import (
     crear_token,
@@ -30,7 +32,7 @@ from app.schemas import (
     SesionOut,
     UserOut,
 )
-from app.services import esl, turn
+from app.services import esl, push, turn
 from app.services.sesiones import revocar_sesiones
 
 # Un refresh token recién rotado puede llegar dos veces por una carrera legítima
@@ -334,6 +336,62 @@ async def poner_dnd(payload: DndRequest, usuario: User = Depends(usuario_actual)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"FreeSWITCH no disponible: {exc}")
     return {"ok": True, "dnd": payload.enabled}
+
+
+class ProbarPushIn(BaseModel):
+    segundos: int = Field(default=15, ge=0, le=60)
+
+
+@router.post("/probar-push")
+async def probar_push(
+    payload: ProbarPushIn,
+    usuario: User = Depends(usuario_actual),
+    session: AsyncSession = Depends(get_session),
+):
+    """Manda al teléfono de quien pide una llamada de PRUEBA por push, tras unos segundos.
+
+    Sirve para comprobar de punta a punta, sin que nadie llame, que el aviso despierta la app con
+    la pantalla apagada: se pulsa, se bloquea el teléfono y a los N segundos debe sonar. El
+    resultado real de Firebase/Apple se devuelve para poder leer el motivo si falla."""
+    dispositivos = (
+        await session.execute(select(DeviceToken).where(DeviceToken.user_id == usuario.id))
+    ).scalars().all()
+    if not dispositivos:
+        raise HTTPException(
+            status_code=409,
+            detail="Este teléfono todavía no registró el aviso de llamadas. Cierra sesión y vuelve a entrar con la "
+            "app ya configurada con Firebase (Android) o Apple (iPhone).",
+        )
+    if not push.android_configurado() and not (settings.apns_key_id and settings.apns_auth_key):
+        raise HTTPException(status_code=503, detail="El servidor no tiene configurados los avisos (Firebase/Apple).")
+
+    evento = {
+        "eventId": str(uuid.uuid4()),
+        "serverCallId": str(uuid.uuid4()),
+        "hasVideo": False,
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+        "caller": {"id": "prueba", "displayName": "Prueba de NSPBX", "phoneNumber": None},
+        "metadata": {"prueba": True},
+    }
+
+    async def _enviar_luego() -> None:
+        await asyncio.sleep(payload.segundos)
+        for d in dispositivos:
+            try:
+                if d.token_type == "APNS_VOIP":
+                    await push.enviar_voip_ios(d.token, evento)
+                elif d.token_type == "FCM":
+                    motivo = await push.enviar_push_android(d.token, evento)
+                    if motivo:
+                        logger.warning("Prueba de push a %s falló: %s", usuario.username, motivo)
+            except Exception:
+                logger.exception("Prueba de push: error con un dispositivo")
+
+    if payload.segundos == 0:
+        await _enviar_luego()
+    else:
+        asyncio.create_task(_enviar_luego())
+    return {"ok": True, "dispositivos": len(dispositivos), "segundos": payload.segundos}
 
 
 @router.post("/dispositivo", status_code=status.HTTP_204_NO_CONTENT)

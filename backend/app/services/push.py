@@ -85,14 +85,38 @@ async def enviar_voip_ios(voip_token: str, incoming_call_event: dict) -> None:
 _fcm_token_cache: tuple[str, float] | None = None
 
 
+def _cuenta_servicio() -> dict | None:
+    """La cuenta de servicio de Firebase (JSON de la variable o de un archivo), o None si no está configurada."""
+    crudo = settings.fcm_service_account_json
+    if not crudo and settings.fcm_service_account_file:
+        try:
+            with open(settings.fcm_service_account_file, encoding="utf-8") as f:
+                crudo = f.read()
+        except OSError as exc:
+            logger.error("No se pudo leer FCM_SERVICE_ACCOUNT_FILE: %s", exc)
+            return None
+    if not crudo:
+        return None
+    try:
+        cuenta = json.loads(crudo)
+    except ValueError:
+        logger.error("FCM_SERVICE_ACCOUNT_JSON no es un JSON válido (¿se cortó al pegarlo en el .env?)")
+        return None
+    return cuenta if isinstance(cuenta, dict) and cuenta.get("client_email") and cuenta.get("private_key") else None
+
+
+def android_configurado() -> bool:
+    return _cuenta_servicio() is not None and bool(settings.fcm_project_id or (_cuenta_servicio() or {}).get("project_id"))
+
+
 async def _fcm_access_token() -> str | None:
     global _fcm_token_cache
-    if not settings.fcm_service_account_json:
+    cuenta = _cuenta_servicio()
+    if not cuenta:
         return None
     ahora = time.time()
     if _fcm_token_cache and ahora - _fcm_token_cache[1] < 50 * 60:
         return _fcm_token_cache[0]
-    cuenta = json.loads(settings.fcm_service_account_json)
     assertion = jwt.encode(
         {
             "iss": cuenta["client_email"],
@@ -118,7 +142,7 @@ async def _fcm_access_token() -> str | None:
     return token
 
 
-async def enviar_push_android(push_token: str, incoming_call_event: dict) -> None:
+async def enviar_push_android(push_token: str, incoming_call_event: dict) -> str | None:
     """Mensaje `data`-only de prioridad alta: la app lo recibe con la
     pantalla apagada y es el propio `expo-callkit-telecom` (su
     FirebaseMessagingService, ver mobile/app.json) quien lo parsea antes
@@ -127,14 +151,15 @@ async def enviar_push_android(push_token: str, incoming_call_event: dict) -> Non
 
     El formato (`messageType`/`incomingCall` como JSON-string) es el que
     ese módulo espera; no es arbitrario."""
-    if not settings.fcm_project_id:
+    proyecto = settings.fcm_project_id or (_cuenta_servicio() or {}).get("project_id", "")
+    if not proyecto or not _cuenta_servicio():
         logger.warning("FCM sin configurar (FCM_PROJECT_ID/FCM_SERVICE_ACCOUNT_JSON): push no enviado")
-        return
+        return "FCM sin configurar en el servidor"
     try:
         access_token = await _fcm_access_token()
         if not access_token:
-            return
-        url = f"https://fcm.googleapis.com/v1/projects/{settings.fcm_project_id}/messages:send"
+            return "No se pudo obtener el acceso a Firebase"
+        url = f"https://fcm.googleapis.com/v1/projects/{proyecto}/messages:send"
         body = {
             "message": {
                 "token": push_token,
@@ -151,5 +176,8 @@ async def enviar_push_android(push_token: str, incoming_call_event: dict) -> Non
             )
         if resp.status_code != 200:
             logger.warning("FCM rechazó el push (%s): %s", resp.status_code, resp.text)
+            return f"Firebase rechazó el aviso ({resp.status_code}): {resp.text[:160]}"
     except Exception:
         logger.exception("Error enviando push a Android")
+        return "Error de red enviando el aviso a Firebase"
+    return None
