@@ -62,8 +62,12 @@ def write_gateway_file(trunk, slug: str) -> Path:
     validacion.exigir(validacion.HOST_RE, trunk.gateway_host, "Host de la troncal")
     if trunk.from_domain:
         validacion.exigir(validacion.HOST_RE, trunk.from_domain, "Dominio de origen")
-    if getattr(trunk, "codec_prefs", None):
-        validacion.exigir(validacion.CODECS_RE, trunk.codec_prefs, "Códecs")
+    # Datos guardados antes de existir la validación traen a veces un retorno de carro
+    # o espacios al final ("PCMU,PCMA\r"): se limpian en vez de descartar la troncal, que
+    # dejaba de cursar llamadas tras actualizar. Solo si tras limpiar sigue mal se rechaza.
+    codecs = (getattr(trunk, "codec_prefs", None) or "").strip()
+    if codecs:
+        validacion.exigir(validacion.CODECS_RE, codecs, "Códecs")
     gw_name = nombre_gateway(trunk.name, slug)
     path = _ruta_segura(gw_name)
 
@@ -95,7 +99,7 @@ def write_gateway_file(trunk, slug: str) -> Path:
     ping = getattr(trunk, "ping", None)
     if ping:
         lines.append(f'    <param name="ping" value="{_attr(ping)}"/>')
-    codec_prefs = getattr(trunk, "codec_prefs", None)
+    codec_prefs = codecs
     if codec_prefs:
         lines.append(f'    <param name="codec-prefs" value="{_attr(codec_prefs)}"/>')
     lines.append('    <param name="context" value="public"/>')

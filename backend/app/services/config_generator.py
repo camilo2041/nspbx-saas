@@ -186,13 +186,53 @@ def _append_mobile_push_hook(context: ET.Element, extensions: list, push_numbers
         condition = ET.SubElement(
             extension, "condition", attrib={"field": "destination_number", "expression": f"^{re.escape(numero)}$"}
         )
-        url = (
-            f"http://backend:8000/fs/push/{firma_push(slug, numero)}/{slug}/{numero}"
-            "?caller_id_number=${url_encode(${caller_id_number})}"
-            "&caller_id_name=${url_encode(${caller_id_name})}"
-            "&call_uuid=${uuid} get"
+        # `bgsystem` + el binario `curl` del contenedor, y NO la aplicación `curl`: esa
+        # es de mod_curl, que esta imagen de FreeSWITCH no trae, y una aplicación
+        # inexistente en el dialplan CUELGA la llamada. Como aquí sí hay un shell, la
+        # URL solo lleva datos que FreeSWITCH o nosotros controlamos (firma hex, slug y
+        # número validados, uuid del canal): nada que escriba quien llama. Su nombre y
+        # número los consulta el backend por ESL con el uuid (ver api/fs_push.py).
+        url = f"http://backend:8000/fs/push/{firma_push(slug, numero)}/{slug}/{numero}?call_uuid=${{uuid}}"
+        ET.SubElement(
+            condition,
+            "action",
+            attrib={"application": "bgsystem", "data": f"curl -s -m 3 -o /dev/null '{url}'"},
         )
-        ET.SubElement(condition, "action", attrib={"application": "curl", "data": url})
+
+
+def _append_push_bridge_routes(context: ET.Element, push_numbers: set[str], extensions: list, dominio: str) -> None:
+    """Llamada a una extensión con la app móvil: REINTENTA el timbrado unos segundos.
+
+    Con el teléfono bloqueado la app no está registrada: el push la despierta, pero
+    tarda entre 2 y 8 s en conectar y registrarse. Un `bridge` normal pregunta una
+    sola vez, ve que no hay nadie registrado (USER_NOT_REGISTERED) y corta al instante,
+    antes de que el teléfono alcance a aparecer. Con `originate_retries` FreeSWITCH
+    vuelve a intentarlo cada 2,5 s (unos 25 s en total) y la llamada entra apenas la app
+    se registra; quien llama oye el tono de llamando mientras tanto.
+
+    Solo para números con la app móvil registrada: un teléfono de escritorio apagado
+    sigue dando ocupado enseguida, sin hacer esperar a quien llama.
+    """
+    if not push_numbers or not dominio:
+        return
+    for numero in sorted(n for n in push_numbers if any(e.number == n for e in extensions)):
+        if not validacion.EXTENSION_RE.fullmatch(numero):
+            continue
+        ext = ET.SubElement(context, "extension", attrib={"name": f"nspbx_push_bridge_{numero}", "continue": "false"})
+        cond = ET.SubElement(ext, "condition", attrib={"field": "destination_number", "expression": f"^{re.escape(numero)}$"})
+        ET.SubElement(cond, "action", attrib={"application": "log", "data": f"Llamada a {numero} con app móvil: reintenta hasta que se registre"})
+        ET.SubElement(cond, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
+        ET.SubElement(cond, "action", attrib={"application": "set", "data": "continue_on_fail=true"})
+        ET.SubElement(cond, "action", attrib={"application": "set", "data": "ringback=%(1000,4000,425)"})
+        ET.SubElement(
+            cond,
+            "action",
+            attrib={
+                "application": "bridge",
+                "data": f"{{originate_retries=10,originate_retry_sleep_ms=2500,call_timeout=45}}user/{numero}@{dominio}",
+            },
+        )
+        ET.SubElement(cond, "action", attrib={"application": "hangup", "data": "NO_ANSWER"})
 
 
 def _append_local_extension_route(context: ET.Element, extensions: list, dominio: str) -> None:
@@ -671,6 +711,7 @@ def build_dialplan_xml(
         _append_dnd_feature_codes(context)
         _append_dnd_hook(context, extensions)
         _append_mobile_push_hook(context, extensions, t.get("push_extensions") or set(), slugs.get(t["tenant_id"], ""))
+        _append_push_bridge_routes(context, t.get("push_extensions") or set(), extensions, dominio)
         _append_local_extension_route(context, extensions, dominio)
         _append_voicebot_routes(section, context, bots, dominio, t["tenant_id"])
         _append_queue_routes(context, queues, dominio)

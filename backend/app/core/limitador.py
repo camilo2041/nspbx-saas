@@ -100,3 +100,15 @@ def registrar_fallo(ip: str, usuario: str) -> None:
 
 def registrar_exito(ip: str, usuario: str) -> None:
     POR_IP_Y_USUARIO.exito(f"{ip}|{usuario}")
+
+
+def limitar_uso(limite: LimiteIntentos, clave: str, mensaje: str = "Demasiadas solicitudes seguidas; espera un momento") -> None:
+    """Tope de uso (no de fallos): cada llamada cuenta, y al pasar el máximo se bloquea un rato."""
+    espera = limite.restante(clave)
+    if espera:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, mensaje, headers={"Retry-After": str(espera)})
+    limite.fallo(clave)
+
+
+# El simulador de bots consume el modelo de IA (cuesta): tope por usuario.
+POR_SIMULADOR = LimiteIntentos(maximo=40, ventana=60, bloqueo=60)

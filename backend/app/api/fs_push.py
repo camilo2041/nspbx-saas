@@ -9,6 +9,7 @@ teléfono real. Ver services/push.py y mobile/SETUP.md.
 
 import asyncio
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -22,11 +23,24 @@ from app.core import validacion
 from app.core.firmas import firma_push_valida
 from app.core.database import get_admin_session
 from app.models import DeviceToken, Extension, Tenant
-from app.services import push
+from app.services import esl, push
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["freeswitch-push"])
+
+_UUID_RE = re.compile(r"[0-9a-fA-F-]{8,64}")
+_NUMERO_RE = re.compile(r"[^0-9+*#]")
+_NOMBRE_RE = re.compile(r"[^A-Za-z0-9 .,\-áéíóúüñÁÉÍÓÚÜÑ]")
+
+
+async def _variable_de_canal(uuid_canal: str, variable: str) -> str:
+    """Valor de una variable del canal, o "" si no se pudo leer (best-effort)."""
+    try:
+        valor = (await asyncio.wait_for(esl.api(f"uuid_getvar {uuid_canal} {variable}"), timeout=1.5)).strip()
+    except Exception:
+        return ""
+    return "" if valor.startswith("-ERR") or valor == "_undef_" else valor[:120]
 
 
 # GET y POST: el `curl` del dialplan (mod_curl) hace GET por omisión.
@@ -52,9 +66,16 @@ async def avisar_llamada_entrante(
     if not validacion.EXTENSION_RE.fullmatch(extension):
         raise HTTPException(status_code=422, detail="Extensión inválida")
     # Vienen del caller ID de quien llama (controlado por un tercero).
-    caller_id_number = caller_id_number[:40]
-    caller_id_name = caller_id_name[:100]
     call_uuid = call_uuid[:64]
+    if not _UUID_RE.fullmatch(call_uuid):
+        call_uuid = ""
+    # El dialplan solo manda el uuid: quién llama se pregunta a FreeSWITCH, así el
+    # nombre del llamante nunca pasa por un shell. Sanea lo recibido: lo controla un tercero.
+    if call_uuid and not (caller_id_number or caller_id_name):
+        caller_id_number = await _variable_de_canal(call_uuid, "caller_id_number")
+        caller_id_name = await _variable_de_canal(call_uuid, "caller_id_name")
+    caller_id_number = _NUMERO_RE.sub("", caller_id_number)[:40]
+    caller_id_name = _NOMBRE_RE.sub("", caller_id_name)[:100]
 
     tenant = (await session.execute(select(Tenant).where(Tenant.slug == slug))).scalar_one_or_none()
     if not tenant:
