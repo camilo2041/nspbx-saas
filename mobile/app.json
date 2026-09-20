@@ -59,6 +59,13 @@
         {
           "faceIDPermission": "NSPBX usa Face ID para desbloquear la app."
         }
+      ],
+      "expo-audio",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "NSPBX lee tus contactos para que puedas llamarlos sin escribir el número."
+        }
       ]
     ],
     "extra": {

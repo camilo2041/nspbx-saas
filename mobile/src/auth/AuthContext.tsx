@@ -22,6 +22,7 @@ import {
   verificarSoloContrasena,
 } from "@/src/api/client";
 import type { SesionOut, UsuarioOut } from "@/src/api/types";
+import { vaciarCache } from "@/src/datos";
 import {
   activarBiometria as guardarBiometria,
   autenticar,
@@ -90,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const quitarSesion = () => {
+    vaciarCache(); // nada del usuario anterior (listas, conversación del asistente) debe verse en la sesión siguiente
     setUsuario(null);
     setPermisos([]);
   };

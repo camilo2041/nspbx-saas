@@ -131,6 +131,7 @@ export default function CuentaScreen() {
         ) : null}
       </Tarjeta>
 
+      <Boton titulo="Diagnóstico de llamadas entrantes" variante="suave" onPress={() => router.push("/diagnostico")} />
       <Boton titulo="Cerrar sesión" variante="peligro" onPress={salir} cargando={saliendo} />
     </ScrollView>
   );

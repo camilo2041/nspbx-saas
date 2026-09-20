@@ -28,7 +28,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { AppState, PermissionsAndroid, Platform, Vibration } from "react-native";
+import { AppState, PermissionsAndroid, Platform } from "react-native";
 import {
   Invitation,
   Inviter,
@@ -41,6 +41,7 @@ import {
 } from "sip.js";
 
 import { peticion, resolverServidorSip, servidorConfigurado } from "@/src/api/client";
+import { detenerTimbre, iniciarTimbre } from "@/src/timbre";
 import type { MiEntorno } from "@/src/api/types";
 import { useAuth } from "@/src/auth/AuthContext";
 import { instalarPolyfillWebRTC } from "@/src/softphone/webrtcPolyfill";
@@ -67,7 +68,8 @@ interface SoftphoneCtx {
   callSeconds: number;
   setDestination: (v: string) => void;
   connect: () => Promise<void>;
-  call: () => Promise<void>;
+  /** Llama a `numero` (o al que esté escrito en el teclado si no se pasa). */
+  call: (numero?: string) => Promise<void>;
   answer: () => Promise<void>;
   reject: () => Promise<void>;
   hangup: () => Promise<void>;
@@ -75,6 +77,8 @@ interface SoftphoneCtx {
   toggleSpeaker: () => void;
   sendDtmf: (digit: string) => void;
   activarDnd: (activar: boolean) => Promise<void>;
+  /** ¿El teléfono tiene un token de push para despertar la app con la llamada? */
+  pushListo: boolean;
 }
 
 const Ctx = createContext<SoftphoneCtx | null>(null);
@@ -235,7 +239,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     stopTimer();
     if (vigiaLlamadaRef.current) clearTimeout(vigiaLlamadaRef.current);
     vigiaLlamadaRef.current = null;
-    Vibration.cancel();
+    detenerTimbre();
     temporizadoresRef.current.forEach((t) => clearTimeout(t));
     temporizadoresRef.current.clear();
     aceptandoRef.current = null;
@@ -258,6 +262,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       session.stateChange.addListener((state) => {
         if (sessionRef.current !== session) return;
         if (state === SessionState.Established) {
+          detenerTimbre();
           setPhase("in-call");
           startTimer();
         } else if (state === SessionState.Terminated) {
@@ -280,6 +285,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         return;
       }
       aceptandoRef.current = inv;
+      detenerTimbre();
 
       // Falla al contestar: se rechaza la llamada, se avisa al sistema y se
       // limpia la pantalla; antes quedaba "Llamada entrante" para siempre.
@@ -330,6 +336,9 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
       // Si el sistema ya tiene la llamada (llegó por push), no se reporta
       // otra vez; si no, se reporta ahora para que suene con la UI nativa.
+      // Con la app abierta suena además un timbre propio: el del sistema no suena si el
+      // teléfono está en silencio o en "no molestar", y la llamada parecería no entrar.
+      if (!idNativoRef.current && AppState.currentState === "active") iniciarTimbre();
       if (!idNativoRef.current) {
         reportIncomingCall({
           eventId: `${Date.now()}`,
@@ -340,7 +349,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           // Sin UI nativa la llamada sigue viva por SIP: quedan los botones
           // Contestar/Rechazar dentro de la app. Como tampoco habrá timbre del
           // sistema, al menos se hace vibrar el teléfono hasta que conteste.
-          Vibration.vibrate([0, 700, 900], true);
+          iniciarTimbre();
         });
       }
     },
@@ -675,8 +684,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const call = useCallback(async () => {
-    if (!destination || phase !== "idle") return;
+  const call = useCallback(async (numero?: string) => {
+    // Los botones llaman a `call` con el evento de toque como primer argumento: solo vale un texto.
+    const destino = typeof numero === "string" && numero ? numero : destination;
+    if (!destino || phase !== "idle") return;
     setConnError("");
     if (connStateRef.current !== "registered") {
       setConnError("Sin conexión con la central: espera a que diga Conectado.");
@@ -689,11 +700,11 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     try {
       prepareAudioSessionForCall(false);
       const id = await startOutgoingCall(
-        { id: destination, displayName: destination, phoneNumber: destination },
+        { id: destino, displayName: destino, phoneNumber: destino },
         { hasVideo: false }
       );
-      salientePendienteRef.current = { id, destino: destination };
-      setRemoteParty(destination);
+      salientePendienteRef.current = { id, destino };
+      setRemoteParty(destino);
       setPhase("outgoing");
       // Respaldo: si el sistema no avisa que aceptó la llamada, se marca igual.
       temporizarLlamada(() => iniciarSaliente(id), 3000);
@@ -793,6 +804,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         toggleSpeaker,
         sendDtmf,
         activarDnd,
+        pushListo: !!voip,
       }}
     >
       {children}

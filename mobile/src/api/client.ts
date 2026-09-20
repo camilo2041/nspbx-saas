@@ -67,6 +67,16 @@ async function limpiarSesionLocal(): Promise<void> {
   await borrarSesion();
 }
 
+/** Cabecera Authorization para pedir recursos que no pasan por `peticion` (audio, descargas). */
+export function cabeceraAuth(): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/** URL absoluta de un recurso de la API. */
+export function urlApi(path: string): string {
+  return `${SERVIDOR_FIJO.apiBase}${path}`;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
