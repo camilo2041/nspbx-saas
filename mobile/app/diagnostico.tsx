@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Linking, PermissionsAndroid, Platform, Text, View } from "react-native";
 
+import { ApiError, peticion } from "@/src/api/client";
 import { Aviso, Pantalla } from "@/src/gestion";
 import { exito } from "@/src/haptico";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
@@ -38,6 +39,8 @@ export default function Diagnostico() {
   const [notif, setNotif] = useState<boolean | null>(null);
   const [mic, setMic] = useState<boolean | null>(null);
   const [probando, setProbando] = useState(false);
+  const [pruebaPush, setPruebaPush] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [enviandoPush, setEnviandoPush] = useState(false);
 
   const revisar = useCallback(async () => {
     const versionNotif = Platform.OS === "android" && Number(Platform.Version) >= 33;
@@ -106,6 +109,24 @@ export default function Diagnostico() {
     setTimeout(() => setProbando(false), 4200);
   };
 
+  // Pide al servidor una llamada de PRUEBA por push a este teléfono, a los 15 s: da tiempo a cerrar la
+  // app y bloquear la pantalla, que es justo lo que hay que comprobar.
+  const probarPush = async () => {
+    setEnviandoPush(true);
+    setPruebaPush(null);
+    try {
+      const r = await peticion<{ segundos: number }>("/api/auth/probar-push", { method: "POST", body: { segundos: 15 } });
+      setPruebaPush({
+        ok: true,
+        texto: `Listo: en ${r.segundos} segundos te llamará «Prueba de NSPBX». Ahora cierra la app (deslízala fuera de recientes) y bloquea el teléfono. Si suena, las llamadas te van a entrar aunque no tengas la app abierta.`,
+      });
+    } catch (e) {
+      setPruebaPush({ ok: false, texto: e instanceof ApiError ? e.message : "No se pudo pedir la prueba. Revisa tu conexión." });
+    } finally {
+      setEnviandoPush(false);
+    }
+  };
+
   return (
     <Pantalla>
       <Aviso
@@ -130,6 +151,15 @@ export default function Diagnostico() {
         </Text>
         <Boton titulo={probando ? "Sonando…" : "Probar timbre (4 s)"} variante="suave" onPress={probar} deshabilitado={probando} />
         <Boton titulo="Ajustes de batería de la app" variante="suave" onPress={abrirBateria} />
+      </Tarjeta>
+
+      <Tarjeta style={{ gap: 10 }}>
+        <Text style={{ fontSize: 15, fontWeight: "700", color: colores.texto }}>Probar una llamada con la app cerrada</Text>
+        <Text style={{ fontSize: 13, color: colores.textoSecundario, lineHeight: 19 }}>
+          Es la prueba que de verdad importa: el servidor te manda una llamada de prueba por push. No necesitas que nadie te llame.
+        </Text>
+        {pruebaPush ? <Aviso texto={pruebaPush.texto} tono={pruebaPush.ok ? "ok" : "peligro"} /> : null}
+        <Boton titulo="Enviarme una llamada de prueba en 15 s" onPress={probarPush} cargando={enviandoPush} />
       </Tarjeta>
 
       {!registrado ? <Boton titulo="Reconectar con la central" onPress={() => connect()} /> : null}

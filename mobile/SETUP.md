@@ -36,20 +36,19 @@ Developer y Firebase en los pasos siguientes.
 
 ## 3. Android — Firebase (push de voz)
 
-1. Creá un proyecto en la [consola de Firebase](https://console.firebase.google.com/) (gratis).
-2. Agregá una app Android con el `android.package` elegido arriba. Descargá el `google-services.json` que te da Firebase.
-3. Poné ese archivo en `mobile/google-services.json` y agregá esta línea a `app.json`:
-   ```jsonc
-   "android": {
-     "googleServicesFile": "./google-services.json",
-     ...
-   }
-   ```
-4. En **Configuración del proyecto → Cuentas de servicio**, generá una clave privada nueva (JSON). En el backend:
+Es lo que hace que una llamada entre **con la app cerrada o el teléfono bloqueado**. Sin esto solo entran con la app abierta.
+
+1. Entra a la [consola de Firebase](https://console.firebase.google.com/) (gratis) y crea un proyecto.
+2. Dentro del proyecto: **Agregar app → Android**, con el nombre de paquete `co.com.gsco.nspbx` (el de `app.json`). Descarga el `google-services.json`.
+3. Déjalo en **`mobile/google-services.json`**. `app.config.js` lo detecta solo (no toques `app.json`); en EAS también puedes subirlo como variable de archivo `GOOGLE_SERVICES_JSON`. No se sube a git.
+4. En Firebase: **Configuración del proyecto → Cuentas de servicio → Generar nueva clave privada**. Guarda el JSON en **`secrets/fcm.json`** en el servidor (carpeta junto a `docker-compose.yml`; también ignorada por git) y en el `.env`:
    ```
    FCM_PROJECT_ID=tu-proyecto-firebase
-   FCM_SERVICE_ACCOUNT_JSON='{"type":"service_account","project_id":"...", ...}'   # el JSON completo, en una sola línea
+   FCM_SERVICE_ACCOUNT_FILE=/run/secrets/fcm.json
    ```
+   (Alternativa: el JSON completo en una línea en `FCM_SERVICE_ACCOUNT_JSON`.)
+5. En el servidor: `docker compose up -d --build backend`.
+6. Genera un APK nuevo (`eas build`), instálalo, **cierra sesión y vuelve a entrar** (así registra su token) y en **Cuenta → Diagnóstico de llamadas entrantes** pulsa **«Enviarme una llamada de prueba en 15 s»**; cierra la app y bloquea el teléfono: debe sonar.
 
 ## 4. Compilar (EAS Build — necesario en Windows)
 
