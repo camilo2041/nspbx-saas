@@ -84,8 +84,7 @@ services:
       # certificado válido del panel.
       - "traefik.http.routers.sipws.rule=Host(`${PBX_HOST:-pbx.localhost}`) && PathPrefix(`/sip`)"
       - "traefik.http.routers.sipws.entrypoints=websecure"
-      - "traefik.http.routers.sipws.tls=true"
-      - "traefik.http.routers.sipws.tls.domains[0].main=${PBX_HOST:-pbx.localhost}"
+      - "traefik.http.routers.sipws.tls.certresolver=${ACME_RESOLVER:-mi-resuelves-ssl}"
       # mod_sofia escucha en ":5066" sin path fijo, así que se le quita
       # el /sip antes de reenviar y la conexión le llega en la raíz.
       - "traefik.http.routers.sipws.middlewares=sip-strip"
@@ -214,8 +213,7 @@ services:
       # tener router, cae en el catch-all del panel y devuelve 404.
       - "traefik.http.routers.api.rule=Host(`${PBX_HOST:-pbx.localhost}`) && (PathPrefix(`/api`) || PathPrefix(`/ws`))"
       - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls=true"
-      - "traefik.http.routers.api.tls.domains[0].main=${PBX_HOST:-pbx.localhost}"
+      - "traefik.http.routers.api.tls.certresolver=${ACME_RESOLVER:-mi-resuelves-ssl}"
       - "traefik.http.services.api.loadbalancer.server.port=8000"
       - "traefik.docker.network=traefik-public"
     depends_on:
@@ -310,8 +308,7 @@ services:
       # ordena por longitud de regla, así que los de path van primero.
       - "traefik.http.routers.panel.rule=Host(`${PBX_HOST:-pbx.localhost}`)"
       - "traefik.http.routers.panel.entrypoints=websecure"
-      - "traefik.http.routers.panel.tls=true"
-      - "traefik.http.routers.panel.tls.domains[0].main=${PBX_HOST:-pbx.localhost}"
+      - "traefik.http.routers.panel.tls.certresolver=${ACME_RESOLVER:-mi-resuelves-ssl}"
       - "traefik.http.services.panel.loadbalancer.server.port=3000"
       # Imprescindible: este contenedor está en DOS redes (la interna y
       # la de Traefik). Sin decirle cuál usar, Traefik puede quedarse con
