@@ -40,8 +40,6 @@ services:
       # aceptar el nuevo. Con esto, el mismo certificado sobrevive entre
       # despliegues.
       - ./freeswitch/certs:/usr/local/freeswitch/certs
-      # Certificados de Cloudflare Origin para Traefik
-      - ./certs:/etc/traefik/certs:ro
     # NOTA: se probó network_mode: host para evitar el NAT de Docker en el
     # tráfico UDP, pero en Docker Desktop con backend WSL2 eso comparte la
     # red de la VM de WSL2, NO la de Windows — ni el navegador ni el resto
