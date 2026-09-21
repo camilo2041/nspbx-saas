@@ -213,7 +213,12 @@ export function useWebcallPhone() {
         if (!uri) throw new Error("Datos SIP inválidos");
         const options: UserAgentOptions = {
           uri,
-          transportOptions: { server: resolverServidorSip(ses.sip_ws_url) },
+          // Ver el mismo ajuste en softphone-context.tsx: sin keepalive,
+          // Cloudflare cierra el WebSocket ocioso a los ~126 s.
+          transportOptions: {
+            server: resolverServidorSip(ses.sip_ws_url),
+            keepAliveInterval: 30,
+          },
           authorizationUsername: ses.username,
           authorizationPassword: ses.password,
           displayName: "Llamada web",

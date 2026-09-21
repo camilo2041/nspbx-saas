@@ -347,7 +347,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
       const options: UserAgentOptions = {
         uri,
-        transportOptions: { server: resolverServidorSip(settings.sip_ws_url) },
+        // keepAliveInterval viene en 0 (desactivado) en SIP.js. Sin él, el
+        // proxy de Cloudflare cierra el WebSocket por inactividad —medido:
+        // 126 s— y el softphone entra en un ciclo de reconexión que aborta
+        // la recolección ICE y manda INVITEs con SDP sin candidatos.
+        transportOptions: {
+          server: resolverServidorSip(settings.sip_ws_url),
+          keepAliveInterval: 30,
+        },
         authorizationUsername: ext.number,
         authorizationPassword: ext.password,
         displayName: ext.caller_id_name || ext.number,
