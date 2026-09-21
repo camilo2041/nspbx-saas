@@ -114,6 +114,23 @@
          rtp-ip/sip-ip por ext-rtp-ip/ext-sip-ip en el SDP -> sin audio.
          Forzar esto asegura que siempre se anuncie la IP externa. -->
     <param name="aggressive-nat-detection" value="true"/>
+
+    <!-- Sin esto NO SE PUEDE LLAMAR a un softphone del navegador, aunque el
+         registro funcione perfecto y el contacto figure como Reachable.
+         El softphone entra por Traefik, así que sofia guarda como ruta de
+         vuelta el puerto de ORIGEN efímero de Traefik
+         (fs_path=...172.19.0.2:46520;transport=wss). Al mandarle el INVITE,
+         tport_by_addrinfo no reconoce ese socket como reusable, y en vez de
+         escribir en el WebSocket que ya tiene abierto intenta CONECTARSE a
+         ese puerto — donde no escucha nadie. El INVITE queda encolado y no
+         se transmite nunca: ni error, ni línea en el log, ni paquete en
+         `sofia global siptrace on`. El que llama solo ve un 408 a los 32 s,
+         cuando expira el Timer B.
+         Estos dos flags fuerzan a reusar siempre la conexión existente. El
+         de TLS es el que importa acá (wss = WebSocket sobre TLS); el de TCP
+         cubre el listener ws en claro del 5066. -->
+    <param name="NDLB-tls-connectile-dysfunction" value="true"/>
+    <param name="NDLB-connectile-dysfunction" value="true"/>
     <!--
         There are known issues (asserts and segfaults) when 100rel is enabled.
         It is not recommended to enable 100rel at this time.
