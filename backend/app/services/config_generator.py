@@ -49,6 +49,15 @@ def build_directory_xml(tenantes: list[dict]) -> str:
             params = ET.SubElement(user, "params")
             ET.SubElement(params, "param", attrib={"name": "password", "value": ext.password})
             ET.SubElement(params, "param", attrib={"name": "vm-password", "value": ext.password})
+            # Sin esto NO SE PUEDE LLAMAR a un softphone del navegador. El
+            # softphone entra por Traefik, así que sofia guarda como ruta de
+            # vuelta el puerto de ORIGEN efímero de Traefik. Al mandarle el
+            # INVITE, tport_by_addrinfo no reconoce ese socket y en vez de
+            # escribir en el WebSocket ya abierto intenta CONECTARSE a ese
+            # puerto, donde no escucha nadie: el INVITE queda encolado y no
+            # se transmite nunca (ni aparece en `sofia global siptrace on`).
+            # El que llama solo ve un 408 a los 32 s, al expirar el Timer B.
+            ET.SubElement(params, "param", attrib={"name": "sip-force-contact", "value": "NDLB-tls-connectile-dysfunction"})
             v = ET.SubElement(user, "variables")
             if ext.caller_id_name:
                 ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_name", "value": ext.caller_id_name})
