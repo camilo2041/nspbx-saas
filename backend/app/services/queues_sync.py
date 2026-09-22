@@ -79,6 +79,12 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
             "tier-rule-no-agent-no-wait": "false",
             "discard-abandoned-after": "60",
             "abandoned-resume-allowed": "false",
+            # Al agotar max-no-answer, mod_callcenter pasa al agente a este
+            # estado. El default de FreeSWITCH es "On Break": el agente deja
+            # de recibir llamadas para siempre (hasta que alguien lo vuelva a
+            # poner "Available"). En una cola "ring-all" eso deja de timbrar
+            # a todos silenciosamente, así que se mantiene "Available".
+            "agent-no-answer-status": "Available",
         }
         if queue.record:
             params["record-template"] = (
