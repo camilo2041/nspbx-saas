@@ -5,6 +5,7 @@
 #
 #   sed -e 's/PBX_HOST/nspbx.tudominio.com/g' \
 #       -e 's/TURN_HOST/turn.nspbx.tudominio.com/g' \
+#       -e 's/WSS_HOST/sip.tudominio.com/g' \
 #       deploy/traefik-dynamic.yml.example \
 #     > /etc/dokploy/traefik/dynamic/nspbx.yml
 #
@@ -60,11 +61,34 @@ http:
     # único que cambia es el Via —"SIP/2.0/WS" devuelve 401 y
     # "SIP/2.0/WSS" devuelve silencio—. Contra el 7443 con Via WSS
     # vuelve el 401 normal.
+    # OJO: esta ruta ya NO es por donde entra el softphone. Se comprobó que
+    # con Traefik en el medio el registro funciona pero NO SE PUEDE LLAMAR
+    # al softphone web (ver el puerto 8443 en docker-compose.yml). Hoy el
+    # navegador va directo a FreeSWITCH por WSS_HOST:8443. Se deja porque no
+    # molesta y sirve de reserva para diagnosticar el registro sin depender
+    # del puerto directo.
     nspbx-sip:
       rule: "Host(`PBX_HOST`) && PathPrefix(`/sip`)"
       entryPoints: ["websecure"]
       service: nspbx-freeswitch
       middlewares: ["nspbx-sip-strip"]
+      tls:
+        certResolver: mi-resuelves-ssl
+
+    # Esta ruta NO la usa nadie: existe solo para que ACME emita y renueve
+    # el certificado de WSS_HOST. Ese certificado no lo sirve Traefik sino
+    # FreeSWITCH, porque el softphone abre el WebSocket DIRECTO contra él
+    # (ver el puerto 8443 en docker-compose.yml: con el proxy en el medio no
+    # se puede llamar a un softphone web). Traefik lo renueva en acme.json y
+    # scripts/renovar-cert-wss.sh lo copia al wss.pem de FreeSWITCH.
+    #
+    # WSS_HOST tiene que ser un registro A a la IP pública con el proxy de
+    # Cloudflare APAGADO (nube gris), igual que TURN_HOST: el navegador
+    # tiene que llegar al origen sin intermediarios.
+    nspbx-wsscert:
+      rule: "Host(`WSS_HOST`)"
+      entryPoints: ["websecure"]
+      service: nspbx-frontend
       tls:
         certResolver: mi-resuelves-ssl
 

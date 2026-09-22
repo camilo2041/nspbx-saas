@@ -71,6 +71,27 @@ services:
       # producción el softphone entra por Traefik (/sip -> nspbx_freeswitch:7443).
       - "127.0.0.1:5066:5066"   # SIP sobre WebSocket sin cifrar (solo desarrollo local)
       - "127.0.0.1:7443:7443"   # SIP sobre WebSocket CIFRADO (wss://); Traefik lo alcanza por la red interna
+      # El softphone del navegador entra por ACÁ, no por Traefik. Con el
+      # proxy en el medio NO SE PUEDE LLAMAR a un softphone web: sofia
+      # guarda como ruta de vuelta el puerto de ORIGEN efímero de Traefik,
+      # y al mandarle el INVITE tport_by_addrinfo no reconoce ese socket e
+      # intenta CONECTARSE a ese puerto, donde no escucha nadie. El INVITE
+      # queda encolado y no se transmite nunca —ni aparece en `sofia global
+      # siptrace on`—; el que llama solo ve un 408 a los 32 s. El registro
+      # funciona igual, porque responder usa la conexión entrante y no
+      # necesita buscar ninguna ruta: por eso el síntoma es "registra
+      # perfecto pero las llamadas internas mueren".
+      #
+      # Expuesto directo, sofia ve el socket REAL del navegador y el INVITE
+      # sale. Requiere el puerto abierto en el router hacia este host y un
+      # certificado válido en freeswitch/certs/wss.pem para el nombre que
+      # use el navegador (ver scripts/renovar-cert-wss.sh).
+      #
+      # 8443 y no 7443 a propósito: 5060 y 5061 están en la lista de
+      # puertos que Chrome bloquea, y conviene separar el número público
+      # del interno. Contrapartida a tener en cuenta: en redes corporativas
+      # restrictivas puede no pasar, a diferencia del 443.
+      - "8443:7443"
       - "16384-16584:16384-16584/udp"  # RTP (audio WebRTC del softphone)
     labels:
       - "traefik.enable=true"
