@@ -1,7 +1,19 @@
+# Docker NO rota los logs por defecto y crecen sin techo: en producción
+# nspbx_freeswitch llegó a 8,4 GB y nspbx_backend a 3,9 GB, 12 GB de disco
+# que nadie iba a reclamar. Esto topa cada contenedor en 250 MB (5 archivos
+# de 50 MB) y descarta lo más viejo. Para conservar más historia, subí
+# max-file, no max-size: rotar archivos grandes es más caro.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: nspbx_postgres
+    logging: *logging
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-nspbx}
@@ -20,6 +32,7 @@ services:
   freeswitch:
     build: ./freeswitch
     container_name: nspbx_freeswitch
+    logging: *logging
     restart: unless-stopped
     environment:
       # Solo para el healthcheck de acá abajo (fs_cli necesita loguearse).
@@ -142,6 +155,7 @@ services:
     build: ./backend
     image: nspbx-backend:latest
     container_name: nspbx_backend
+    logging: *logging
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
@@ -271,6 +285,7 @@ services:
     build: ./backend
     image: nspbx-backend:latest
     container_name: nspbx_voicebot
+    logging: *logging
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
@@ -311,6 +326,7 @@ services:
   frontend:
     build: ./frontend
     container_name: nspbx_frontend
+    logging: *logging
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
@@ -361,6 +377,7 @@ services:
   coturn:
     image: coturn/coturn:4.6-alpine
     container_name: nspbx_coturn
+    logging: *logging
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
