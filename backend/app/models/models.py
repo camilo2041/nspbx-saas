@@ -631,6 +631,57 @@ class InboundRoute(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class OutboundRoute(Base):
+    """Regla de salida: qué troncal usa cada destino marcado.
+
+    Antes había UNA sola ruta fija que mandaba todo por la cadena de
+    troncales habilitadas (ver config_generator._append_outbound_route).
+    Alcanzaba con una troncal, pero no deja hacer lo básico de cualquier
+    central: celulares por un proveedor y fijos por otro, normalizar el
+    marcado, o abrir internacional solo en una ruta.
+
+    El patrón se escribe en la notación de FreePBX/Issabel y NO en regex,
+    porque es la que conoce quien instala centrales y porque un regex mal
+    puesto acá no da un error visible: abre un destino caro y se paga en
+    la factura. `config_generator` lo traduce a la expresión que entiende
+    FreeSWITCH.
+
+        X  un dígito 0-9        N  un dígito 2-9
+        Z  un dígito 1-9        .  uno o más caracteres
+        [1-5]  un dígito del rango
+
+    El orden importa: gana la PRIMERA regla que coincide, de menor a
+    mayor `priority`. Una regla con patrón "." al final actúa de comodín.
+    """
+
+    __tablename__ = "outbound_routes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    name: Mapped[str] = mapped_column(String(100))
+    pattern: Mapped[str] = mapped_column(String(100))
+    # Dígitos que se quitan por la izquierda antes de marcar, y texto que
+    # se antepone después. En ese orden: con strip=1 y prepend="57", el
+    # 03001234567 sale como 573001234567.
+    strip_digits: Mapped[int] = mapped_column(Integer, default=0)
+    prepend: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Troncales en orden, separadas por coma (misma convención que
+    # Tenant.modules). FreeSWITCH prueba la siguiente si la anterior
+    # rechaza o no contesta. Vacío = todas las habilitadas, como antes.
+    trunk_ids: Mapped[str] = mapped_column(String(120), default="")
+    # Puerta antifraude POR RUTA. El fraude telefónico vive en destinos
+    # internacionales y de tarificación especial, así que se abre solo
+    # donde hace falta en vez de para toda la empresa.
+    allow_international: Mapped[bool] = mapped_column(Boolean, default=False)
+    priority: Mapped[int] = mapped_column(Integer, default=10)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    @property
+    def trunk_id_list(self) -> list[int]:
+        return [int(t) for t in (self.trunk_ids or "").split(",") if t.strip().isdigit()]
+
+
 class Appointment(Base):
     """Cita agendada — pensada para que un agente de IA (ej. ElevenLabs
     Conversational AI) la consulte/gestione vía los endpoints de

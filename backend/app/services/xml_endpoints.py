@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # docstring; antes vivía acá y ese otro endpoint quedó sin protección.
 from app.core.auth import verificar_secreto_fs as _verificar_secreto
 from app.core.database import get_admin_session
-from app.models import DeviceToken, Extension, InboundRoute, Queue, SystemSettings, Tenant, Trunk, VoiceBot
+from app.models import DeviceToken, Extension, InboundRoute, OutboundRoute, Queue, SystemSettings, Tenant, Trunk, VoiceBot
 from app.services import webcall
 from app.services.ajustes import dominios_tenants
 from app.services.config_generator import build_dialplan_xml, build_directory_xml, build_guest_directory_xml
@@ -28,6 +28,7 @@ def _tenantes(
     troncales_por_tenant: dict[int, list],
     colas_por_tenant: dict[int, list],
     push_por_tenant: dict[int, set] | None = None,
+    salientes_por_tenant: dict[int, list] | None = None,
 ) -> list[dict]:
     """Los bloques por empresa que consumen los generadores XML.
 
@@ -37,6 +38,7 @@ def _tenantes(
     (ver docs/arquitectura-multitenant.md).
     """
     push_por_tenant = push_por_tenant or {}
+    salientes_por_tenant = salientes_por_tenant or {}
     out = []
     for t in tenantes_rows:
         ajustes = ajustes_por_tenant.get(t.id)
@@ -66,6 +68,9 @@ def _tenantes(
                 # solo a esos se les dispara el push de aviso antes de
                 # timbrar (ver config_generator._append_mobile_push_hook).
                 "push_extensions": push_por_tenant.get(t.id, set()),
+                # Reglas de salida por patrón. Vacío = ruta única de
+                # siempre (ver config_generator._append_outbound_route).
+                "outbound_routes": salientes_por_tenant.get(t.id, []),
                 "webcall_queue": webcall_queue,
             }
         )
@@ -129,6 +134,9 @@ async def fs_dialplan(session: AsyncSession = Depends(get_admin_session)):
     trunks = (await session.execute(select(Trunk).where(Trunk.enabled.is_(True)).order_by(Trunk.id))).scalars().all()
     queues = (await session.execute(select(Queue).where(Queue.enabled.is_(True)))).scalars().all()
     inbound_routes = (await session.execute(select(InboundRoute).where(InboundRoute.enabled.is_(True)))).scalars().all()
+    outbound_routes = (
+        await session.execute(select(OutboundRoute).where(OutboundRoute.enabled.is_(True)).order_by(OutboundRoute.priority, OutboundRoute.id))
+    ).scalars().all()
     # Extensiones con la app móvil registrada, para el hook de push (ver
     # config_generator._append_mobile_push_hook). Se agrupan por empresa
     # con el número en vez del id porque el dialplan matchea por número.
@@ -166,6 +174,7 @@ async def fs_dialplan(session: AsyncSession = Depends(get_admin_session)):
         _agrupar(trunks),
         _agrupar(queues),
         push_por_tenant,
+        _agrupar(outbound_routes),
     )
     xml = build_dialplan_xml(tenantes, inbound_routes, contextos, dominios, slugs)
     return Response(content=xml, media_type="text/xml")

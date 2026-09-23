@@ -135,6 +135,12 @@ const GROUPS: NavGroup[] = [
         icon: icon(<path strokeLinecap="round" strokeLinejoin="round" d="M9 5l-7 7 7 7M2 12h20" />),
       },
       {
+        href: "/outbound-routes",
+        label: "Rutas salientes",
+        permiso: PERMISOS.telefonia,
+        icon: icon(<path strokeLinecap="round" strokeLinejoin="round" d="M15 5l7 7-7 7M22 12H2" />),
+      },
+      {
         href: "/queues",
         label: "Colas",
         permiso: PERMISOS.colas,
@@ -258,6 +264,7 @@ const MODULO_POR_SECCION: Record<string, string | null> = {
   "/extensions": "pbx",
   "/trunks": "pbx",
   "/inbound-routes": "pbx",
+  "/outbound-routes": "pbx",
   "/queues": "pbx",
   "/logs": "pbx",
   "/voicebots": "voicebot",

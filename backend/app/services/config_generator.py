@@ -434,6 +434,7 @@ def _append_outbound_route(
     permitir_internacional: bool = False,
     tope_simultaneas: int = 0,
     slug: str = "",
+    rutas: list | None = None,
 ) -> None:
     """Ruta de salida: números externos (7-15 dígitos) vía la cadena de
     troncales habilitadas, en serie (separadas por "|" en `bridge`, que es
@@ -441,25 +442,81 @@ def _append_outbound_route(
     rechaza, probá la siguiente"). Con una sola troncal habilitada, esto
     genera exactamente la misma llamada de antes.
 
-    Nota: es una ruta única simple (no hay aún "outbound routes" con
-    patrones por troncal como en Issabel/FreePBX). Si se necesitan varias
-    troncales con distintos patrones de marcado, esto debe evolucionar a
-    algo configurable.
+    Con rutas configuradas (tabla outbound_routes) se emite UNA extensión
+    por regla, en orden de prioridad: gana la primera que coincide, igual
+    que en Issabel/FreePBX. Sin ninguna regla se mantiene exactamente la
+    ruta única de siempre, así que una central existente no cambia de
+    comportamiento al actualizar.
     """
     cadena = orden_troncales(trunks)
     if not cadena:
         return
-    extension = ET.SubElement(context, "extension", attrib={"name": "Outbound_External", "continue": "false"})
-    # Sin permiso internacional: nada de prefijos 00/011 ni de más de 10
-    # dígitos (el fraude cae en destinos de ese tipo).
-    expresion = r"^(\d{7,15})$" if permitir_internacional else r"^(?!00|011)(\d{7,10})$"
+
+    activas = sorted(
+        (r for r in (rutas or []) if getattr(r, "enabled", True)),
+        key=lambda r: (r.priority, r.id),
+    )
+    if not activas:
+        # Sin permiso internacional: nada de prefijos 00/011 ni de más de 10
+        # dígitos (el fraude cae en destinos de ese tipo).
+        expresion = r"^(\d{7,15})$" if permitir_internacional else r"^(?!00|011)(\d{7,10})$"
+        _append_outbound_extension(
+            context, "Outbound_External", expresion, cadena,
+            "${destination_number}", slug_por_tenant, tope_simultaneas, slug,
+        )
+        return
+
+    por_id = {t.id: t for t in cadena}
+    for ruta in activas:
+        try:
+            expresion = validacion.patron_marcado_a_regex(ruta.pattern, ruta.strip_digits or 0)
+        except ValueError as e:
+            # Guardada antes de una validación más estricta, o migrada a
+            # mano: se omite la regla en vez de generar un dialplan que
+            # mande llamadas a donde no corresponde.
+            logger.error("Ruta saliente %s omitida: %s", ruta.id, e)
+            continue
+        if not ruta.allow_international:
+            expresion = "^(?!00|011)" + expresion[1:]
+
+        # Troncales de la regla, en su orden; vacío = todas las de la empresa.
+        elegidas = [por_id[i] for i in ruta.trunk_id_list if i in por_id] or cadena
+        if not elegidas:
+            logger.error("Ruta saliente %s omitida: ninguna de sus troncales está habilitada", ruta.id)
+            continue
+
+        prefijo = ruta.prepend or ""
+        if prefijo and not validacion.TELEFONO_RE.fullmatch(prefijo):
+            logger.error("Ruta saliente %s omitida: prefijo %r no válido", ruta.id, prefijo)
+            continue
+
+        _append_outbound_extension(
+            context, f"Outbound_{ruta.id}", expresion, elegidas,
+            f"{prefijo}$1", slug_por_tenant, tope_simultaneas, slug, ruta.name,
+        )
+
+
+def _append_outbound_extension(
+    context: ET.Element,
+    nombre: str,
+    expresion: str,
+    cadena: list,
+    marcado: str,
+    slug_por_tenant: dict[int, str],
+    tope_simultaneas: int,
+    slug: str,
+    etiqueta: str = "",
+) -> None:
+    """Una extensión de salida ya resuelta: a quién atrapa y por dónde sale."""
+    extension = ET.SubElement(context, "extension", attrib={"name": nombre, "continue": "false"})
     condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": expresion})
     # Tope de salientes simultáneas de la empresa: al superarlo se rechaza
     # la llamada en vez de saturar la troncal (y el saldo).
     if tope_simultaneas and tope_simultaneas > 0 and validacion.NOMBRE_RE.fullmatch(slug or ""):
         ET.SubElement(condition, "action", attrib={"application": "limit", "data": f"hash outbound {slug} {int(tope_simultaneas)} !CALL_REJECTED"})
     nombres = " -> ".join(t.name for t in cadena)
-    ET.SubElement(condition, "action", attrib={"application": "log", "data": f"Llamada saliente vía {nombres}"})
+    detalle = f"{etiqueta}: " if etiqueta else ""
+    ET.SubElement(condition, "action", attrib={"application": "log", "data": f"Llamada saliente {detalle}vía {nombres}"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
     # Tono de "está llamando" (425 Hz, 1 s sí / 4 s no, el de Colombia) para quien
     # marca: FreeSWITCH lo envía como audio previo a la respuesta (183) mientras el
@@ -470,7 +527,7 @@ def _append_outbound_route(
     # app/services/gateways.py) — sin él, la ruta apuntaría a un gateway
     # que no existe o al de otra empresa.
     destinos = "|".join(
-        f"sofia/gateway/{slug_por_tenant.get(t.tenant_id, 'x')}_{t.name}/${{destination_number}}"
+        f"sofia/gateway/{slug_por_tenant.get(t.tenant_id, 'x')}_{t.name}/{marcado}"
         for t in cadena
     )
     ET.SubElement(condition, "action", attrib={"application": "bridge", "data": destinos})
@@ -738,6 +795,7 @@ def build_dialplan_xml(
             t.get("allow_international", False),
             t.get("max_concurrent", 0),
             slugs.get(t["tenant_id"], t.get("slug", "")),
+            t.get("outbound_routes") or [],
         )
 
         webcall_queue = t.get("webcall_queue")

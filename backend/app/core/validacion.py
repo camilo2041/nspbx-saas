@@ -78,6 +78,64 @@ def destino_valido(tipo: str, valor: str | None) -> bool:
     return False
 
 
+# --- Patrones de marcado (rutas salientes) ------------------------------
+# Notación de FreePBX/Issabel, no regex. Ver el modelo OutboundRoute para
+# el porqué: un regex mal escrito acá no falla de forma visible, abre un
+# destino caro y se descubre en la factura.
+#
+#   X  0-9      Z  1-9      N  2-9      .  uno o más caracteres
+#   [1-5] rango       dígitos, + * # literales
+#
+# El filtro es deliberadamente cerrado: lo que salga de acá se inserta en
+# el dialplan, donde una expresión inesperada cambia a qué troncal sale
+# una llamada.
+PATRON_MARCADO_RE = re.compile(r"^(?:[0-9+*#XZN.]|\[[0-9]-[0-9]\]){1,40}$")
+
+_CLASE_POR_LETRA = {"X": "[0-9]", "Z": "[1-9]", "N": "[2-9]"}
+
+
+def patron_marcado_a_regex(patron: str, quitar: int = 0) -> str:
+    """Traduce un patrón de marcado a la expresión que usa FreeSWITCH.
+
+    Devuelve la expresión anclada con UN grupo de captura. `quitar` deja
+    ese grupo empezando después de los primeros N símbolos del patrón,
+    que es como se descartan dígitos de marcado (el 0 de "03001234567"):
+    así el dialplan marca `$1` y ya sale normalizado, sin tener que
+    recortar la cadena en tiempo de llamada.
+
+    Lanza ValueError si el patrón no pasa el filtro: preferimos romper al
+    guardar, donde alguien lo ve, que generar una ruta que se come
+    llamadas en silencio.
+    """
+    if not PATRON_MARCADO_RE.fullmatch(patron or ""):
+        raise ValueError(
+            "Patrón inválido. Se permiten dígitos, + * #, las letras X (0-9), "
+            "Z (1-9), N (2-9), el punto (uno o más) y rangos como [1-5]."
+        )
+    partes: list[str] = []
+    i = 0
+    while i < len(patron):
+        c = patron[i]
+        if c == "[":
+            fin = patron.index("]", i)
+            partes.append(patron[i : fin + 1])
+            i = fin + 1
+            continue
+        if c in _CLASE_POR_LETRA:
+            partes.append(_CLASE_POR_LETRA[c])
+        elif c == ".":
+            partes.append(".+")
+        else:
+            partes.append(re.escape(c))
+        i += 1
+    if quitar < 0 or quitar >= len(partes):
+        raise ValueError(
+            f"No se pueden quitar {quitar} dígitos de un patrón de {len(partes)}: "
+            "no quedaría nada que marcar."
+        )
+    return "^" + "".join(partes[:quitar]) + "(" + "".join(partes[quitar:]) + ")$"
+
+
 # --- Flujos del voizbot -------------------------------------------------
 # Todo lo que un flujo (flow_json) o un saludo mete en el dialplan pasa por
 # estos filtros. El motivo es concreto: FreeSWITCH expande `${...}` DENTRO de

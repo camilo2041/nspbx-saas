@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import permissions
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
@@ -188,6 +188,7 @@ _TABLAS_CON_TENANT = [
     "ai_call_usage",
     "queues",
     "inbound_routes",
+    "outbound_routes",
     "appointments",
     "debts",
     "payment_promises",
@@ -608,6 +609,7 @@ _TELEFONIA = [
 app.include_router(trunks.router, dependencies=_TELEFONIA)
 app.include_router(extensions.router, dependencies=_TELEFONIA)
 app.include_router(inbound_routes.router, dependencies=_TELEFONIA)
+app.include_router(outbound_routes.router, dependencies=_TELEFONIA)
 # Colas: su propio permiso, pero también módulo pbx y licencia.
 app.include_router(
     queues_api.router,

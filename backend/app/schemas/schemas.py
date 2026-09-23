@@ -512,6 +512,59 @@ class InboundRouteOut(BaseModel):
     created_at: datetime
 
 
+class OutboundRouteBase(BaseModel):
+    name: NombreVisible
+    pattern: str = Field(..., min_length=1, max_length=40)
+    strip_digits: int = Field(default=0, ge=0, le=20)
+    prepend: Optional[str] = Field(default=None, max_length=20, pattern=val.PATRON_TELEFONO)
+    # Ids de troncal separados por coma, en orden de preferencia. Vacío =
+    # todas las habilitadas de la empresa.
+    trunk_ids: str = Field(default="", max_length=120, pattern=r"^$|^[0-9]+(,[0-9]+)*$")
+    allow_international: bool = False
+    priority: int = Field(default=10, ge=0, le=1000)
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def _patron_traducible(self):
+        # Se valida acá y no solo al generar el dialplan porque un patrón
+        # inválido guardado se convierte en una ruta que desaparece en
+        # silencio: la llamada cae en la siguiente regla o no sale, y
+        # nadie relaciona el síntoma con lo que escribió.
+        val.patron_marcado_a_regex(self.pattern, self.strip_digits)
+        return self
+
+
+class OutboundRouteCreate(OutboundRouteBase):
+    pass
+
+
+class OutboundRouteUpdate(BaseModel):
+    name: Optional[NombreVisible] = None
+    pattern: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    strip_digits: Optional[int] = Field(default=None, ge=0, le=20)
+    prepend: Optional[str] = Field(default=None, max_length=20, pattern=val.PATRON_TELEFONO)
+    trunk_ids: Optional[str] = Field(default=None, max_length=120, pattern=r"^$|^[0-9]+(,[0-9]+)*$")
+    allow_international: Optional[bool] = None
+    priority: Optional[int] = Field(default=None, ge=0, le=1000)
+    enabled: Optional[bool] = None
+
+
+class OutboundRouteOut(BaseModel):
+    # Sin las reglas estrictas de la entrada, igual que InboundRouteOut.
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    pattern: str
+    strip_digits: int = 0
+    prepend: Optional[str] = None
+    trunk_ids: str = ""
+    allow_international: bool = False
+    priority: int = 10
+    enabled: bool = True
+    created_at: datetime
+
+
 class AppointmentBase(BaseModel):
     patient_name: str = Field(..., min_length=1, max_length=150)
     phone: str = Field(..., min_length=1, max_length=30)

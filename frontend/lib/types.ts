@@ -179,6 +179,21 @@ export interface InboundRoute {
   created_at: string;
 }
 
+export interface OutboundRoute {
+  id: number;
+  name: string;
+  /** Notación FreePBX/Issabel: X=0-9, Z=1-9, N=2-9, .=uno o más, [1-5]=rango. */
+  pattern: string;
+  strip_digits: number;
+  prepend: string | null;
+  /** Ids de troncal separados por coma, en orden. Vacío = todas. */
+  trunk_ids: string;
+  allow_international: boolean;
+  priority: number;
+  enabled: boolean;
+  created_at: string;
+}
+
 export interface Queue {
   id: number;
   name: string;
