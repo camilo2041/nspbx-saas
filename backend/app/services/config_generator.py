@@ -49,15 +49,19 @@ def build_directory_xml(tenantes: list[dict]) -> str:
             params = ET.SubElement(user, "params")
             ET.SubElement(params, "param", attrib={"name": "password", "value": ext.password})
             ET.SubElement(params, "param", attrib={"name": "vm-password", "value": ext.password})
-            # Sin esto NO SE PUEDE LLAMAR a un softphone del navegador. El
-            # softphone entra por Traefik, así que sofia guarda como ruta de
-            # vuelta el puerto de ORIGEN efímero de Traefik. Al mandarle el
-            # INVITE, tport_by_addrinfo no reconoce ese socket y en vez de
-            # escribir en el WebSocket ya abierto intenta CONECTARSE a ese
-            # puerto, donde no escucha nadie: el INVITE queda encolado y no
-            # se transmite nunca (ni aparece en `sofia global siptrace on`).
-            # El que llama solo ve un 408 a los 32 s, al expirar el Timer B.
-            ET.SubElement(params, "param", attrib={"name": "sip-force-contact", "value": "NDLB-tls-connectile-dysfunction"})
+            # NO va sip-force-contact acá, y conviene saber por qué para no
+            # volver a agregarlo: se puso cuando el softphone entraba por
+            # Traefik, porque con el proxy en el medio sofia guardaba como
+            # ruta de vuelta el puerto efímero del proxy y el INVITE no
+            # llegaba nunca. Ese problema se resolvió de raíz exponiendo el
+            # wss de FreeSWITCH directo (ver el puerto 8443 en
+            # docker-compose.yml): ahora el contacto registrado ya es la
+            # dirección real del navegador.
+            #
+            # Con la conexión directa el parámetro no aporta nada y sí
+            # cuesta: acorta el vencimiento del registro a 30 segundos, o
+            # sea 20 veces más REGISTER de los necesarios, cada uno con su
+            # consulta al directorio de este backend.
             v = ET.SubElement(user, "variables")
             if ext.caller_id_name:
                 ET.SubElement(v, "variable", attrib={"name": "effective_caller_id_name", "value": ext.caller_id_name})
