@@ -1,0 +1,32 @@
+# Jail del escaneo de fraude telefónico. Instalación igual que el otro:
+#
+#   sudo cp deploy/fail2ban/filter.d/nspbx-sip-scan.conf /etc/fail2ban/filter.d/
+#   sudo cp deploy/fail2ban/jail.d/nspbx-sip-scan.local  /etc/fail2ban/jail.d/
+#   sudo systemctl restart fail2ban
+#   sudo fail2ban-client status nspbx-sip-scan
+
+[nspbx-sip-scan]
+enabled  = true
+filter   = nspbx-sip-scan
+backend  = auto
+logpath  = /var/lib/docker/containers/*/*-json.log
+
+# Mucho más duro que el jail de credenciales fallidas, y se puede porque
+# acá el falso positivo es imposible por construcción: el filtro solo
+# matchea intentos contra la IP del servidor como dominio SIP, y ningún
+# teléfono legítimo hace eso. No hay usuario propio que proteger, así que
+# no hay razón para dar tres oportunidades ni para soltar al día siguiente.
+maxretry = 2
+findtime = 3600
+bantime  = 604800
+bantime.increment = true
+bantime.maxtime = 24w
+
+# Igual que el otro jail: con puertos publicados por Docker el tráfico no
+# pasa por INPUT sino por FORWARD, así que el bloqueo tiene que ir en
+# DOCKER-USER o fail2ban dice "Ban" y la IP sigue entrando.
+port     = 5060,15080
+protocol = all
+chain    = DOCKER-USER
+banaction = iptables-allports
+ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
