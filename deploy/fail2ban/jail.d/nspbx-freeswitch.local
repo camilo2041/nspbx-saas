@@ -14,11 +14,22 @@ filter   = nspbx-freeswitch
 backend  = auto
 logpath  = /var/lib/docker/containers/*/*-json.log
 
-# 6 fallos en 10 minutos -> bloqueo. Un teléfono con la contraseña mal puesta
-# repite el intento cada pocos segundos, así que un usuario legítimo que se
-# equivoca queda bloqueado un rato; es el precio de frenar la fuerza bruta.
-# Súbelo si tus clientes reportan bloqueos por error.
-maxretry = 6
+# Este jail cuenta fallos de CREDENCIALES, y ahí el falso positivo es real:
+# lo dispara un teléfono con la contraseña mal puesta, que reintenta cada
+# pocos segundos. Con 6 bastaba un descuido para dejar a un cliente afuera.
+#
+# Pasó en producción el 2026-09-23 y por un motivo que ni siquiera era un
+# error del usuario: al corregir la zona horaria de los contenedores, las
+# marcas del log de FreeSWITCH saltaron 5 horas hacia atrás y fail2ban
+# releyó fallos viejos como recién ocurridos. Contó seis y bloqueó a las
+# dos extensiones reales por 24 horas.
+#
+# Se sube el umbral porque el trabajo pesado ya no es de este jail: el de
+# nspbx-sip-scan atrapa al escáner de fraude por el dominio al que apunta,
+# sin depender de cuántas veces falle. Acá conviene equivocarse del lado de
+# no dejar afuera a un cliente; un atacante de fuerza bruta real hace
+# cientos de intentos y cruza 15 igual de rápido que 6.
+maxretry = 15
 findtime = 600
 
 # 24 h de base y no 1 h: contra un escáner una hora no es disuasión, vuelve

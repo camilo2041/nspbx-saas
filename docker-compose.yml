@@ -40,6 +40,14 @@ services:
       # event_socket.conf.xml — este debe coincidir con ese, no lo
       # reemplaza.
       FS_ESL_PASSWORD: ${FS_ESL_PASSWORD:?Definí FS_ESL_PASSWORD en .env}
+      # Los contenedores corren en UTC por omisión y el servidor está en
+      # America/Bogota: los logs salían 5 horas adelantados respecto del
+      # reloj de quien los lee, y las grabaciones se archivaban bajo la
+      # carpeta del día equivocado (una llamada de las 20:00 caía en el día
+      # siguiente). No afecta la base: todas las fechas se guardan con
+      # datetime.utcnow(), que no depende de esta variable, y la agenda usa
+      # su propia zona (ver app/core/clock.py).
+      TZ: ${TZ:-America/Bogota}
     volumes:
       - ./freeswitch/conf:/etc/freeswitch
       - ./freeswitch/sounds:/usr/share/freeswitch/sounds
@@ -160,6 +168,7 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-America/Bogota}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}@postgres:5432/${POSTGRES_DB:-nspbx}
       # Rol restringido con el que se atiende la operación normal. Es lo
       # que hace que el aislamiento por empresa (RLS) se aplique de
@@ -299,6 +308,7 @@ services:
     restart: unless-stopped
     command: ["uvicorn", "app.voicebot_server:app", "--host", "0.0.0.0", "--port", "8090"]
     environment:
+      TZ: ${TZ:-America/Bogota}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}@postgres:5432/${POSTGRES_DB:-nspbx}
       # Rol restringido con el que se atiende la operación normal. Es lo
       # que hace que el aislamiento por empresa (RLS) se aplique de
