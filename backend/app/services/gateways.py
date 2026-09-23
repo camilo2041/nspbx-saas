@@ -137,7 +137,41 @@ def clean_gateways(valid_names: set[str]):
 
 
 def sync_gateways(trunks: list, slug_por_tenant: dict[int, str]):
+    """Reconcilia los archivos de gateway con las troncales de la base.
+
+    Solo se llama al ARRANCAR. El alta, la edición y el borrado desde el
+    panel escriben o borran su archivo directamente (ver api/trunks.py),
+    así que acá nunca hay que borrar nada como parte de una acción del
+    usuario: esto existe para limpiar restos de cambios hechos mientras el
+    backend estaba caído.
+    """
     validos = {nombre_gateway(t.name, slug_por_tenant.get(t.tenant_id, "x")) for t in trunks}
+
+    # Una lista VACÍA no borra nada, y esta guarda no es teórica: el
+    # 2026-09-23 la tabla de troncales apareció sin filas y este arranque
+    # borró los tres gateways que estaban registrados y cursando llamadas.
+    # La central quedó sin salida ni entrada externa, y el único rastro
+    # fueron tres INFO de "Gateway obsoleto eliminado". Recuperarlo exigió
+    # sacar las credenciales de un respaldo.
+    #
+    # Cero troncales casi nunca es un estado real: es el síntoma de un
+    # borrado accidental o de una consulta que no devolvió lo que debía. Y
+    # la asimetría de costos es enorme — conservar archivos de más deja
+    # gateways que registran sin respaldo en la base, algo visible y
+    # trivial de limpiar a mano; borrarlos de menos tira el servicio y
+    # destruye credenciales que quizá no estén en ningún otro lado.
+    if not validos:
+        existentes = [f for f in os.listdir(_gateways_path()) if f.startswith("gw_") and f.endswith(".xml")]
+        if existentes:
+            logger.error(
+                "La base no tiene NINGUNA troncal pero hay %d gateway(s) en disco (%s). "
+                "No se borra nada: revisá si se vaciaron las troncales por error. "
+                "Para quitarlos de verdad, borralos desde el panel.",
+                len(existentes),
+                ", ".join(existentes),
+            )
+            return
+
     clean_gateways(validos)
     for trunk in trunks:
         if trunk.enabled:
