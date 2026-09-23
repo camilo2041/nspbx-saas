@@ -14,13 +14,25 @@ filter   = nspbx-freeswitch
 backend  = auto
 logpath  = /var/lib/docker/containers/*/*-json.log
 
-# 6 fallos en 10 minutos -> bloqueo de 1 hora. Un teléfono con la contraseña
-# mal puesta repite el intento cada pocos segundos, así que un usuario legítimo
-# que se equivoca queda bloqueado un rato; es el precio de frenar la fuerza
-# bruta. Súbelo si tus clientes reportan bloqueos por error.
+# 6 fallos en 10 minutos -> bloqueo. Un teléfono con la contraseña mal puesta
+# repite el intento cada pocos segundos, así que un usuario legítimo que se
+# equivoca queda bloqueado un rato; es el precio de frenar la fuerza bruta.
+# Súbelo si tus clientes reportan bloqueos por error.
 maxretry = 6
 findtime = 600
-bantime  = 3600
+
+# 24 h de base y no 1 h: contra un escáner una hora no es disuasión, vuelve
+# apenas se le levanta. Comprobado en producción el 2026-09-22, un solo
+# atacante metió 1686 intentos en 60 segundos y bajó el CPU ocioso de
+# FreeSWITCH de 90% a 58%.
+bantime = 86400
+
+# Escalonado: cada reincidencia duplica la condena (24 h, 48 h, 96 h...).
+# Es lo que separa al escáner que insiste del usuario que se equivocó una
+# vez, sin tener que endurecer maxretry y castigar al segundo. Necesita la
+# base de datos persistente de fail2ban, que viene activada por defecto.
+bantime.increment = true
+bantime.maxtime = 5w
 
 # Los puertos de FreeSWITCH están publicados por Docker, así que el tráfico
 # NO pasa por la cadena INPUT sino por FORWARD: el bloqueo tiene que ir en
