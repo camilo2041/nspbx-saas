@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     # Proxies inversos delante del backend (Traefik = 1). Define de dónde se toma la
     # IP real del cliente; 0 = sin proxy, se usa la conexión directa.
     proxies_confiables: int = 1
+    # Base de fail2ban, montada en SOLO LECTURA desde el host (ver
+    # docker-compose y app/services/fail2ban.py). Si no existe —una máquina
+    # de desarrollo sin fail2ban— la pantalla de seguridad lo dice y el
+    # resto del panel sigue funcionando.
+    fail2ban_db: str = "/var/lib/fail2ban/fail2ban.sqlite3"
 
     # Zona horaria del negocio. La agenda (horario de atención, "hoy",
     # "mañana", si un cupo ya pasó) se interpreta siempre en esta zona,

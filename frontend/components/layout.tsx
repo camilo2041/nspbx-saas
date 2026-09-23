@@ -219,6 +219,18 @@ const GROUPS: NavGroup[] = [
         ),
       },
       {
+        href: "/seguridad",
+        label: "Seguridad",
+        permiso: PERMISOS.ajustes,
+        icon: icon(
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 3l7 4v5c0 4.2-2.8 7.8-7 9-4.2-1.2-7-4.8-7-9V7l7-4zM12 9v3m0 3h.01"
+          />
+        ),
+      },
+      {
         href: "/roles",
         label: "Roles y permisos",
         permiso: PERMISOS.usuarios,

@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, role_permissions, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import permissions
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
@@ -670,6 +670,8 @@ app.include_router(assistant.router)  # solo lectura; recorta por rol dentro
 
 # Ajustes y estado del sistema: API keys de los proveedores y control de
 # FreeSWITCH.
+# Estado de las defensas (fail2ban). Solo lectura: ver services/fail2ban.py.
+app.include_router(security_api.router, **_con(permissions.AJUSTES_GESTIONAR))
 app.include_router(system.router, **_con(permissions.AJUSTES_GESTIONAR))
 app.include_router(settings_api.router, **_con(permissions.AJUSTES_GESTIONAR))
 

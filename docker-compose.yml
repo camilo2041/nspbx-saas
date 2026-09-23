@@ -226,6 +226,14 @@ services:
       # respuesta real a "¿y si se pierde este servidor entero?".
       - ./backups:/backups
       - ./secrets:/run/secrets:ro
+      # Base de fail2ban, para la pantalla de Seguridad. SOLO LECTURA y
+      # solo la base, NO el socket de control: ese socket no permite
+      # únicamente desbloquear —también bloquear, recargar y
+      # reconfigurar—, así que montarlo convertiría cualquier fallo de
+      # autenticación del panel en control del cortafuegos del servidor.
+      # Si fail2ban no está instalado, el archivo no existe y la pantalla
+      # lo dice en vez de romperse (ver app/services/fail2ban.py).
+      - /var/lib/fail2ban/fail2ban.sqlite3:/var/lib/fail2ban/fail2ban.sqlite3:ro
     ports:
       # Atado a 127.0.0.1 y NO a 0.0.0.0: la API queda accesible solo
       # desde este mismo servidor. Sin el prefijo, Docker publica en
