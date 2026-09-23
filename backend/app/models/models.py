@@ -631,6 +631,34 @@ class InboundRoute(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class RolePermission(Base):
+    """Diferencia respecto de lo que el rol trae de fábrica.
+
+    La matriz de `core/permissions.py` sigue siendo el valor POR DEFECTO;
+    acá solo se guarda lo que una empresa cambió. Se hizo así y no
+    copiando la matriz entera a la base por dos motivos: una instalación
+    nueva no necesita ninguna fila para funcionar, y cuando se agregue un
+    permiso al producto lo heredan todas las empresas sin migración.
+
+    `permitido` es explícito —no basta con "existe la fila"— porque hay
+    que poder tanto AGREGAR un permiso que el rol no trae como QUITAR uno
+    que sí trae, y ambas cosas son diferencias respecto del valor de
+    fábrica.
+    """
+
+    __tablename__ = "role_permissions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "role", "permission", name="ux_role_permissions"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    role: Mapped[str] = mapped_column(String(20))
+    permission: Mapped[str] = mapped_column(String(50))
+    allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class OutboundRoute(Base):
     """Regla de salida: qué troncal usa cada destino marcado.
 

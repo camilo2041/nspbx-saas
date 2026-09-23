@@ -69,7 +69,7 @@ def _sesion(u: User, modulos: list[str] | None = None, refresh_token: str | None
         token=token,
         expira_en=vida,
         usuario=usuario_out(u),
-        permisos=sorted(permissions.permisos_de(u.role)),
+        permisos=sorted(permissions.permisos_de(u.role, u.tenant_id)),
         modulos=modulos or [],
         refresh_token=refresh_token,
     )
@@ -283,7 +283,7 @@ async def mi_entorno(
     las API keys de los proveedores de IA; un asesor solo necesita su
     línea, y esto es exactamente eso.
     """
-    if not permissions.puede(usuario.role, permissions.SOFTPHONE_USAR):
+    if not permissions.puede(usuario.role, permissions.SOFTPHONE_USAR, usuario.tenant_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tu rol no usa el softphone")
 
     ajustes = await ajustes_de(session)

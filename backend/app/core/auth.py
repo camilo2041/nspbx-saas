@@ -178,7 +178,7 @@ def requiere(*permisos: str):
     """
 
     async def comprobar(usuario: User = Depends(usuario_actual)) -> User:
-        faltan = [p for p in permisos if not permissions.puede(usuario.role, p)]
+        faltan = [p for p in permisos if not permissions.puede(usuario.role, p, usuario.tenant_id)]
         if faltan:
             logger.info(
                 "Acceso denegado: %s (%s) pidió %s", usuario.username, usuario.role, ", ".join(faltan)
@@ -203,7 +203,7 @@ def escribir_requiere(permiso: str):
     async def comprobar(request: Request, usuario: User = Depends(usuario_actual)) -> User:
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return usuario
-        if not permissions.puede(usuario.role, permiso):
+        if not permissions.puede(usuario.role, permiso, usuario.tenant_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Tu rol puede consultar esto, pero no modificarlo",
@@ -217,7 +217,7 @@ def requiere_alguno(*permisos: str):
     """Igual que `requiere`, pero basta con uno de los permisos."""
 
     async def comprobar(usuario: User = Depends(usuario_actual)) -> User:
-        if not any(permissions.puede(usuario.role, p) for p in permisos):
+        if not any(permissions.puede(usuario.role, p, usuario.tenant_id) for p in permisos):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Tu rol no tiene permiso para esta acción",

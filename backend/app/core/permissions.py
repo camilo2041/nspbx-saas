@@ -127,9 +127,98 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
 }
 
 
-def permisos_de(rol: str) -> frozenset[str]:
-    return PERMISOS_POR_ROL.get(rol, frozenset())
+# --- Personalización por empresa -------------------------------------
+# La tabla `role_permissions` guarda solo las DIFERENCIAS respecto de la
+# matriz de arriba (ver el modelo). Se cachean en el proceso porque los
+# permisos se evalúan en CADA petición: ir a la base en cada `requiere()`
+# multiplicaría las consultas por el número de endpoints protegidos.
+#
+# El caché se rellena al arrancar y se invalida al guardar. Asume UN
+# proceso de aplicación, que es como corre hoy (ver docker-compose); con
+# varios workers habría que mover la invalidación a Postgres (LISTEN/NOTIFY).
+_OVERRIDES: dict[tuple[int, str], dict[str, bool]] = {}
+
+# Permisos que una empresa NO puede tocar, pase lo que pase en la tabla.
+#
+# EMPRESAS_GESTIONAR es la frontera con la plataforma: quien lo tiene crea
+# y edita empresas, incluidos sus packs contratados. Si una empresa
+# pudiera otorgárselo, se habilitaría módulos que no pagó.
+_NUNCA_OTORGABLES = frozenset({EMPRESAS_GESTIONAR})
+
+# Sin estos dos, un admin que se equivoca de casilla deja a su empresa sin
+# NADIE que pueda revertirlo: no habría quien administre usuarios ni quien
+# entre a la pantalla de permisos. La única salida sería editar la base a
+# mano. Se ignoran los intentos de quitarlos en vez de fallar, para que la
+# interfaz no tenga que conocer esta regla.
+_IRRENUNCIABLES_ADMIN = frozenset({USUARIOS_GESTIONAR, AJUSTES_GESTIONAR})
 
 
-def puede(rol: str, permiso: str) -> bool:
-    return permiso in permisos_de(rol)
+def cargar_overrides(filas) -> None:
+    """Rellena el caché desde las filas de `role_permissions`."""
+    nuevo: dict[tuple[int, str], dict[str, bool]] = {}
+    for f in filas:
+        nuevo.setdefault((f.tenant_id, f.role), {})[f.permission] = bool(f.allowed)
+    _OVERRIDES.clear()
+    _OVERRIDES.update(nuevo)
+
+
+def permisos_de(rol: str, tenant_id: int | None = None) -> frozenset[str]:
+    """Permisos efectivos del rol, ya con la personalización de la empresa."""
+    base = PERMISOS_POR_ROL.get(rol, frozenset())
+    # El rol de plataforma no se personaliza: no pertenece a ninguna
+    # empresa, así que no hay quién pudiera hacerlo sin pisar la frontera.
+    if tenant_id is None or rol == PLATAFORMA:
+        return base
+    cambios = _OVERRIDES.get((tenant_id, rol))
+    if not cambios:
+        return base
+    efectivos = set(base)
+    for permiso, permitido in cambios.items():
+        if permitido:
+            efectivos.add(permiso)
+        else:
+            efectivos.discard(permiso)
+    efectivos -= _NUNCA_OTORGABLES
+    if rol == ADMIN:
+        efectivos |= _IRRENUNCIABLES_ADMIN
+    return frozenset(efectivos)
+
+
+def puede(rol: str, permiso: str, tenant_id: int | None = None) -> bool:
+    return permiso in permisos_de(rol, tenant_id)
+
+
+def personalizable(rol: str) -> bool:
+    """¿Esta empresa puede editar los permisos de este rol?"""
+    return rol in ROLES and rol != PLATAFORMA
+
+
+def editable(rol: str, permiso: str) -> bool:
+    """¿Esta casilla concreta se puede cambiar, o está fija por diseño?"""
+    if permiso in _NUNCA_OTORGABLES:
+        return False
+    if rol == ADMIN and permiso in _IRRENUNCIABLES_ADMIN:
+        return False
+    return True
+
+
+# Catálogo para la interfaz: qué permisos existen y cómo se llaman en
+# castellano. Vive acá y no en el frontend para que agregar un permiso sea
+# tocar un solo archivo.
+ETIQUETAS_PERMISOS = {
+    USUARIOS_GESTIONAR: "Gestionar usuarios",
+    AJUSTES_GESTIONAR: "Gestionar ajustes del sistema",
+    EMPRESAS_GESTIONAR: "Gestionar empresas",
+    TELEFONIA_GESTIONAR: "Telefonía: troncales, extensiones y rutas",
+    COLAS_GESTIONAR: "Gestionar colas",
+    CAMPANAS_GESTIONAR: "Gestionar campañas y cobranza",
+    VOIZBOTS_GESTIONAR: "Editar voizbots",
+    VOIZBOTS_VER: "Ver voizbots",
+    LLAMADAS_VER_TODAS: "Ver todas las llamadas",
+    LLAMADAS_VER_PROPIAS: "Ver las llamadas propias",
+    CITAS_GESTIONAR: "Gestionar citas",
+    CONSUMO_IA_VER: "Ver consumo de IA",
+    SOFTPHONE_USAR: "Usar el softphone",
+}
+
+TODOS_LOS_PERMISOS = tuple(ETIQUETAS_PERMISOS)

@@ -58,16 +58,21 @@ async def listar(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/roles")
-async def roles():
+async def roles(usuario: User = Depends(usuario_actual)):
     """Catálogo de roles con su descripción, para que la interfaz no
-    tenga que repetir estos textos."""
+    tenga que repetir estos textos.
+
+    Los permisos que lista son los EFECTIVOS de esta empresa, no los de
+    fábrica: si se personalizaron (ver /api/role-permissions), lo que se
+    muestra al asignar un rol tiene que coincidir con lo que ese rol podrá
+    hacer de verdad."""
     return [
         {
             "value": rol,
             "label": permissions.ETIQUETAS[rol],
             "description": permissions.DESCRIPCIONES[rol],
             "requiere_extension": rol in permissions.REQUIERE_EXTENSION,
-            "permisos": sorted(permissions.permisos_de(rol)),
+            "permisos": sorted(permissions.permisos_de(rol, usuario.tenant_id)),
         }
         # "plataforma" no se ofrece: no es asignable desde un panel de empresa
         # (ver _ROLES_PATRON en los esquemas).

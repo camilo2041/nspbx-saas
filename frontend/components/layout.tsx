@@ -219,6 +219,18 @@ const GROUPS: NavGroup[] = [
         ),
       },
       {
+        href: "/roles",
+        label: "Roles y permisos",
+        permiso: PERMISOS.usuarios,
+        icon: icon(
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 3l7 4v5c0 4.2-2.8 7.8-7 9-4.2-1.2-7-4.8-7-9V7l7-4zM9.5 12l1.8 1.8L15 10"
+          />
+        ),
+      },
+      {
         href: "/users",
         label: "Usuarios",
         permiso: PERMISOS.usuarios,
