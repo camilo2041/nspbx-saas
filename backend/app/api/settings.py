@@ -151,6 +151,21 @@ async def update_settings(
     return _salida(row, puede_infra)
 
 
+@router.post("/salientes/colgar")
+async def colgar_salientes_propias(usuario: User = Depends(usuario_actual)):
+    """Cuelga las salientes EN CURSO de la empresa del usuario, nunca de
+    otra: la empresa sale de la sesión, no de la petición."""
+    from app.services import emergencia
+
+    if usuario.tenant_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo para usuarios de una empresa")
+    try:
+        await emergencia.colgar_salientes([usuario.tenant_id])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"FreeSWITCH no respondió; no se pudo colgar: {exc}")
+    return {"empresas": 1}
+
+
 @router.get("/salientes")
 async def estado_salientes(session: AsyncSession = Depends(get_session), usuario: User = Depends(usuario_actual)):
     """Si la empresa puede llamar afuera ahora, y cuánto lleva del cupo de

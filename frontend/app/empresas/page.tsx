@@ -230,13 +230,24 @@ export default function EmpresasPage() {
   const set = <K extends keyof typeof vacio>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   // Controles de emergencia: cortan toda llamada saliente NUEVA al instante
-  // (dialplan, clic para llamar y campañas). Las que están en curso terminan
-  // solas por el tope de duración.
+  // (dialplan, clic para llamar y campañas). Las que ya están hablando se
+  // cuelgan aparte (backend/app/services/emergencia.py): se pregunta enseguida,
+  // porque en un fraude son justo las que se están facturando.
+  const colgarEnCurso = async (ruta: string, quien: string) => {
+    if (!confirm(`Salientes cortadas. ¿Colgar también las llamadas salientes de ${quien} que están en curso ahora?`)) return;
+    try {
+      await api.post(ruta);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron colgar las llamadas en curso");
+    }
+  };
+
   const cambiarSalientesEmpresa = async (e: Empresa) => {
     const cortar = !e.outbound_blocked;
     if (cortar && !confirm(`¿Cortar todas las llamadas salientes de ${e.name}? La empresa no podrá reactivarlas.`)) return;
     try {
       await api.put(`/api/tenants/${e.id}`, { outbound_blocked: cortar });
+      if (cortar) await colgarEnCurso(`/api/tenants/${e.id}/salientes/colgar`, e.name);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cambiar las salientes");
@@ -250,6 +261,7 @@ export default function EmpresasPage() {
     try {
       const r = await api.put<{ outbound_blocked: boolean }>("/api/plataforma/salientes", { outbound_blocked: cortar });
       setGlobalCortado(r.outbound_blocked);
+      if (cortar) await colgarEnCurso("/api/plataforma/salientes/colgar", "todas las empresas");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cambiar las salientes");
     } finally {

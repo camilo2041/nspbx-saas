@@ -127,6 +127,15 @@ def ocultar_secretos(valor, profundidad: int = 0):
     return valor
 
 
+def se_audita(metodo: str, path: str) -> bool:
+    """Toda petición bajo /api/ que modifica algo, y las lecturas sensibles,
+    salvo las excluidas a propósito. tests/test_auditoria.py recorre TODAS
+    las rutas de la aplicación contra esta función."""
+    return path.startswith("/api/") and not path.startswith(_EXCLUIDAS) and bool(
+        metodo in _METODOS_QUE_MODIFICAN or (metodo == "GET" and _LECTURAS_SENSIBLES.match(path))
+    )
+
+
 def _detalle(cuerpo: bytes, tipo: str):
     if not cuerpo:
         return None
@@ -233,9 +242,7 @@ class MiddlewareAuditoria:
 
         path = scope.get("path", "")
         metodo = scope.get("method", "")
-        auditar = path.startswith("/api/") and not path.startswith(_EXCLUIDAS) and (
-            metodo in _METODOS_QUE_MODIFICAN or (metodo == "GET" and _LECTURAS_SENSIBLES.match(path))
-        )
+        auditar = se_audita(metodo, path)
         cuerpo = bytearray()
         estado = {"codigo": 500}
 

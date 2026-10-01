@@ -186,6 +186,20 @@ async def update_licencia(
     return await _lic_out(session, lic)
 
 
+@router.post("/{tenant_id}/salientes/colgar")
+async def colgar_salientes_de_la_empresa(tenant_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Cuelga las salientes EN CURSO de esta empresa (ver services/emergencia.py)."""
+    from app.services import emergencia
+
+    if not await session.get(Tenant, tenant_id):
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    try:
+        await emergencia.colgar_salientes([tenant_id])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"FreeSWITCH no respondió; no se pudo colgar: {exc}")
+    return {"empresas": 1}
+
+
 @router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tenant(tenant_id: int, session: AsyncSession = Depends(get_admin_session)):
     ten = await session.get(Tenant, tenant_id)

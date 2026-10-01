@@ -67,6 +67,24 @@ async def cambiar_salientes(
     return SalientesGlobal(outbound_blocked=payload.outbound_blocked)
 
 
+@router.post("/salientes/colgar")
+async def colgar_salientes_de_todas(
+    session: AsyncSession = Depends(get_admin_session), usuario: User = Depends(usuario_actual)
+):
+    """Cuelga las salientes EN CURSO de todas las empresas (ver
+    services/emergencia.py). Cortar las salientes frena las nuevas; esto,
+    las que ya están hablando."""
+    from app.services import emergencia
+
+    ids = (await session.execute(select(Tenant.id))).scalars().all()
+    try:
+        hechas = await emergencia.colgar_salientes(ids)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"FreeSWITCH no respondió; no se pudo colgar: {exc}")
+    logger.warning("Salientes en curso de TODA la plataforma colgadas por %s", usuario.username)
+    return {"empresas": len(hechas)}
+
+
 @router.get("/alertas")
 async def alertas_de_todas(session: AsyncSession = Depends(get_admin_session)):
     """Alertas de tráfico saliente de todas las empresas, las más recientes primero."""

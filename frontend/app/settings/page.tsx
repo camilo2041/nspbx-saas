@@ -111,6 +111,24 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [colgando, setColgando] = useState(false);
+  const [colgadas, setColgadas] = useState(false);
+
+  // Control de emergencia: cuelga las salientes EN CURSO de la empresa (ver
+  // backend/app/services/emergencia.py).
+  async function colgarSalientes() {
+    if (!confirm("¿Colgar ahora todas las llamadas salientes en curso de la empresa?")) return;
+    setColgando(true);
+    setError("");
+    try {
+      await api.post("/api/system/salientes/colgar");
+      setColgadas(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudieron colgar las llamadas en curso");
+    } finally {
+      setColgando(false);
+    }
+  }
   const [saved, setSaved] = useState(false);
   const [voices, setVoices] = useState<TtsVoice[]>([]);
   const [voicesError, setVoicesError] = useState("");
@@ -414,6 +432,18 @@ export default function SettingsPage() {
               </div>
               <Toggle checked={form.outbound_paused} onChange={(v) => set("outbound_paused", v)} />
             </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div>
+                <div className="text-sm text-fg-soft">Colgar las salientes en curso</div>
+                <div className="mt-0.5 text-[11px] leading-snug text-faint">
+                  Pausar frena las llamadas nuevas; esto corta las que ya están hablando hacia afuera. Las internas y las entrantes no se tocan.
+                </div>
+              </div>
+              <Button variant="danger" size="sm" onClick={colgarSalientes} loading={colgando}>
+                Colgar
+              </Button>
+            </div>
+            {colgadas && <Note tone="warn">Salientes en curso colgadas. Pueden tardar unos segundos en cortarse.</Note>}
             {salientes && (
               <Note tone={salientes.bloqueo ? "warn" : "muted"}>
                 {salientes.bloqueo ? <>Salientes cortadas: {salientes.bloqueo}.</> : <>Salientes habilitadas.</>}{" "}

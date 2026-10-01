@@ -554,6 +554,13 @@ def _append_outbound_extension(
     detalle = f"{etiqueta}: " if etiqueta else ""
     ET.SubElement(condition, "action", attrib={"application": "log", "data": f"Llamada saliente {detalle}vía {nombres}"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
+    # Marca de "sale por troncal": empresa y extensión que llama. Es lo que
+    # permite colgar las salientes EN CURSO ante un fraude (hupall por
+    # variable, ver services/emergencia.py). `user_name` es el usuario SIP
+    # autenticado, no el caller ID que manda el teléfono.
+    if cadena:
+        ET.SubElement(condition, "action", attrib={"application": "set", "data": f"nspbx_saliente={int(cadena[0].tenant_id)}"})
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": "nspbx_saliente_ext=${user_name}@${domain_name}"})
     # Tono de "está llamando" (425 Hz, 1 s sí / 4 s no, el de Colombia) para quien
     # marca: FreeSWITCH lo envía como audio previo a la respuesta (183) mientras el
     # proveedor no mande el suyo. Sin esto, si el proveedor solo manda "180 Ringing"

@@ -80,11 +80,32 @@ async def update_extension(
             cambios["password"] = _clave_valida(cambios["password"], cambios.get("number") or ext.number)
         else:
             cambios.pop("password")
+    # Desactivarla o cambiarle la clave (lo que se hace cuando se filtró)
+    # tiene que sacar ya a quien la esté usando, no cuando venza su registro.
+    cortar = (cambios.get("enabled") is False and ext.enabled) or "password" in cambios
+    numero_anterior = ext.number
     for field, value in cambios.items():
         setattr(ext, field, value)
     await session.commit()
     await session.refresh(ext)
+    if cortar:
+        await _cortar(session, ext.tenant_id, numero_anterior)
     return ext
+
+
+async def _cortar(session, tenant_id: int, numero: str) -> None:
+    """Cuelga las salientes en curso de la extensión y tira su registro
+    (services/emergencia.py). Si FreeSWITCH no responde, el cambio en la
+    base vale igual: el directorio ya no la autentica con la clave vieja."""
+    import logging
+
+    from app.services import emergencia
+
+    tenant = await session.get(Tenant, tenant_id)
+    try:
+        await emergencia.cortar_extension(numero, tenant.sip_domain)
+    except Exception as exc:
+        logging.getLogger(__name__).error("No se pudo cortar la extensión %s en FreeSWITCH: %s", numero, exc)
 
 
 @router.delete("/{extension_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -92,8 +113,10 @@ async def delete_extension(extension_id: int, session: AsyncSession = Depends(ge
     ext = await traer_propio(session, Extension, extension_id)
     if not ext:
         raise HTTPException(status_code=404, detail="Extensión no encontrada")
+    tenant_id, numero = ext.tenant_id, ext.number
     await session.delete(ext)
     await session.commit()
+    await _cortar(session, tenant_id, numero)
 
 
 @router.post("/{extension_id}/call")
@@ -133,6 +156,7 @@ async def call_extension(
         tenant_trunk = await session.get(Tenant, trunk.tenant_id)
         slug = tenant_trunk.slug if tenant_trunk else "x"
         bridge_target = "|".join(f"sofia/gateway/{slug}_{t.name}/{destination}" for t in cadena)
+        sale_por_troncal = True
     else:
         target_ext = await session.execute(
             select(Extension).where(Extension.number == destination, Extension.enabled.is_(True))
@@ -143,6 +167,7 @@ async def call_extension(
                 detail="Destino no es una extensión interna válida; especifica una troncal para llamar a un número externo",
             )
         bridge_target = f"user/{destination}"
+        sale_por_troncal = False
 
     try:
         # El dominio de la EMPRESA de la extensión (el de su directorio en
@@ -150,10 +175,14 @@ async def call_extension(
         # extensión vive en la suya.
         tenant = await session.get(Tenant, ext.tenant_id)
         dominio = tenant.sip_domain if tenant else "nspbx.local"
+        # Marca de "sale por troncal" (ver services/emergencia.py): se puede
+        # colgar en curso por empresa o por extensión.
+        marcas = {"nspbx_saliente": str(ext.tenant_id), "nspbx_saliente_ext": f"{ext.number}@{dominio}"}
         out = await originate_bridge(
             from_endpoint=f"user/{ext.number}@{dominio}",
             bridge_target=bridge_target,
             caller_id=ext.caller_id_name or ext.number,
+            variables=marcas if sale_por_troncal else None,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"FreeSWITCH no disponible: {exc}")

@@ -172,3 +172,53 @@ async def test_la_retencion_borra_solo_lo_viejo(mundo):
     await maintenance._purgar_auditoria()
     acciones = {f.action for f in await _ultimas(500)}
     assert "PRUEBA nueva" in acciones and "PRUEBA vieja" not in acciones
+
+
+# Rutas que modifican algo y NO se auditan, cada una con su motivo. Agregar
+# una acá tiene que ser una decisión, no un olvido.
+_SIN_AUDITORIA = {
+    "/api/webcall/": "widget anónimo de los sitios de los clientes: mucho volumen y sin usuario",
+    "/api/auth/refresh": "renovación rutinaria de la sesión de la app móvil",
+    "/api/csp-report": "avisos de CSP de los navegadores, sin usuario (app/api/csp.py)",
+}
+
+
+def test_toda_ruta_que_modifica_queda_auditada():
+    """El middleware audita por método, no por lista de rutas: una ruta nueva
+    queda auditada sola. Esto lo comprueba contra TODAS las de la aplicación
+    (incluidas las de emergencia, salientes, campañas y la API pública)."""
+    from fastapi.routing import APIRoute
+
+    from app.main import app
+
+    sin = []
+    for r in app.routes:
+        if not isinstance(r, APIRoute) or not r.path.startswith("/api/"):
+            continue
+        for metodo in r.methods & {"POST", "PUT", "PATCH", "DELETE"}:
+            if not auditoria.se_audita(metodo, r.path) and not r.path.startswith(tuple(_SIN_AUDITORIA)):
+                sin.append(f"{metodo} {r.path}")
+    assert not sin, f"Rutas que modifican y no se auditan: {sin}"
+    assert set(_SIN_AUDITORIA) == set(auditoria._EXCLUIDAS), "la lista de excluidas cambió: revisar el motivo acá"
+
+
+async def test_acciones_de_fraude_quedan_registradas(cliente, mundo, monkeypatch):
+    """Lo que §5.6 exige registrar: rutas salientes, campañas y los
+    controles de emergencia, con quién lo hizo."""
+    from app.services import esl
+
+    async def api(cmd):
+        return "+OK"
+
+    monkeypatch.setattr(esl, "api", api)
+    cab = mundo.alfa.cabeceras()
+    await cliente.put(f"/api/outbound-routes/{mundo.alfa.ids['outbound_route']}", json={"priority": 12}, headers=cab)
+    await cliente.post(f"/api/campaigns/{mundo.alfa.ids['campaign']}/stop", headers=cab)
+    await cliente.post("/api/system/salientes/colgar", headers=cab)
+    async with engine.connect() as conn:
+        acciones = set((await conn.execute(text(
+            "SELECT action FROM audit_log WHERE tenant_id = :t AND actor LIKE 'admin-alfa%'"
+        ), {"t": mundo.alfa.id})).scalars())
+    for esperada in ("PUT /api/outbound-routes/{route_id}", "POST /api/campaigns/{campaign_id}/stop",
+                     "POST /api/system/salientes/colgar"):
+        assert esperada in acciones, (esperada, sorted(acciones)[:20])

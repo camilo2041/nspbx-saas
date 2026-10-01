@@ -176,7 +176,12 @@ RUN groupadd --system --gid 10001 freeswitch \
     && mkdir -p /var/lib/freeswitch/db /var/lib/freeswitch/storage /var/lib/freeswitch/cache \
         /var/lib/freeswitch/recordings /var/log/freeswitch /var/run/freeswitch /usr/local/freeswitch/certs \
     && chown -R freeswitch:freeswitch /var/lib/freeswitch /var/log/freeswitch /var/run/freeswitch \
-        /usr/local/freeswitch/certs
+        /usr/local/freeswitch/certs \
+    && mkdir -p /tmp && chmod 1777 /tmp
+# /tmp escribible por el usuario (1777): mod_xml_curl baja ahí cada
+# respuesta del backend (directorio y dialplan). Sin eso no se registra ni
+# llama nadie. La base Debian ya lo trae así; se fija igual para no
+# depender de la imagen base.
 COPY entrypoint.sh /usr/local/bin/nspbx-entrypoint.sh
 
 EXPOSE 5060/udp 5060/tcp 5080/udp 8021 5066 7443

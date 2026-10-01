@@ -264,7 +264,7 @@ cortar la pérdida:
 | Detección | alerta por salientes de madrugada, prefijo internacional nuevo y 80 % del cupo | ✅ | alerta |
 | Detección | alerta por extensión registrada desde un país distinto al habitual | ❌ | alerta |
 | Reacción | botón "cortar todas las salientes" por empresa (la empresa y la plataforma) y global | ✅ | ver §5.15. Corta toda llamada **nueva**; las que están en curso terminan por la duración máxima |
-| Auditoría | todo cambio de rutas salientes, internacional o topes queda registrado | ❌ | ver §5.10 |
+| Auditoría | todo cambio de rutas salientes, internacional o topes queda registrado | ✅ | el middleware audita toda petición que modifica algo; `test_auditoria.py` lo comprueba contra todas las rutas de la aplicación y en las de fraude (rutas salientes, campañas, colgar en curso) |
 
 Verificación: prueba de dialplan con destinos `00…`, `011…`, premium y
 números largos que deben rechazarse; prueba de que al superar el tope
@@ -310,7 +310,7 @@ llamante ─► STT ─► LLM ─► pide herramienta(args)
 | Horario permitido de marcación (regulación local) | ❌ | — | ventana por empresa y zona horaria |
 | Límite diario y presupuesto por campaña | ❌ | — | — |
 | Detener ya (kill switch) | 🟢 | pausa | prueba: tras pausar, ninguna llamada nueva sale en ≤ 2 s |
-| Auditoría de crear/iniciar/pausar | ❌ | — | §5.10 |
+| Auditoría de crear/iniciar/pausar | ✅ | middleware de auditoría (§5.10) | `test_auditoria.py`: toda ruta que modifica queda auditada |
 
 ### 5.9 Grabaciones y datos personales
 
@@ -428,10 +428,10 @@ tocar código. Cada uno queda auditado.
 | Suspender empresa | 🟢 | licencia `suspended` / `Tenant.enabled` |
 | Cortar todas las salientes de una empresa | ✅ | la empresa (Ajustes → Pausar) o la plataforma (Empresas → Cortar salientes; la empresa no puede deshacerlo) |
 | Cortar todas las salientes de la plataforma | ✅ | Empresas → Cortar todas las salientes (`PUT /api/plataforma/salientes`) |
-| Colgar las salientes **en curso** | ❌ | hoy terminan por la duración máxima; falta un `hupall` por empresa |
+| Colgar las salientes **en curso** | ✅ | la empresa (Ajustes → Colgar) o la plataforma (al cortar salientes, de una empresa o de todas, pregunta si colgar también las que están hablando). Toda llamada que sale por troncal (dialplan, campañas, clic para llamar) lleva su empresa en `nspbx_saliente`, y `hupall` cuelga solo esas. `test_emergencia.py`; probado con FreeSWITCH real: una llamada de verdad de una extensión a la troncal se cortó en menos de 2 s en las dos puntas, con `MANAGER_REQUEST` en el CDR |
 | Detener campaña | 🟢 | pausar |
 | Desactivar un voizbot | 🟢 | `VoiceBot.enabled` |
-| Bloquear extensión (y tirar su registro) | 🟡 | `enabled`; falta `sofia profile ... flush_inbound_reg` automático |
+| Bloquear extensión (y tirar su registro) | ✅ | desactivarla, cambiarle la clave o borrarla cuelga sus salientes en curso (`nspbx_saliente_ext`, el usuario SIP autenticado) y tira su registro. Probado con FreeSWITCH real: la llamada se cortó, el registro desapareció y el teléfono no pudo volver a registrarse |
 | Cerrar sesiones de un usuario / de una empresa | 🟡 | `revocar_sesiones` por usuario |
 | Bloquear un país o prefijo para todos | 🟡 | lista fija en `salientes.CODIGOS_BLOQUEADOS`; falta poder agregar desde el panel |
 | Bloquear IP | 🟢 | fail2ban / panel de seguridad |
@@ -701,7 +701,9 @@ empresa entraba al contexto del voizbot (y se nombraba sin verificar). Al
 sacar root, las pruebas con Docker encontraron dos más antes de llegar a
 producción: el backend no arrancaba (HOME seguía en /root y asyncpg no
 podía mirar ahí) y la renovación del certificado wss tumbaba el perfil SIP
-`internal`. La prueba de carga de los topes encontró que los resúmenes de
+`internal`. Al probar con un teléfono y un proveedor SIP de verdad apareció
+que mod_xml_curl necesita escribir en `/tmp` (ahí baja directorio y
+dialplan): la imagen lo deja explícito en 1777. La prueba de carga de los topes encontró que los resúmenes de
 IA y de cobranza traían todas las filas a memoria (790 MB por petición con
 una empresa grande: dos a la vez reiniciaban el backend, y FreeSWITCH se
 quedaba sin dialplan) y que `ai-usage/daily` aceptaba cualquier cantidad

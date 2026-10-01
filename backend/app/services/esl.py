@@ -457,6 +457,7 @@ async def originate_bridge(
     bridge_target: str,
     caller_id: str = "NSPBX",
     timeout: int = 30,
+    variables: dict[str, str] | None = None,
 ) -> str:
     """Origina una llamada a `from_endpoint`; al contestar, la bridgea a `bridge_target`.
 
@@ -470,10 +471,17 @@ async def originate_bridge(
         raise ValueError("Destino de puente con formato no permitido")
     if not re.fullmatch(r"[A-Za-z0-9_.@:/+*#-]{1,255}", from_endpoint or ""):
         raise ValueError("Origen con formato no permitido")
+    # `variables`: marcas propias (p. ej. nspbx_saliente); nombre y valor
+    # restringidos, van dentro del bloque {…} sin comillas.
+    extra = ""
+    for k, v in (variables or {}).items():
+        if not (re.fullmatch(r"[a-z_]{1,40}", k) and re.fullmatch(r"[A-Za-z0-9_.@-]{1,120}", v)):
+            raise ValueError("Variable de canal con formato no permitido")
+        extra += f",{k}={v}"
     cmd = (
         f"originate {{origination_caller_id_name='{safe_caller_id}',"
         f"origination_caller_id_number='{safe_caller_id}',"
-        f"call_timeout={timeout}}}{from_endpoint} &bridge({bridge_target})"
+        f"call_timeout={timeout}{extra}}}{from_endpoint} &bridge({bridge_target})"
     )
     return await bgapi(cmd)
 

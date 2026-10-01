@@ -217,6 +217,8 @@ class CampaignDialer:
             # compatibilidad con las campañas viejas.
             extra_vars: dict[str, str] = {
                 "nspbx_tenant_id": str(fresh.tenant_id),
+                # Sale por troncal: se puede colgar en curso (services/emergencia.py).
+                "nspbx_saliente": str(fresh.tenant_id),
                 "nspbx_ai_intent": (fresh.ai_intent or "").strip().lower() or "confirmar",
             }
             intencion = extra_vars["nspbx_ai_intent"]

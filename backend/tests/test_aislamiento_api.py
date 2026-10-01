@@ -43,6 +43,7 @@ _RECURSO_POR_PARAMETRO = {
 _FUERA_DE_ESTA_PRUEBA = {
     "/api/tenants/{tenant_id}": "solo plataforma — test_alcance.py",
     "/api/tenants/{tenant_id}/licencia": "solo plataforma — test_alcance.py",
+    "/api/tenants/{tenant_id}/salientes/colgar": "solo plataforma — test_emergencia.py",
     "/api/auth/dispositivo/{platform}": "actúa sobre el propio usuario, no recibe ids",
     "/api/webcall/session/{username}/end": "widget anónimo con credencial temporal propia",
     "/api/v1/campanas/{campaign_id}/numeros": "API pública, entra con clave de API — test_api_v1.py",
