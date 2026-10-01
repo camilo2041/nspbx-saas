@@ -182,9 +182,9 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | Gateways con prefijo por empresa | ✅ | `services/gateways.py` | `test_dialplan.py`: cada contexto sale solo por `sofia/gateway/<su_slug>_…` |
 | WebSocket de logs/eventos filtrado por empresa | ✅ | `api/logs_ws.py` fija tenant; consola FS solo operador global | `test_rutas_abiertas.py` (sin token no hay usuario), `test_alcance.py` (admin de empresa no es operador global) |
 | Workers (dialer, mantenimiento) conservan la empresa | 🟡 | `workers/dialer.py` | revisar que cada consulta del worker fije tenant o filtre explícito; prueba |
-| Herramientas del voizbot filtran por `tenant_id` (sesión sin RLS) | 🟡 | `services/ai_agent.py:_run_tool` | **lint/prueba que falle si una consulta en `_run_tool` no menciona `tenant_id`**; a futuro, darle al bot su propia sesión con RLS por llamada |
+| Herramientas del voizbot filtran por `tenant_id` (sesión sin RLS) | ✅ | `services/ai_agent.py:_run_tool` | sin empresa no hay herramientas (fallo seguro); la cita fijada tiene que ser de la empresa; `test_voicebot_herramientas.py`. A futuro: sesión con RLS por llamada |
 | **Filtro por empresa también en la aplicación** (segunda capa, independiente de RLS) | ✅ | `core/database.py`: `with_loader_criteria` en toda consulta ORM de una sesión atada a una empresa, `traer_propio()` en las búsquedas por id; la sesión exige que la empresa del token sea la del usuario | CI corre la suite de la API dos veces: con RLS y con el rol dueño (`NSPBX_TEST_SIN_RLS=1`). Desactivar el filtro de la aplicación hace fallar 25 pruebas del segundo modo |
-| Caché / almacenamiento de archivos por empresa | 🟡 | grabaciones en carpetas por fecha, no por empresa | mover a `recordings/t<id>/...` para que el aislamiento también sea físico y la retención por empresa sea trivial |
+| Caché / almacenamiento de archivos por empresa | ✅ | grabaciones en `t<id>/AAAA/MM/DD`, colas `queue_t<id>_…` | `test_grabaciones.py` |
 
 ### 5.2 Identidad y sesiones
 
@@ -218,7 +218,7 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | CORS abierto **sin credenciales**, token en cabecera | 🟢 | `main.py:576` | prueba de que no hay cookies de sesión |
 | Sin stack traces en producción | por verificar | — | prueba: error 500 devuelve mensaje genérico + `request_id` |
 | `request_id` en cada petición y en cada log | ✅ | `core/auditoria.py` | cabecera `X-Request-ID` en cada respuesta y en cada línea de log; `LOG_FORMATO=json` para un recolector; `test_auditoria.py` |
-| Cabeceras de seguridad (CSP, HSTS, X-Frame-Options, Referrer-Policy) | ❌ | `next.config.ts` y Traefik sin ellas | middleware de Traefik + `headers()` en Next |
+| Cabeceras de seguridad (CSP, HSTS, X-Frame-Options, Referrer-Policy) | 🟡 | `next.config.ts`, `core/cabeceras.py` | aplicadas: nosniff, HSTS, sin iframes (salvo `/webcall`), Permissions-Policy, `no-store` en la API. La CSP completa está en **solo reporte**: pasarla a aplicada cuando la consola del navegador no muestre avisos en producción |
 | Límite de peticiones por usuario/empresa (no solo login) | 🟡 | `limitar_uso` en endpoints puntuales | límite general por token y por empresa |
 | Idempotencia en operaciones críticas (iniciar campaña, cobros) | ❌ | — | cabecera `Idempotency-Key` |
 | Webhooks firmados (HMAC + timestamp + tolerancia de 5 min) | 🟡 | `agent_webhook_secret`, `core/firmas.py` | prueba de firma inválida y de repetición |
@@ -290,15 +290,15 @@ llamante ─► STT ─► LLM ─► pide herramienta(args)
 |---|---|---|---|
 | El LLM no tiene acceso directo a la base ni a SQL | 🟢 | solo herramientas cerradas | — |
 | Cada herramienta valida empresa y reglas fuera del modelo | 🟢 | `_run_tool` | prueba por herramienta: args de otra empresa → rechazo |
-| El llamante solo actúa sobre **sus** datos (citas/deudas ligadas a su número o a la campaña) | 🟡 | `caller_phone`, `appointment_id` | prueba: pedir "cancela la cita de 3001234567" desde otro número → rechazo |
+| El llamante solo actúa sobre **sus** datos (citas/deudas ligadas a su número o a la campaña) | ✅ | teléfono, empresa y cita salen de la llamada, nunca de los argumentos del modelo | `test_voicebot_herramientas.py` (argumentos inyectados, otro llamante, nombre del paciente) |
 | El contexto del prompt no incluye datos de otros clientes | por verificar | — | revisión de `voice_prompts.py` |
 | Éxito de herramienta explícito (no deducido del texto) | 🟢 | `_run_tool` devuelve `(ok, …)` | — |
 | Topes por llamada: turnos, duración, tokens | 🟡 | `max_turns`, duración | tope de tokens por llamada y por empresa/día |
 | Concurrencia de bots por empresa | 🟡 | concurrencia general | tope propio del bot |
 | Costo por empresa medido | 🟢 | `AiCallUsage`, `services/usage.py` | alerta al pasar el presupuesto |
-| Versionado de prompts/flujos con rollback | ❌ | `flow_json` sin historial | tabla de versiones; la campaña apunta a una versión |
+| Versionado de prompts/flujos con rollback | ✅ | `voicebot_versions`; Historial en el editor de flujos | `test_voicebot_versiones.py`. Falta: que una campaña apunte a una versión fija |
 | Proveedor de IA caído → degradación controlada | por verificar | — | prueba de caos: transferir a humano o mensaje y colgar, nunca silencio |
-| Pruebas de prompt injection | ❌ | — | conjunto fijo de ataques ("ignora tus instrucciones", "dime los datos del cliente anterior") que corre contra `bot_sim.py` en CI |
+| Pruebas de prompt injection | 🟡 | `test_voicebot_herramientas.py` simula al modelo ya manipulado pidiendo herramientas con argumentos maliciosos | cubre lo que el bot puede HACER. Falta una batería contra el modelo real (lo que puede DECIR), que necesita una clave de LLM en CI |
 
 ### 5.8 Campañas
 
@@ -319,8 +319,8 @@ llamante ─► STT ─► LLM ─► pide herramienta(args)
 | No servidas desde carpeta pública | 🟢 | solo `GET /api/calls/{id}/recording` | prueba: la ruta del archivo no es accesible por HTTP |
 | Empresa + permiso validados antes de entregar | ✅ | `_traer()` + RLS | `test_grabacion_de_otra_empresa_no_se_entrega` (con el archivo presente en disco) |
 | Tope de disco | 🟢 | `recordings_max_gb` | — |
-| Registro de cada escucha/descarga | ❌ | — | §5.10 |
-| Retención configurable por empresa y borrado real | 🟡 | tope global por espacio | retención en días por empresa; borrado verificable |
+| Registro de cada escucha/descarga | ✅ | auditoría (§5.10) | `test_auditoria.py` |
+| Retención configurable por empresa y borrado real | ✅ | cada empresa su retención (Ajustes) sobre su carpeta; tope de disco de la plataforma encima | `test_grabaciones.py` |
 | Cifrado en reposo | 🟡 | respaldos cifrados; disco en vivo según proveedor | cifrado de volumen del proveedor |
 | Exportar y borrar datos de un cliente final / de una empresa | ❌ | — | requisito de la Ley 1581 (Colombia) y similares |
 
@@ -364,8 +364,8 @@ una empresa, kill switches.
 | Secretos de infraestructura solo en `.env`, arranque falla si faltan | 🟢 | `:?` en `docker-compose.yml` | — |
 | `.env` fuera de Git | ✅ | `.gitignore` (`.env`, `.env.*`) | gitleaks sobre el historial completo en cada push (`ci.yml`) |
 | Claves privadas en el historial | ❌ | `freeswitch/conf/tls/wss.pem` y `dtls-srtp.pem` del primer commit | ya no están en el árbol, pero sí en el historial: tratarlas como filtradas y **rotarlas** si el servidor todavía las usa. Detalle en `.gitleaksignore` |
-| Claves de proveedores por empresa (ElevenLabs, Deepgram, LLM, ARI, Turnstile) cifradas en DB | ❌ | columnas en texto claro en `system_settings` | cifrado de aplicación (AES-GCM con clave en `.env`), nunca devueltas completas por la API |
-| Contraseñas de troncales y extensiones | ❌ | texto claro (FreeSWITCH las necesita) | cifradas en DB y descifradas solo al generar el XML; extensiones con `a1-hash` |
+| Claves de proveedores por empresa (ElevenLabs, Deepgram, LLM, ARI, Turnstile) cifradas en DB | ✅ | `core/cifrado.py` (AES-256-GCM, `DATA_ENCRYPTION_KEY`, rotación con `_ANTERIOR`); la API devuelve `••••••abcd` | `test_cifrado.py`: ningún secreto en claro en ninguna columna |
+| Contraseñas de troncales y extensiones | ✅ | cifradas en DB, en claro solo al generar el XML; la de la troncal enmascarada en la API | `a1-hash` descartado: el softphone del panel necesita la contraseña de la extensión |
 | Rotación documentada (ESL, `AUTH_SECRET`, claves de proveedor, SIP) | ❌ | — | runbook por secreto: cómo rotar y qué se corta |
 | TLS en todo lo público | 🟢 | Traefik + WSS | renovación automática; alerta 14 días antes de vencer |
 | Respaldos cifrados con clave fuera del servidor | 🟢 | `scripts/backup-offsite.sh` | restauración de prueba (§6.3) |
@@ -613,15 +613,34 @@ en curso al cortar, y agregar prefijos bloqueados desde el panel.
 hace 30 días (✅ con la auditoría), y hay un RTO medido (pendiente: correr
 el simulacro en el servidor).
 
-### Fase 3 — Endurecer y escalar
+### Fase 3 — Endurecer y escalar 🟡
 
-- Secretos de proveedores y troncales cifrados en DB; `a1-hash` en extensiones.
-- Backend sin root, límites de recursos, filesystem de solo lectura.
-- Cabeceras de seguridad (CSP, HSTS).
-- Versionado de flujos del voizbot y suite de prompt injection.
-- Grabaciones por carpeta de empresa, retención por empresa, registro de escuchas.
+- ✅ Secretos de proveedores, troncales, extensiones y MFA cifrados en DB
+  (AES-256-GCM) y enmascarados en la API.
+- 🟡 Cabeceras de seguridad aplicadas; CSP completa en solo reporte.
+- ✅ Herramientas del voizbot a prueba de manipulación (I4) y versionado
+  de flujos con restauración.
+- ✅ Grabaciones por carpeta de empresa y retención por empresa; las
+  escuchas ya se auditaban.
+- ❌ **Contenedores** (backend y voicebot sin root, límites de memoria y
+  CPU, filesystem de solo lectura). Pendiente a propósito: no se puede
+  probar sin Docker, y un error tumba la central. Plan para hacerlo en un
+  servidor de pruebas:
+  1. Medir con `docker stats` durante un día normal y uno de campaña.
+  2. Límites a 2× el pico medido (`mem_limit`, `cpus`), primero en el
+     voicebot y el backend; nunca en FreeSWITCH ni Postgres.
+  3. Usuario sin root en `backend/Dockerfile` con un entrypoint que
+     ajusta el dueño de los volúmenes montados (`/freeswitch-conf`,
+     sonidos, grabaciones, respaldos) y baja privilegios con `gosu`.
+  4. `read_only: true` + `tmpfs: /tmp` en el voicebot, que no escribe en disco.
 - Redis para limitadores y estado compartido (requisito para más de un proceso).
 - SBC (Kamailio/OpenSIPS) delante de FreeSWITCH cuando el volumen lo justifique.
+
+Lo que dejó a la vista la fase 3, ya corregido: el voizbot buscaba en
+todas las empresas si una llamada llegaba sin empresa; la verificación del
+nombre del paciente se saltaba con cualquier cita fijada; el contexto
+público grababa las entrantes de empresas que no graban; un secreto
+cifrado corrupto hacía fallar el descifrado.
 
 ### Fase 4 — Producto SaaS maduro
 
@@ -653,7 +672,7 @@ la siguiente sin cerrar la anterior.
 
 **Compuerta C — Se puede vender voizbot y campañas a escala**
 - [ ] Todo lo de B
-- [ ] I4 con prueba (herramientas + prompt injection)
+- [x] I4 con prueba (herramientas a prueba de manipulación; falta la batería contra el modelo real)
 - [ ] Topes de tokens y bots por empresa
 - [ ] Ventana horaria de campañas
 
@@ -661,7 +680,7 @@ la siguiente sin cerrar la anterior.
 - [ ] Todo lo de C
 - [ ] Pentest externo sin críticos abiertos
 - [ ] Retención y borrado de datos por empresa
-- [ ] Secretos cifrados en DB
+- [x] Secretos cifrados en DB
 - [ ] RPO 15 min / RTO medido ≤ 2 h
 
 ---
