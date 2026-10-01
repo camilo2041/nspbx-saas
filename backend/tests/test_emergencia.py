@@ -198,7 +198,7 @@ def _cortes(enviados):
     return [c for c in enviados if "1050@eco.pbx.test" in c]
 
 
-@pytest.mark.parametrize("cambio", [{"enabled": False}, {"password": "Otra-Clave-Larga-987"}])
+@pytest.mark.parametrize("cambio", [{"enabled": False}, {"password": "Otra-Clave-Larga-987"}])  # gitleaks:allow (clave de prueba)
 async def test_desactivar_o_cambiar_clave_saca_al_que_la_usa(eco, cliente, fs, extension_temporal, cambio):
     resp = await cliente.put(f"/api/extensions/{extension_temporal}", json=cambio, headers=eco["cab"])
     assert resp.status_code == 200, resp.text
