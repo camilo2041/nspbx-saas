@@ -19,6 +19,8 @@
 services:
   backend:
     environment:
+      # Tolera secretos faltantes (avisa en el log en vez de no arrancar).
+      ENTORNO: desarrollo
       SIP_WS_URL: ws://localhost:5066
       SIP_SERVER_IP: 127.0.0.1
 

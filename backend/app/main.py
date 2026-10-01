@@ -16,6 +16,7 @@ from sqlalchemy import select, text, update
 
 from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import permissions
+from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
 from app.core.database import Base, async_session, engine, verificar_rol_sin_privilegios
@@ -488,11 +489,18 @@ async def _asegurar_plataforma(session) -> None:
     logger.warning("Usuario de plataforma creado: 'plataforma' con la misma contraseña que 'admin'")
 
 
-async def lifespan(app: FastAPI):
-    # Las migraciones van con el motor del DUEÑO, no con el de la
-    # aplicación: el rol restringido está sujeto a las políticas que
-    # estas mismas sentencias crean, así que un UPDATE de relleno vería
-    # cero filas y la migración "terminaría bien" sin haber hecho nada.
+async def migrar() -> None:
+    """Esquema, parches, rol de la aplicación y políticas de RLS.
+
+    Separado del arranque para que las pruebas (backend/tests) migren su
+    base exactamente por el mismo camino que producción: un aislamiento
+    probado contra un esquema armado a mano no prueba nada.
+
+    Las migraciones van con el motor del DUEÑO, no con el de la
+    aplicación: el rol restringido está sujeto a las políticas que estas
+    mismas sentencias crean, así que un UPDATE de relleno vería cero
+    filas y la migración "terminaría bien" sin haber hecho nada.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         for stmt in _COLUMN_PATCHES:
@@ -501,6 +509,13 @@ async def lifespan(app: FastAPI):
     # el que se va a atender NO puede saltárselas. Va acá y no antes
     # porque el rol se crea recién en la migración de arriba.
     await verificar_rol_sin_privilegios()
+
+
+async def lifespan(app: FastAPI):
+    # Antes de tocar la base: sin los secretos que sostienen el
+    # aislamiento, en producción no se arranca (ver core/arranque.py).
+    exigir_configuracion_segura()
+    await migrar()
     async with async_session() as session:
         # Ajustes y ESL por empresa. Los ajustes se siembran desde cada
         # tenant (fs_domain sale de Tenant.sip_domain) y la config de

@@ -187,12 +187,14 @@ services:
       FS_SOUNDS_DIR: /freeswitch-sounds
       # Debe coincidir con el ?secret= de freeswitch/conf/autoload_configs/xml_curl.conf.xml.
       FS_XML_SECRET: ${FS_XML_SECRET:?Definí FS_XML_SECRET en .env — ver freeswitch/conf/autoload_configs/xml_curl.conf.xml}
-      # Firma los tokens de sesión. Si falta, el backend genera una clave
-      # al azar en cada arranque y todo el mundo queda desconectado al
-      # reiniciar. Se define en .env, nunca acá con un valor por defecto:
-      # una clave fija en el repositorio deja firmar tokens de admin a
-      # cualquiera que lo lea.
+      # Firma los tokens de sesión. Se define en .env, nunca acá con un
+      # valor por defecto: una clave fija en el repositorio deja firmar
+      # tokens de admin a cualquiera que lo lea. En producción el backend
+      # no arranca si falta o es corta (ver app/core/arranque.py).
       AUTH_SECRET: ${AUTH_SECRET:-}
+      # produccion | desarrollo. En producción el arranque falla si falta
+      # un secreto que sostiene el aislamiento; en desarrollo solo avisa.
+      ENTORNO: ${ENTORNO:-produccion}
       # Solo se usa la primera vez, para crear el usuario "admin". Si se
       # deja vacío, la contraseña se genera y sale en el log del arranque.
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

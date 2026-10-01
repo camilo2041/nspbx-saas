@@ -1,0 +1,17 @@
+# Hallazgos de gitleaks revisados a mano. Cada línea es la huella exacta de
+# UN hallazgo (commit:archivo:regla:línea): un secreto nuevo, aunque sea en
+# el mismo archivo, tiene otra huella y hace fallar el CI igual.
+
+# Falso positivo: el ejemplo de formato de APNS_AUTH_KEY en la guía de la
+# app móvil ("-----BEGIN PRIVATE KEY-----\n...\n"), sin clave real.
+d8e224d89c7c367291971d32d9b69bfee57ca99b:mobile/SETUP.md:private-key:27
+
+# REALES, del primer commit: claves que FreeSWITCH se autogeneró y que
+# quedaron versionadas antes de ignorar freeswitch/conf/tls/. Ya no están
+# en el árbol, pero siguen en el historial: hay que tratarlas como
+# filtradas. Si el servidor todavía usa esas mismas claves, rotarlas
+# (borrar los .pem de freeswitch/conf/tls/ y reiniciar FreeSWITCH, que crea
+# unas nuevas). Se ignoran acá solo para que el CI vigile los secretos
+# NUEVOS; reescribir el historial es una decisión aparte.
+12eec00d7b7e0ab4d3a194dd45041dc1a02fc3e8:freeswitch/conf/tls/dtls-srtp.pem:private-key:1
+12eec00d7b7e0ab4d3a194dd45041dc1a02fc3e8:freeswitch/conf/tls/wss.pem:private-key:1

@@ -55,8 +55,10 @@ docker compose logs backend | grep -A 3 "Usuario inicial"
 
 Para fijarla en vez de que se genere, poner `ADMIN_PASSWORD` en `.env` antes del primer arranque.
 
-`AUTH_SECRET` (también en `.env`) firma los tokens de sesión. Si falta, se genera una clave al azar en
-cada arranque y todo el mundo queda desconectado al reiniciar el backend. Si se cambia, pasa lo mismo.
+`AUTH_SECRET` (también en `.env`) firma los tokens de sesión. Es obligatoria en producción (mínimo 32
+caracteres): sin ella, o sin `FS_XML_SECRET` o el rol restringido de la base, el backend no arranca y
+dice qué falta. En un equipo de desarrollo, `ENTORNO=desarrollo` lo convierte en un aviso. Si se cambia
+`AUTH_SECRET`, todo el mundo queda desconectado.
 
 ### Roles
 

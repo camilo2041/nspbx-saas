@@ -30,10 +30,19 @@ está organizado alrededor de ellas:
 | 🟡 | Parcial: cubre una parte del riesgo |
 | ❌ | No existe |
 
-Hoy el repositorio no tiene pruebas automáticas ni CI, así que **ningún
-control está en ✅**. Ese es el hueco más importante del sistema y la
-razón por la que la fase 0 de la hoja de ruta (sección 8) es verificar,
-no construir.
+La fase 0 (sección 8) agregó la suite de `backend/tests/` y el workflow
+`.github/workflows/ci.yml`: el aislamiento entre empresas (I1, I2, I3), el
+alcance (I6) y el fallo seguro (I8) ya están en ✅. El resto sigue en 🟢 o
+menos hasta que tenga su prueba.
+
+Para correr las pruebas en un equipo propio hace falta un Postgres 16
+descartable (la suite borra la base entera):
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:clave@localhost:5432/nspbx_test python -m pytest
+```
 
 El estado se revisó contra el código el 2026-10-01. Al cambiar un control,
 se actualiza su fila en el mismo commit.
@@ -163,17 +172,18 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 
 | Requisito | Estado | Evidencia | Verificación |
 |---|---|---|---|
-| `tenant_id` no nulo en toda tabla de negocio | 🟢 | `models/models.py` (`_tenant_fk`) | prueba que recorre el metadata y falla si una tabla de negocio no lo tiene |
-| RLS con `USING` y `WITH CHECK` en esas tablas | 🟢 | `main.py:_parches_rls` | prueba: con el filtro de la app quitado, RLS igual devuelve 0 filas ajenas |
-| La app conecta con `nspbx_app`, sin `SUPERUSER` ni `BYPASSRLS` | 🟢 | `main.py:370`, `core/database.py` | el arranque lo verifica; falta que **se niegue a arrancar** en producción si `DATABASE_URL_APP` falta (hoy solo avisa) |
-| `SET LOCAL app.tenant_id` sobrevive a varios commits | 🟢 | `after_begin` en `core/database.py` | prueba: endpoint con dos transacciones devuelve datos en la segunda |
+| `tenant_id` no nulo en toda tabla de negocio | ✅ | `models/models.py` (`_tenant_fk`) | `test_aislamiento_db.py`: recorre los modelos y falla si una tabla de negocio admite NULL o no tiene RLS |
+| RLS con `USING` y `WITH CHECK` en esas tablas | ✅ | `main.py:_parches_rls` | `test_aislamiento_db.py`: `SELECT`/`UPDATE`/`DELETE` sin `WHERE` no tocan otra empresa; sin empresa fijada no se ve nada; `INSERT` o mover una fila a otra empresa falla |
+| La app conecta con `nspbx_app`, sin `SUPERUSER` ni `BYPASSRLS` | ✅ | `core/database.py`, `core/arranque.py` | el arranque lo verifica y en producción **no arranca** si `DATABASE_URL_APP` falta o es el rol dueño; `test_aislamiento_db.py`, `test_arranque.py` |
+| `SET LOCAL app.tenant_id` sobrevive a varios commits | ✅ | `after_begin` en `core/database.py` | `test_la_empresa_sobrevive_a_varios_commits` |
 | `tenant_id` nunca se toma del cliente | 🟢 | sale del token firmado | prueba: enviar `tenant_id` ajeno en el body no tiene efecto |
-| Directorio y dialplan de FreeSWITCH por dominio/contexto | 🟢 | `services/xml_endpoints.py`, `config_generator.py` | prueba: dos empresas con extensión 1000, cada dominio ve solo la suya |
-| Entrantes: DID → empresa | 🟢 | contexto `public` | prueba: DID de A nunca rutea a contexto de B; DID sin dueño se rechaza |
-| Gateways con prefijo por empresa | 🟢 | `services/gateways.py` | prueba de nombres |
-| WebSocket de logs/eventos filtrado por empresa | 🟢 | `api/logs_ws.py` fija tenant; consola FS solo operador global | prueba: suscriptor de A no recibe eventos de B |
+| Directorio y dialplan de FreeSWITCH por dominio/contexto | ✅ | `services/xml_endpoints.py`, `config_generator.py` | `test_dialplan.py`: dos empresas con extensión 1000, cola 5000 y troncal "principal"; ningún contexto menciona a la otra |
+| Entrantes: DID → empresa | ✅ | contexto `public` | `test_dialplan.py`: cada DID va al contexto y dominio de su empresa; un DID sin dueño cuelga |
+| Gateways con prefijo por empresa | ✅ | `services/gateways.py` | `test_dialplan.py`: cada contexto sale solo por `sofia/gateway/<su_slug>_…` |
+| WebSocket de logs/eventos filtrado por empresa | ✅ | `api/logs_ws.py` fija tenant; consola FS solo operador global | `test_rutas_abiertas.py` (sin token no hay usuario), `test_alcance.py` (admin de empresa no es operador global) |
 | Workers (dialer, mantenimiento) conservan la empresa | 🟡 | `workers/dialer.py` | revisar que cada consulta del worker fije tenant o filtre explícito; prueba |
 | Herramientas del voizbot filtran por `tenant_id` (sesión sin RLS) | 🟡 | `services/ai_agent.py:_run_tool` | **lint/prueba que falle si una consulta en `_run_tool` no menciona `tenant_id`**; a futuro, darle al bot su propia sesión con RLS por llamada |
+| **Filtro por empresa también en la aplicación** (segunda capa, independiente de RLS) | ❌ | la mayoría de los endpoints buscan por id sin filtrar (`session.get(Modelo, id)`) | corriendo la suite de la API con RLS desactivado fallan 41 casos: unas 30 operaciones por id (troncales, extensiones, rutas, colas, bots, campañas, deudas, citas, usuarios, llamadas) y 6 listados. Hoy **RLS es la única capa** en esos puntos: funciona y está probado, pero un error de configuración de la base los dejaría abiertos a la vez. Ver fase 1 |
 | Caché / almacenamiento de archivos por empresa | 🟡 | grabaciones en carpetas por fecha, no por empresa | mover a `recordings/t<id>/...` para que el aislamiento también sea físico y la retención por empresa sea trivial |
 
 ### 5.2 Identidad y sesiones
@@ -182,10 +192,10 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 |---|---|---|---|
 | Hash de contraseñas fuerte | 🟢 | PBKDF2-SHA256 (`core/security.py`) | revisar iteraciones ≥ 600 000 (recomendación OWASP actual); migrar a Argon2id al próximo login |
 | Token de acceso corto + refresh token rotado y hasheado | 🟢 | `crear_token`, `RefreshToken` | prueba: refresh reutilizado invalida la familia |
-| Revocación de sesiones | 🟢 | `services/sesiones.py` | prueba: tras cambiar contraseña o desactivar usuario, el token viejo da 401 |
+| Revocación de sesiones | ✅ | `services/sesiones.py`, `sesiones_desde` | `test_fallo_seguro.py`: usuario desactivado, rol rebajado y sesiones cerradas cortan al instante |
 | Límite de intentos de login por IP y por usuario | 🟢 | `core/limitador.py` (en memoria) | prueba; pasa a Redis el día que haya más de un proceso |
 | IP real detrás del proxy, no falsificable | 🟢 | `ip_cliente()` | prueba con `X-Forwarded-For` inventado |
-| `AUTH_SECRET` obligatorio en producción | 🟡 | hoy tiene valor vacío por defecto y genera uno al azar | que el arranque **falle** sin él en producción |
+| `AUTH_SECRET` obligatorio en producción | ✅ | `core/arranque.py` | en producción no arranca sin ella o con menos de 32 caracteres; `test_arranque.py` |
 | MFA (TOTP) | ❌ | — | obligatorio para `plataforma` y `admin`; opcional para el resto |
 | Recuperación de contraseña segura | ❌/por verificar | — | token de un solo uso, 15 min, no revela si el correo existe |
 | Lista de sesiones/dispositivos visible al usuario | ❌ | — | — |
@@ -195,10 +205,10 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | Requisito | Estado | Evidencia | Verificación |
 |---|---|---|---|
 | Permisos granulares, no `if rol == "admin"` | 🟢 | `core/permissions.py`, overrides por empresa | — |
-| Toda ruta bajo `/api/` exige sesión salvo lista explícita | 🟢 | `core/auth.py:_es_abierta` | prueba que enumera `app.routes` y falla si una ruta nueva no declara permiso ni está en la lista abierta |
-| Operaciones globales separadas de las de empresa | 🟢 | `core/alcance.py` | prueba con dos empresas: admin de empresa recibe 403 |
-| Licencia suspendida bloquea operación | 🟢 | `licencia_operativa()` | prueba |
-| Matriz rol × endpoint documentada y probada | ❌ | — | generar la matriz desde el código y probarla en CI |
+| Toda ruta bajo `/api/` exige sesión salvo lista explícita | ✅ | `core/auth.py:_es_abierta` | `test_rutas_abiertas.py`: llama TODAS las rutas sin token; la lista abierta está repetida en la prueba a propósito |
+| Operaciones globales separadas de las de empresa | ✅ | `core/alcance.py` | `test_alcance.py`: admin, supervisor y asesor de una empresa reciben 403 en empresas, licencias, diagnóstico y respaldos |
+| Licencia suspendida bloquea operación | ✅ | `licencia_operativa()` | `test_fallo_seguro.py`: deja ver, no deja crear (402); empresa desactivada → 403 y fuera de FreeSWITCH |
+| Matriz rol × endpoint documentada y probada | 🟡 | — | `test_alcance.py` cubre lo sensible (troncales, extensiones, rutas, usuarios, ajustes: solo admin); falta la matriz completa |
 
 ### 5.4 API
 
@@ -220,7 +230,7 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | Requisito | Estado | Evidencia | Verificación |
 |---|---|---|---|
 | ESL no publicado; contraseña obligatoria y distinta de `ClueCon` | 🟢 | `docker-compose.yml`, `FS_ESL_PASSWORD:?` | `scripts/verificar.sh`; prueba de que el puerto 8021 no responde desde fuera |
-| `mod_xml_curl` con secreto compartido | 🟢 | `verificar_secreto_fs` | prueba: `/fs/*` sin secreto da 401 |
+| `mod_xml_curl` y CDR con secreto compartido | ✅ | `verificar_secreto_fs` | `test_dialplan.py`: `/fs/directory`, `/fs/dialplan` y `/fs/cdr` sin secreto o con otro dan 403 |
 | WS/WSS de desarrollo solo en loopback | 🟢 | `127.0.0.1:5066` | escaneo de puertos externo |
 | fail2ban para registro fallido y escaneo | 🟢 | `deploy/fail2ban/` | prueba con sipvicious contra staging: la IP queda bloqueada en < 1 min |
 | Rango RTP acotado | 🟢 | `16384-16584/udp` | — |
@@ -239,7 +249,8 @@ cortar la pérdida:
 
 | Capa | Requisito | Estado | Valor propuesto por defecto |
 |---|---|---|---|
-| Destino | internacional bloqueado salvo permiso explícito por empresa y por ruta | 🟢 (`allow_international`) | apagado |
+| Destino | internacional bloqueado salvo permiso explícito por empresa y por ruta | 🟡 (`allow_international`) | apagado |
+| Destino | **el filtro se aplica a lo que sale, no a lo que se marca** | ❌ | hoy el `(?!00\|011)` mira el número marcado. Una ruta con patrón `9.` y quitar 1 dígito deja salir `9` + `0044…` como `0044…`; una con patrón `.` deja salir `+44…`. Comprobado contra `patron_marcado_a_regex`. Fase 1 |
 | Destino | lista de países permitidos (no un sí/no a "internacional") | ❌ | solo el país de la empresa |
 | Destino | lista negra de prefijos premium/satelitales siempre bloqueados | ❌ | rangos premium conocidos, `+882`, `+881`, etc. |
 | Volumen | llamadas salientes simultáneas por empresa | 🟢 (`max_concurrent_calls`, licencia) | según plan |
@@ -305,7 +316,7 @@ llamante ─► STT ─► LLM ─► pide herramienta(args)
 | Requisito | Estado | Evidencia | Verificación |
 |---|---|---|---|
 | No servidas desde carpeta pública | 🟢 | solo `GET /api/calls/{id}/recording` | prueba: la ruta del archivo no es accesible por HTTP |
-| Empresa + permiso validados antes de entregar | 🟢 | `_traer()` + RLS | prueba de aislamiento I3 |
+| Empresa + permiso validados antes de entregar | ✅ | `_traer()` + RLS | `test_grabacion_de_otra_empresa_no_se_entrega` (con el archivo presente en disco) |
 | Tope de disco | 🟢 | `recordings_max_gb` | — |
 | Registro de cada escucha/descarga | ❌ | — | §5.10 |
 | Retención configurable por empresa y borrado real | 🟡 | tope global por espacio | retención en días por empresa; borrado verificable |
@@ -343,7 +354,8 @@ una empresa, kill switches.
 | Requisito | Estado | Evidencia | Verificación |
 |---|---|---|---|
 | Secretos de infraestructura solo en `.env`, arranque falla si faltan | 🟢 | `:?` en `docker-compose.yml` | — |
-| `.env` fuera de Git | 🟢 | `.gitignore` (`.env`, `.env.*`) | escaneo de secretos (gitleaks) en CI y sobre el historial completo |
+| `.env` fuera de Git | ✅ | `.gitignore` (`.env`, `.env.*`) | gitleaks sobre el historial completo en cada push (`ci.yml`) |
+| Claves privadas en el historial | ❌ | `freeswitch/conf/tls/wss.pem` y `dtls-srtp.pem` del primer commit | ya no están en el árbol, pero sí en el historial: tratarlas como filtradas y **rotarlas** si el servidor todavía las usa. Detalle en `.gitleaksignore` |
 | Claves de proveedores por empresa (ElevenLabs, Deepgram, LLM, ARI, Turnstile) cifradas en DB | ❌ | columnas en texto claro en `system_settings` | cifrado de aplicación (AES-GCM con clave en `.env`), nunca devueltas completas por la API |
 | Contraseñas de troncales y extensiones | ❌ | texto claro (FreeSWITCH las necesita) | cifradas en DB y descifradas solo al generar el XML; extensiones con `a1-hash` |
 | Rotación documentada (ESL, `AUTH_SECRET`, claves de proveedor, SIP) | ❌ | — | runbook por secreto: cómo rotar y qué se corta |
@@ -486,14 +498,14 @@ Esta sección es la que convierte el documento en confianza.
 
 | Suite | Qué prueba | Sostiene |
 |---|---|---|
-| **Aislamiento** | dos empresas con datos espejo (misma extensión 1000, mismo nombre de campaña). Para **cada** endpoint de lectura/escritura, la empresa A intenta acceder a cada recurso de B por ID → 404. Se repite con el filtro de la aplicación desactivado (RLS debe cortar igual). | I1, I3 |
-| **Cobertura de rutas** | enumera `app.routes`; falla si una ruta no tiene permiso declarado ni está en la lista abierta, o si no tiene prueba de aislamiento. | I1, I8 |
-| **Dialplan** | genera directorio y dialplan para dos empresas y comprueba que ningún destino de A resuelve en B; DID ajeno rechazado. | I2 |
+| ✅ **Aislamiento** (`test_aislamiento_db.py`, `test_aislamiento_api.py`) | dos empresas con datos espejo (misma extensión 1000, mismo nombre de campaña). Para **cada** ruta con id, la empresa A ataca el recurso de B → 404, sin datos de B en la respuesta, y la foto de B en la base queda idéntica. Control positivo: el mismo pedido sobre lo propio funciona. En la base, consultas sin `WHERE` con el rol de la aplicación. | I1, I3 |
+| ✅ **Cobertura de rutas** (`test_rutas_abiertas.py`, `test_aislamiento_api.py`) | enumera `app.routes`; falla si una ruta responde sin token fuera de la lista abierta, o si una ruta con un id nuevo no tiene recurso declarado para atacarla. | I1, I8 |
+| ✅ **Dialplan** (`test_dialplan.py`) | directorio y dialplan para dos empresas: ningún destino de A resuelve en B; DID ajeno rechazado; salientes sin 00/011. | I2 |
 | **Fraude** | destinos internacionales, premium, largos, con prefijos raros → rechazados; tope diario y de concurrencia → rechazo. | I5 |
 | **Voizbot** | cada herramienta con args de otra empresa o de otro llamante → rechazo; batería de prompt injection contra `bot_sim`. | I4 |
-| **Alcance** | admin de empresa en instalación con 2+ empresas → 403 en todas las operaciones globales. | I6 |
-| **Secretos** | gitleaks sobre el repo; los logs de la suite no contienen contraseñas ni claves. | I7 |
-| **Fallo seguro** | token corrupto, empresa inexistente, licencia ilegible, DB sin `app.tenant_id` → todos niegan. | I8 |
+| ✅ **Alcance** (`test_alcance.py`) | admin de empresa en instalación con 2+ empresas → 403 en todas las operaciones globales. | I6 |
+| 🟡 **Secretos** (`ci.yml`) | gitleaks sobre el historial completo ✅; falta comprobar que los logs no contengan contraseñas ni claves. | I7 |
+| ✅ **Fallo seguro** (`test_fallo_seguro.py`, `test_arranque.py`) | token corrupto, sin firma, vencido, de otra clave, con la empresa de otro usuario o una inexistente; usuario o empresa desactivados; licencia suspendida; secretos faltantes al arrancar → todos niegan. | I8 |
 
 ### 7.2 Pipeline
 
@@ -526,18 +538,31 @@ mismo cambio.
 Ordenada por riesgo × probabilidad, no por facilidad. Cada fase tiene un
 criterio de "terminado" verificable.
 
-### Fase 0 — Probar lo que ya existe (antes que nada)
+### Fase 0 — Probar lo que ya existe ✅
 
-- Infraestructura de pruebas con Postgres real y RLS activo.
-- Suites de aislamiento, cobertura de rutas, dialplan y fallo seguro (§7.1).
-- CI que las corra en cada push, más gitleaks.
-- Arranque que falla en producción sin `DATABASE_URL_APP` o `AUTH_SECRET`.
+- ✅ Infraestructura de pruebas con Postgres real y RLS activo (`backend/tests/conftest.py`).
+- ✅ Suites de aislamiento, cobertura de rutas, dialplan, alcance y fallo seguro (§7.1).
+- ✅ CI que las corre en cada push, más gitleaks sobre el historial (`.github/workflows/ci.yml`).
+- ✅ Arranque que falla en producción sin `DATABASE_URL_APP`, `AUTH_SECRET` o `FS_XML_SECRET` (`core/arranque.py`).
 
 **Terminado cuando:** I1, I2, I6 e I8 tienen prueba en verde en CI, y
 quitar a propósito un filtro `tenant_id` hace fallar el pipeline.
+Comprobado rompiendo el aislamiento a propósito: una política RLS que deja
+ver todo hace fallar 93 pruebas, y sacar `extensions` de la lista de RLS
+hace fallar 12.
+
+Lo que dejó a la vista, y pasa a la fase 1:
+- RLS es la única capa en unas 30 operaciones por id y 6 listados (§5.1).
+- El filtro internacional mira lo marcado, no lo que sale (§5.6).
+- Dos claves privadas de FreeSWITCH siguen en el historial (§5.11).
 
 ### Fase 1 — Cortar el riesgo económico
 
+- Filtro internacional sobre el número que sale (después de quitar y
+  anteponer dígitos) y bloqueo de `+` salvo permiso, con su prueba.
+- Filtro por empresa también en la capa de aplicación (un helper
+  `traer_propio(session, Modelo, id)` usado en todos los endpoints por id),
+  y la suite de la API corriendo también con RLS desactivado en CI.
 - Tope de minutos y gasto por día por empresa, con corte automático.
 - Lista de países permitidos y lista negra global de prefijos premium.
 - Alertas de anomalía de tráfico saliente.
@@ -586,7 +611,7 @@ En vez de una lista plana de 60 casillas, cuatro compuertas. No se pasa a
 la siguiente sin cerrar la anterior.
 
 **Compuerta A — Se puede vender a una empresa**
-- [ ] Invariantes I1, I2, I6, I8 con prueba en CI
+- [x] Invariantes I1, I2, I6, I8 con prueba en CI
 - [ ] Internacional apagado y topes de concurrencia y duración activos
 - [ ] Respaldo diario + off-site funcionando y alertado
 

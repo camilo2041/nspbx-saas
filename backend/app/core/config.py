@@ -6,6 +6,13 @@ class Settings(BaseSettings):
 
     app_name: str = "NSPBX"
 
+    # "produccion" o "desarrollo". En producción el arranque se NIEGA a
+    # seguir si faltan los secretos que sostienen el aislamiento y las
+    # sesiones (ver core/arranque.py); en desarrollo solo avisa. El valor
+    # por omisión es el estricto a propósito: olvidarse de definirlo tiene
+    # que dejar el sistema protegido, no abierto.
+    entorno: str = "produccion"
+
     # Conexión del DUEÑO de las tablas. Se usa para migrar al arrancar y
     # para las dos operaciones que por definición no pueden estar
     # limitadas a una empresa: el login —todavía no se sabe de quién es
