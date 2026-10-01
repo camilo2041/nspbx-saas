@@ -38,9 +38,9 @@ async def india(mundo):
         s.add(License(tenant_id=t.id, plan="enterprise", status="active"))
         await get_or_create_settings(s, t.id)
         troncal = Trunk(tenant_id=t.id, name="principal", gateway_host="sip.india.test", register_enabled=False)
-        sin = Extension(tenant_id=t.id, number="1000", password="clave-sip-india-larga-1")
-        con = Extension(tenant_id=t.id, number="1001", password="clave-sip-india-larga-2", outbound_after_hours=True)
-        apagada = Extension(tenant_id=t.id, number="1002", password="clave-sip-india-larga-3",
+        sin = Extension(tenant_id=t.id, number="1000", password="clave-sip-india-larga-1")  # gitleaks:allow (clave de prueba)
+        con = Extension(tenant_id=t.id, number="1001", password="clave-sip-india-larga-2", outbound_after_hours=True)  # gitleaks:allow (clave de prueba)
+        apagada = Extension(tenant_id=t.id, number="1002", password="clave-sip-india-larga-3",  # gitleaks:allow (clave de prueba)
                             outbound_after_hours=True, enabled=False)
         s.add_all([troncal, sin, con, apagada])
         await s.flush()

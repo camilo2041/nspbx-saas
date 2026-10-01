@@ -27,3 +27,6 @@ d8e224d89c7c367291971d32d9b69bfee57ca99b:mobile/SETUP.md:private-key:27
 d52396ba2cc8107379169f30dd6179812c2a9a2f:backend/tests/test_mfa.py:generic-api-key:12
 32ab2b95acbda848d02eb2fc95acd66475a6e0ab:backend/tests/test_auditoria.py:generic-api-key:28
 776ea749a5c837ccc6c249aa54e2981ff7a1d703:backend/tests/test_emergencia.py:generic-api-key:201
+4bcd308ced0280dff983dffad627776ca6d6b540:backend/tests/test_salientes_horario.py:generic-api-key:41
+4bcd308ced0280dff983dffad627776ca6d6b540:backend/tests/test_salientes_horario.py:generic-api-key:42
+4bcd308ced0280dff983dffad627776ca6d6b540:backend/tests/test_salientes_horario.py:generic-api-key:43
