@@ -166,6 +166,25 @@ services:
     logging: *logging
     security_opt:
       - no-new-privileges:true
+    # Root, pero sin los poderes de root. Sigue siendo root porque borra
+    # grabaciones (retención, supresión de datos) que FreeSWITCH crea como
+    # root en carpetas 0755: un usuario sin privilegios no podría y el
+    # disco se llenaría. Solo conserva DAC_OVERRIDE y FOWNER (escribir y
+    # borrar en las carpetas montadas); pierde el resto: abrir sockets
+    # crudos, cambiar de usuario, montar, cargar módulos, etc.
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE, FOWNER]
+    # La imagen no se puede modificar: solo escribe en los volúmenes y en
+    # /tmp (subidas de audio en curso).
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    # Topes para que un error (una fuga de memoria, un bucle) no se lleve
+    # puesta a la central entera. Valores holgados: ajustarlos a 2× el pico
+    # que muestre `docker stats` en un día de campaña.
+    mem_limit: ${BACKEND_MEM_LIMIT:-1g}
+    cpus: ${BACKEND_CPUS:-2}
+    pids_limit: 512
     restart: unless-stopped
     environment:
       TZ: ${TZ:-America/Bogota}
@@ -320,9 +339,23 @@ services:
     logging: *logging
     security_opt:
       - no-new-privileges:true
+    # Corre SIN root (ver backend/entrypoint.sh): arranca como root solo
+    # para adueñarse de las dos carpetas en las que escribe y baja al
+    # usuario 10001. Es el contenedor que habla con proveedores externos y
+    # procesa audio de llamantes desconocidos: el más expuesto.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID]
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    mem_limit: ${VOICEBOT_MEM_LIMIT:-2g}
+    cpus: ${VOICEBOT_CPUS:-2}
+    pids_limit: 512
     restart: unless-stopped
     command: ["uvicorn", "app.voicebot_server:app", "--host", "0.0.0.0", "--port", "8090"]
     environment:
+      NSPBX_CORRER_COMO: "10001:10001"
+      NSPBX_CARPETAS_PROPIAS: /freeswitch-sounds/ai_sessions /freeswitch-sounds/ambience
       TZ: ${TZ:-America/Bogota}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}@postgres:5432/${POSTGRES_DB:-nspbx}
       # Rol restringido con el que se atiende la operación normal. Es lo
@@ -365,6 +398,11 @@ services:
     logging: *logging
     security_opt:
       - no-new-privileges:true
+    # Ya corre como el usuario `node` (frontend/Dockerfile); no necesita
+    # ningún poder de root.
+    cap_drop: [ALL]
+    mem_limit: ${FRONTEND_MEM_LIMIT:-1g}
+    pids_limit: 512
     restart: unless-stopped
     ports:
       # Solo desde este servidor. Con Traefik delante ya no hace falta
