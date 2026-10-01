@@ -66,18 +66,20 @@ def _cab(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _activar(cliente, token: str) -> tuple[str, dict]:
+async def _activar(cliente, token: str) -> tuple[str, dict, int]:
+    """Activa MFA y devuelve (secreto, respuesta, paso usado). El paso se
+    devuelve para no recalcularlo después: si entre medio se cruza un
+    límite de 30 s, "el código de ahora" ya no es el que se usó."""
     ini = await cliente.post("/api/auth/mfa/iniciar", headers=_cab(token))
     assert ini.status_code == 200, ini.text
     secreto = ini.json()["secreto"]
     assert ini.json()["uri"].startswith("otpauth://totp/")
     malo = await cliente.post("/api/auth/mfa/activar", headers=_cab(token), json={"codigo": "000000"})
     assert malo.status_code == 400
-    ok = await cliente.post(
-        "/api/auth/mfa/activar", headers=_cab(token), json={"codigo": mfa.codigo(secreto, mfa.paso_actual())}
-    )
+    paso = mfa.paso_actual()
+    ok = await cliente.post("/api/auth/mfa/activar", headers=_cab(token), json={"codigo": mfa.codigo(secreto, paso)})
     assert ok.status_code == 200, ok.text
-    return secreto, ok.json()
+    return secreto, ok.json(), paso
 
 
 async def test_admin_sin_mfa_solo_puede_activarlo(cliente, admin_nuevo, obligatorio):
@@ -87,7 +89,7 @@ async def test_admin_sin_mfa_solo_puede_activarlo(cliente, admin_nuevo, obligato
     assert bloqueada.status_code == 403 and bloqueada.headers.get("x-mfa-requerido") == "1"
     assert (await cliente.get("/api/auth/me", headers=_cab(sesion["token"]))).status_code == 200
 
-    _, activado = await _activar(cliente, sesion["token"])
+    _, activado, _ = await _activar(cliente, sesion["token"])
     assert len(activado["codigos_recuperacion"]) == mfa.CODIGOS_RECUPERACION
     # La sesión vieja se abrió sin segundo paso: queda cerrada.
     assert (await cliente.get("/api/auth/me", headers=_cab(sesion["token"]))).status_code == 401
@@ -97,7 +99,7 @@ async def test_admin_sin_mfa_solo_puede_activarlo(cliente, admin_nuevo, obligato
 
 
 async def test_login_con_mfa_pide_el_codigo(cliente, admin_nuevo, obligatorio):
-    secreto, activado = await _activar(cliente, (await _login(cliente, admin_nuevo))["token"])
+    secreto, activado, paso_activacion = await _activar(cliente, (await _login(cliente, admin_nuevo))["token"])
 
     paso1 = await _login(cliente, admin_nuevo)
     assert paso1 == {"mfa_requerido": True, "mfa_token": paso1["mfa_token"]}, "sin sesión todavía"
@@ -105,11 +107,11 @@ async def test_login_con_mfa_pide_el_codigo(cliente, admin_nuevo, obligatorio):
     assert (await cliente.get("/api/auth/me", headers=_cab(paso1["mfa_token"]))).status_code == 401
 
     # El código ya usado al activar no vuelve a servir.
-    usado = mfa.codigo(secreto, mfa.paso_actual())
+    usado = mfa.codigo(secreto, paso_activacion)
     repetido = await cliente.post("/api/auth/mfa/verificar", json={"mfa_token": paso1["mfa_token"], "codigo": usado})
     assert repetido.status_code == 401
     # El siguiente sí.
-    siguiente = mfa.codigo(secreto, mfa.paso_actual() + 1)
+    siguiente = mfa.codigo(secreto, paso_activacion + 1)
     ok = await cliente.post("/api/auth/mfa/verificar", json={"mfa_token": paso1["mfa_token"], "codigo": siguiente})
     assert ok.status_code == 200, ok.text
     assert (await cliente.get("/api/extensions", headers=_cab(ok.json()["token"]))).status_code == 200
@@ -131,7 +133,7 @@ async def test_token_intermedio_alterado_o_de_sesion_no_sirve(cliente, mundo):
 
 
 async def test_un_rol_obligado_no_puede_desactivarla(cliente, admin_nuevo, obligatorio):
-    _, activado = await _activar(cliente, (await _login(cliente, admin_nuevo))["token"])
+    _, activado, _ = await _activar(cliente, (await _login(cliente, admin_nuevo))["token"])
     resp = await cliente.post(
         "/api/auth/mfa/desactivar", headers=_cab(activado["sesion"]["token"]),
         json={"password": admin_nuevo["password"], "codigo": activado["codigos_recuperacion"][1]},
@@ -140,7 +142,7 @@ async def test_un_rol_obligado_no_puede_desactivarla(cliente, admin_nuevo, oblig
 
 
 async def test_otro_admin_la_restablece_y_nadie_la_propia(cliente, mundo, admin_nuevo, obligatorio):
-    _, activado = await _activar(cliente, (await _login(cliente, admin_nuevo))["token"])
+    _, activado, _ = await _activar(cliente, (await _login(cliente, admin_nuevo))["token"])
     token_viejo = activado["sesion"]["token"]
 
     propia = await cliente.post(f"/api/users/{admin_nuevo['id']}/mfa/reset", headers=_cab(token_viejo))
