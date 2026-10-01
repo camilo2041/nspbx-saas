@@ -183,7 +183,7 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | WebSocket de logs/eventos filtrado por empresa | ✅ | `api/logs_ws.py` fija tenant; consola FS solo operador global | `test_rutas_abiertas.py` (sin token no hay usuario), `test_alcance.py` (admin de empresa no es operador global) |
 | Workers (dialer, mantenimiento) conservan la empresa | 🟡 | `workers/dialer.py` | revisar que cada consulta del worker fije tenant o filtre explícito; prueba |
 | Herramientas del voizbot filtran por `tenant_id` (sesión sin RLS) | 🟡 | `services/ai_agent.py:_run_tool` | **lint/prueba que falle si una consulta en `_run_tool` no menciona `tenant_id`**; a futuro, darle al bot su propia sesión con RLS por llamada |
-| **Filtro por empresa también en la aplicación** (segunda capa, independiente de RLS) | ❌ | la mayoría de los endpoints buscan por id sin filtrar (`session.get(Modelo, id)`) | corriendo la suite de la API con RLS desactivado fallan 41 casos: unas 30 operaciones por id (troncales, extensiones, rutas, colas, bots, campañas, deudas, citas, usuarios, llamadas) y 6 listados. Hoy **RLS es la única capa** en esos puntos: funciona y está probado, pero un error de configuración de la base los dejaría abiertos a la vez. Ver fase 1 |
+| **Filtro por empresa también en la aplicación** (segunda capa, independiente de RLS) | ✅ | `core/database.py`: `with_loader_criteria` en toda consulta ORM de una sesión atada a una empresa, `traer_propio()` en las búsquedas por id; la sesión exige que la empresa del token sea la del usuario | CI corre la suite de la API dos veces: con RLS y con el rol dueño (`NSPBX_TEST_SIN_RLS=1`). Desactivar el filtro de la aplicación hace fallar 25 pruebas del segundo modo |
 | Caché / almacenamiento de archivos por empresa | 🟡 | grabaciones en carpetas por fecha, no por empresa | mover a `recordings/t<id>/...` para que el aislamiento también sea físico y la retención por empresa sea trivial |
 
 ### 5.2 Identidad y sesiones
@@ -234,7 +234,7 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | WS/WSS de desarrollo solo en loopback | 🟢 | `127.0.0.1:5066` | escaneo de puertos externo |
 | fail2ban para registro fallido y escaneo | 🟢 | `deploy/fail2ban/` | prueba con sipvicious contra staging: la IP queda bloqueada en < 1 min |
 | Rango RTP acotado | 🟢 | `16384-16584/udp` | — |
-| Contraseñas SIP fuertes y generadas por el sistema | por verificar | — | el backend rechaza contraseñas < 16 caracteres o sacadas de diccionario; las genera por defecto |
+| Contraseñas SIP fuertes y generadas por el sistema | ✅ | `validacion.problema_clave_sip`, `generar_clave_sip` | `test_claves_sip.py`: 12+ caracteres, no solo números, sin el número de la extensión, no comunes; vacía = generada (20). Las existentes débiles se listan en Seguridad |
 | Límite de registros por extensión | por verificar | — | `max-registrations-per-extension` |
 | Troncales con IP permitida (ACL) cuando el carrier la tiene fija | 🟡 | — | ACL por troncal en el perfil `external` |
 | SBC o capa de filtrado delante de FreeSWITCH | ❌ | 5060 publicado directo | fase 3: Kamailio/OpenSIPS como SBC con `pike` y `ratelimit`; mientras tanto, firewall del host + fail2ban |
@@ -249,20 +249,21 @@ cortar la pérdida:
 
 | Capa | Requisito | Estado | Valor propuesto por defecto |
 |---|---|---|---|
-| Destino | internacional bloqueado salvo permiso explícito por empresa y por ruta | 🟡 (`allow_international`) | apagado |
-| Destino | **el filtro se aplica a lo que sale, no a lo que se marca** | ❌ | hoy el `(?!00\|011)` mira el número marcado. Una ruta con patrón `9.` y quitar 1 dígito deja salir `9` + `0044…` como `0044…`; una con patrón `.` deja salir `+44…`. Comprobado contra `patron_marcado_a_regex`. Fase 1 |
-| Destino | lista de países permitidos (no un sí/no a "internacional") | ❌ | solo el país de la empresa |
-| Destino | lista negra de prefijos premium/satelitales siempre bloqueados | ❌ | rangos premium conocidos, `+882`, `+881`, etc. |
+| Destino | una sola política para los tres caminos de salida (dialplan, clic para llamar, campañas) | ✅ (`services/salientes.py`) | antes el clic para llamar y el marcador salían directo a la troncal sin filtro |
+| Destino | internacional solo con permiso de la empresa **y** de la regla | ✅ | apagado |
+| Destino | el filtro se aplica a lo que sale (después de quitar y anteponer dígitos), no a lo que se marca | ✅ | `test_dialplan_y_python_deciden_igual` compara la regla del dialplan y la de Python en todas las combinaciones |
+| Destino | lista de países permitidos (no un sí/no a "internacional") | ✅ (`international_countries`) | vacía = ningún internacional |
+| Destino | lista negra de prefijos premium/satelitales siempre bloqueados | ✅ | `+870`, `+881`, `+882`, `+883`, `+979`, `+808`, `+1 900` |
 | Volumen | llamadas salientes simultáneas por empresa | 🟢 (`max_concurrent_calls`, licencia) | según plan |
 | Volumen | llamadas por segundo por empresa | ❌ | 1 CPS (campañas aparte) |
 | Duración | duración máxima por llamada | 🟢 (`max_call_duration_minutes`) | 60 min |
-| Dinero | minutos salientes por día por empresa | ❌ | según plan; al llegar, **se cortan las salientes**, no solo se avisa |
+| Dinero | minutos salientes por día por empresa | ✅ (`License.max_outbound_minutes_day`) | prueba 60, gratis 120, pro 5000, enterprise sin tope; al llegar **se cortan las salientes** hasta medianoche. Cuenta solo la pata que salió por troncal (`CallLog.via_trunk`) y solo llamadas terminadas: las que están en curso las acotan la duración máxima y las simultáneas |
 | Dinero | gasto estimado por día y por mes | ❌ | tarifa por prefijo × minutos |
 | Horario | salientes fuera de horario laboral requieren permiso | ❌ | opcional por empresa |
-| Detección | alerta si la última hora supera 3× el promedio de esa hora en los 7 días previos | ❌ | alerta + bloqueo temporal de salientes de esa extensión |
-| Detección | alerta por primer uso de un país/prefijo nuevo | ❌ | alerta |
+| Detección | alerta si la última hora supera 3× el promedio de esa hora en los 7 días previos (mín. 30 min) | ✅ (`services/alertas.py`) | alerta en el panel y webhook. **No corta**: una campaña nueva también es un pico; el corte lo da el cupo |
+| Detección | alerta por salientes de madrugada, prefijo internacional nuevo y 80 % del cupo | ✅ | alerta |
 | Detección | alerta por extensión registrada desde un país distinto al habitual | ❌ | alerta |
-| Reacción | botón "cortar todas las salientes" por empresa y global | 🟡 (desactivar troncal/empresa) | ver §5.14 |
+| Reacción | botón "cortar todas las salientes" por empresa (la empresa y la plataforma) y global | ✅ | ver §5.15. Corta toda llamada **nueva**; las que están en curso terminan por la duración máxima |
 | Auditoría | todo cambio de rutas salientes, internacional o topes queda registrado | ❌ | ver §5.10 |
 
 Verificación: prueba de dialplan con destinos `00…`, `011…`, premium y
@@ -398,7 +399,7 @@ backend o en el dialplan, no en el panel.
 | extensiones, troncales, campañas | 🟢 | `License.max_*`, `licensing.hay_cupo` |
 | llamadas simultáneas | 🟢 | `License.max_concurrent_calls`, `tope_concurrentes` |
 | usuarios | ❌ | — |
-| minutos salientes por día/mes | ❌ | ver §5.6 |
+| minutos salientes por día | ✅ | `License.max_outbound_minutes_day`, ver §5.6 |
 | almacenamiento de grabaciones | 🟡 | tope global, no por empresa |
 | llamadas y tokens de voizbot por día | ❌ | — |
 | peticiones a la API por minuto | ❌ | — |
@@ -411,13 +412,14 @@ tocar código. Cada uno queda auditado.
 | Acción | Estado | Cómo |
 |---|---|---|
 | Suspender empresa | 🟢 | licencia `suspended` / `Tenant.enabled` |
-| Cortar todas las salientes de una empresa | 🟡 | desactivar troncales; falta un interruptor único |
-| Cortar todas las salientes de la plataforma | ❌ | interruptor global leído por el dialplan |
+| Cortar todas las salientes de una empresa | ✅ | la empresa (Ajustes → Pausar) o la plataforma (Empresas → Cortar salientes; la empresa no puede deshacerlo) |
+| Cortar todas las salientes de la plataforma | ✅ | Empresas → Cortar todas las salientes (`PUT /api/plataforma/salientes`) |
+| Colgar las salientes **en curso** | ❌ | hoy terminan por la duración máxima; falta un `hupall` por empresa |
 | Detener campaña | 🟢 | pausar |
 | Desactivar un voizbot | 🟢 | `VoiceBot.enabled` |
 | Bloquear extensión (y tirar su registro) | 🟡 | `enabled`; falta `sofia profile ... flush_inbound_reg` automático |
 | Cerrar sesiones de un usuario / de una empresa | 🟡 | `revocar_sesiones` por usuario |
-| Bloquear un país o prefijo para todos | ❌ | lista negra global |
+| Bloquear un país o prefijo para todos | 🟡 | lista fija en `salientes.CODIGOS_BLOQUEADOS`; falta poder agregar desde el panel |
 | Bloquear IP | 🟢 | fail2ban / panel de seguridad |
 
 ---
@@ -501,7 +503,7 @@ Esta sección es la que convierte el documento en confianza.
 | ✅ **Aislamiento** (`test_aislamiento_db.py`, `test_aislamiento_api.py`) | dos empresas con datos espejo (misma extensión 1000, mismo nombre de campaña). Para **cada** ruta con id, la empresa A ataca el recurso de B → 404, sin datos de B en la respuesta, y la foto de B en la base queda idéntica. Control positivo: el mismo pedido sobre lo propio funciona. En la base, consultas sin `WHERE` con el rol de la aplicación. | I1, I3 |
 | ✅ **Cobertura de rutas** (`test_rutas_abiertas.py`, `test_aislamiento_api.py`) | enumera `app.routes`; falla si una ruta responde sin token fuera de la lista abierta, o si una ruta con un id nuevo no tiene recurso declarado para atacarla. | I1, I8 |
 | ✅ **Dialplan** (`test_dialplan.py`) | directorio y dialplan para dos empresas: ningún destino de A resuelve en B; DID ajeno rechazado; salientes sin 00/011. | I2 |
-| **Fraude** | destinos internacionales, premium, largos, con prefijos raros → rechazados; tope diario y de concurrencia → rechazo. | I5 |
+| ✅ **Fraude** (`test_salientes*.py`, `test_interruptores.py`, `test_alertas.py`) | destinos internacionales, premium, largos, con prefijos raros → rechazados en los tres caminos de salida; Python y dialplan deciden igual; interruptores y cupo diario cortan; alertas. | I5 |
 | **Voizbot** | cada herramienta con args de otra empresa o de otro llamante → rechazo; batería de prompt injection contra `bot_sim`. | I4 |
 | ✅ **Alcance** (`test_alcance.py`) | admin de empresa en instalación con 2+ empresas → 403 en todas las operaciones globales. | I6 |
 | 🟡 **Secretos** (`ci.yml`) | gitleaks sobre el historial completo ✅; falta comprobar que los logs no contengan contraseñas ni claves. | I7 |
@@ -556,22 +558,29 @@ Lo que dejó a la vista, y pasa a la fase 1:
 - El filtro internacional mira lo marcado, no lo que sale (§5.6).
 - Dos claves privadas de FreeSWITCH siguen en el historial (§5.11).
 
-### Fase 1 — Cortar el riesgo económico
+### Fase 1 — Cortar el riesgo económico ✅ (falta el simulacro en staging)
 
-- Filtro internacional sobre el número que sale (después de quitar y
-  anteponer dígitos) y bloqueo de `+` salvo permiso, con su prueba.
-- Filtro por empresa también en la capa de aplicación (un helper
-  `traer_propio(session, Modelo, id)` usado en todos los endpoints por id),
-  y la suite de la API corriendo también con RLS desactivado en CI.
-- Tope de minutos y gasto por día por empresa, con corte automático.
-- Lista de países permitidos y lista negra global de prefijos premium.
-- Alertas de anomalía de tráfico saliente.
-- Interruptor global y por empresa de salientes.
-- Contraseñas SIP generadas y validadas.
-- Suite de fraude en CI.
+- ✅ Una sola política de salientes para dialplan, clic para llamar y
+  campañas, aplicada sobre el número que sale (`services/salientes.py`).
+- ✅ Filtro por empresa también en la aplicación, con la suite de la API
+  corriendo también sin RLS en CI.
+- ✅ Tope de minutos salientes por día por empresa, con corte automático.
+- ✅ Lista de países permitidos y lista negra global de prefijos premium.
+- ✅ Alertas de tráfico saliente anómalo (panel y webhook).
+- ✅ Interruptores de salientes: de la empresa, de la plataforma por
+  empresa y global.
+- ✅ Contraseñas SIP generadas y validadas; las débiles existentes, listadas.
+- ✅ Suite de fraude en CI.
 
 **Terminado cuando:** el simulacro de extensión comprometida en staging
-no logra superar el tope diario y genera alerta en < 5 min.
+no logra superar el tope diario y genera alerta en < 5 min. **Pendiente**:
+requiere FreeSWITCH real. También hay que confirmar con una llamada real
+que el CDR de la pata hacia el proveedor llega con `via_trunk` verdadero
+(el cupo y las alertas se apoyan en eso).
+
+Quedó para después: tope de **gasto** (necesita tarifas por prefijo),
+llamadas por segundo, horario permitido de salientes, colgar las llamadas
+en curso al cortar, y agregar prefijos bloqueados desde el panel.
 
 ### Fase 2 — Poder investigar y recuperar
 
@@ -617,8 +626,8 @@ la siguiente sin cerrar la anterior.
 
 **Compuerta B — Se puede vender a varias empresas**
 - [ ] Todo lo de A
-- [ ] Topes de minutos/gasto con corte automático (I5)
-- [ ] Alertas de fraude
+- [x] Tope de minutos con corte automático (I5); el de gasto, pendiente
+- [x] Alertas de fraude
 - [ ] Auditoría de cambios sensibles
 - [ ] MFA para administradores
 - [ ] Simulacro de restauración hecho y medido
