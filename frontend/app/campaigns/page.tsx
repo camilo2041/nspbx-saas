@@ -25,6 +25,7 @@ import {
   Textarea,
   Tr,
 } from "@/components/ui";
+import { AvisoHorarioCampanas } from "@/components/aviso-horario-campanas";
 import { api } from "@/lib/api";
 import {
   CampaignNumber,
@@ -455,6 +456,7 @@ export default function CampaignsPage() {
         subtitle="Marcación masiva con autodialer"
         actions={<Button onClick={openCreate}>+ Nueva campaña</Button>}
       />
+      <AvisoHorarioCampanas />
 
       {error && (
         <div className="mb-4">

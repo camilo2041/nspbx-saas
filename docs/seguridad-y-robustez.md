@@ -307,7 +307,7 @@ llamante ─► STT ─► LLM ─► pide herramienta(args)
 | Estados explícitos | 🟡 | `idle → running ↔ paused → done` | agregar `validating/approved` solo si hay aprobación de un segundo usuario; no antes |
 | Concurrencia por campaña y tope global por empresa | 🟢 | `max_concurrency`, `max_concurrent_calls` | — |
 | Validación de números antes de iniciar (formato, destino permitido, duplicados) | por verificar | — | prueba: lista con números internacionales en empresa sin permiso → rechazo |
-| Horario permitido de marcación (regulación local) | ❌ | — | ventana por empresa y zona horaria |
+| Horario permitido de marcación (regulación local) | ✅ | `services/horario_marcacion.py`; Ajustes → Horario de marcación | por defecto la franja de la Ley 2300 de 2023 (lunes a viernes 7-19, sábados 8-15, sin domingos ni festivos de Colombia, calculados por la Ley 51 de 1983). La empresa puede achicarla; las campañas de **cobranza nunca salen de la franja legal** aunque la amplíe. Fuera de la franja el marcador espera sin dar números por fallidos, y la pantalla de Campañas dice desde cuándo retoma. `test_horario_marcacion.py` (festivos oficiales 2025-2026, bordes de cada franja, el marcador real) |
 | Límite diario y presupuesto por campaña | ❌ | — | — |
 | Detener ya (kill switch) | 🟢 | pausa | prueba: tras pausar, ninguna llamada nueva sale en ≤ 2 s |
 | Auditoría de crear/iniciar/pausar | ✅ | middleware de auditoría (§5.10) | `test_auditoria.py`: toda ruta que modifica queda auditada |

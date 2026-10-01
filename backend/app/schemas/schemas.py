@@ -301,6 +301,9 @@ class SystemSettingsOut(BaseModel):
     allow_international: bool = False
     international_countries: str = ""
     outbound_paused: bool = False
+    campaign_hours_weekdays: str = "07:00-19:00"
+    campaign_hours_saturday: str = "08:00-15:00"
+    campaign_sundays_holidays: bool = False
     ai_stt_provider: str = "elevenlabs"
     ai_voice_provider: str = "elevenlabs"
     ai_voice_id: str = "Xb7hH8MSUJpSbSDYk0k2"
@@ -374,6 +377,20 @@ class SystemSettingsUpdate(BaseModel):
     record_all_calls: Optional[bool] = None
     allow_international: Optional[bool] = None
     outbound_paused: Optional[bool] = None
+    # "HH:MM-HH:MM"; vacío o "-" = ese día no se marca.
+    campaign_hours_weekdays: Optional[str] = Field(default=None, max_length=11)
+    campaign_hours_saturday: Optional[str] = Field(default=None, max_length=11)
+    campaign_sundays_holidays: Optional[bool] = None
+
+    @field_validator("campaign_hours_weekdays", "campaign_hours_saturday")
+    @classmethod
+    def _franja_valida(cls, v):
+        if v is None:
+            return v
+        from app.services.horario_marcacion import leer_franja
+
+        leer_franja(v)  # lanza ValueError con el motivo
+        return v.strip() or "-"
     # Códigos de país separados por coma ("57, 1, 34"); se guardan normalizados.
     international_countries: Optional[str] = Field(
         default=None, max_length=200, pattern=r"^[0-9+,;\s]*$"

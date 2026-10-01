@@ -68,6 +68,9 @@ const empty: SystemSettings = {
   allow_international: false,
   international_countries: "",
   outbound_paused: false,
+  campaign_hours_weekdays: "07:00-19:00",
+  campaign_hours_saturday: "08:00-15:00",
+  campaign_sundays_holidays: false,
   ai_stt_provider: "elevenlabs",
   ai_voice_provider: "elevenlabs",
   ai_voice_id: "",
@@ -444,6 +447,38 @@ export default function SettingsPage() {
               </Button>
             </div>
             {colgadas && <Note tone="warn">Salientes en curso colgadas. Pueden tardar unos segundos en cortarse.</Note>}
+            <div className="rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div className="text-sm text-fg-soft">Horario de marcación de campañas</div>
+              <div className="mt-0.5 mb-2 text-[11px] leading-snug text-faint">
+                Fuera de esta franja las campañas esperan, sin marcar ni dar números por fallidos. Las de cobranza
+                nunca salen de la franja de la Ley 2300 de 2023 (lunes a viernes 7:00-19:00, sábados 8:00-15:00, sin
+                domingos ni festivos), aunque acá se amplíe.
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Lunes a viernes"
+                  value={form.campaign_hours_weekdays}
+                  onChange={(v) => set("campaign_hours_weekdays", v)}
+                  placeholder="07:00-19:00"
+                  mono
+                />
+                <Input
+                  label="Sábados"
+                  value={form.campaign_hours_saturday}
+                  onChange={(v) => set("campaign_hours_saturday", v)}
+                  placeholder="08:00-15:00"
+                  hint="Vacío o - = no se marca ese día."
+                  mono
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <span className="text-xs text-fg-soft">Domingos y festivos (con la franja del sábado; no aplica a cobranza)</span>
+                <Toggle
+                  checked={form.campaign_sundays_holidays}
+                  onChange={(v) => set("campaign_sundays_holidays", v)}
+                />
+              </div>
+            </div>
             {salientes && (
               <Note tone={salientes.bloqueo ? "warn" : "muted"}>
                 {salientes.bloqueo ? <>Salientes cortadas: {salientes.bloqueo}.</> : <>Salientes habilitadas.</>}{" "}

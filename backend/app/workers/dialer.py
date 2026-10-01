@@ -5,11 +5,11 @@ from datetime import datetime
 
 from sqlalchemy import select, update
 
-from app.core.clock import fecha_en_palabras
+from app.core.clock import fecha_en_palabras, now_local
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import Campaign, CampaignNumber, SystemSettings, Tenant, Trunk, VoiceBot
-from app.services import esl, licensing, salientes, templating
+from app.services import esl, horario_marcacion, licensing, salientes, templating
 from app.services.fechas import formatear_natural, parse_fecha_hora
 from app.services.config_generator import orden_troncales
 from app.services.numeros import numero_a_palabras
@@ -112,6 +112,14 @@ class CampaignDialer:
             # devolverlos en cada ciclo. Ver services/salientes.py.
             politicas = await salientes.politicas(session, {c.tenant_id for c in campaigns})
             campaigns = [c for c in campaigns if not politicas[c.tenant_id].bloqueo]
+            # Fuera de su franja de marcación (Ley 2300 para cobranza; ver
+            # services/horario_marcacion.py) la campaña espera sin tomar
+            # números: no se marcan como fallidos, se llaman cuando abra.
+            ahora = now_local()
+            campaigns = [
+                c for c in campaigns
+                if horario_marcacion.puede_marcar(ajustes_por_tenant.get(c.tenant_id), c.ai_intent, ahora)
+            ]
             # Lo máximo que pueden marcar TODAS juntas: la suma de lo que cada una tiene
             # permitido, sin pasar del tope de la plataforma. (Con el máximo, una
             # empresa marcando le quitaba margen a otra que aún estaba bajo su tope.)

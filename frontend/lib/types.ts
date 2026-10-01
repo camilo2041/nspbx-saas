@@ -239,6 +239,10 @@ export interface SystemSettings {
   international_countries: string;
   /** Pausa de salientes decidida por la propia empresa. */
   outbound_paused: boolean;
+  /** Franja de marcación de campañas ("HH:MM-HH:MM"; "-" = ese día no). */
+  campaign_hours_weekdays: string;
+  campaign_hours_saturday: string;
+  campaign_sundays_holidays: boolean;
   ai_stt_provider: "elevenlabs" | "deepgram";
   ai_voice_provider: "edge" | "elevenlabs" | "deepgram";
   ai_voice_id: string;

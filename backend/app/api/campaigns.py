@@ -196,6 +196,28 @@ async def list_campaigns_detail(session: AsyncSession = Depends(get_session)):
     return out
 
 
+@router.get("/horario")
+async def horario_de_marcacion(session: AsyncSession = Depends(get_session)):
+    """Si las campañas pueden marcar ahora y, si no, desde cuándo (Ley 2300
+    para las de cobranza; ver services/horario_marcacion.py). Para que quien
+    inicia una campaña de noche entienda por qué no sale ninguna llamada."""
+    from app.core.clock import now_local
+    from app.services import horario_marcacion
+    from app.services.ajustes import ajustes_de
+
+    ajustes = await ajustes_de(session)
+    ahora = now_local()
+    salida = {}
+    for intencion in ("cobranza", "otras"):
+        prox = horario_marcacion.proxima_apertura(ajustes, intencion, ahora)
+        salida[intencion] = {
+            "puede_marcar": horario_marcacion.puede_marcar(ajustes, intencion, ahora),
+            "proxima_apertura": prox.isoformat(timespec="minutes") if prox else None,
+        }
+    salida["festivo_hoy"] = horario_marcacion.es_festivo(ahora.date())
+    return salida
+
+
 async def _validar_referencias(session: AsyncSession, trunk_id: int | None, voicebot_id: int | None) -> None:
     """La troncal y el voizbot tienen que ser de ESTA empresa. `session.get` va
     por la sesión atada a la empresa, que no ve las ajenas; sin esta comprobación

@@ -363,6 +363,11 @@ class SystemSettings(Base):
     # Interruptor de la EMPRESA: su administrador pausa las salientes (y lo
     # deshace) sin depender de la plataforma. Ver services/salientes.py.
     outbound_paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Franja en la que pueden marcar las campañas (services/horario_marcacion.py).
+    # Por defecto la de la Ley 2300 de 2023; las de cobranza nunca salen de ella.
+    campaign_hours_weekdays: Mapped[str] = mapped_column(String(11), default="07:00-19:00", server_default="07:00-19:00")
+    campaign_hours_saturday: Mapped[str] = mapped_column(String(11), default="08:00-15:00", server_default="08:00-15:00")
+    campaign_sundays_holidays: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     # Widget de "llamar a un agente" embebible en sitios web públicos (ver
     # app/api/webcall.py y app/services/webcall.py). Un visitante anónimo
