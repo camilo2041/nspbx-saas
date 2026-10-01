@@ -22,6 +22,7 @@ from app.models.models import (
     Trunk,
     User,
     VoiceBot,
+    VoiceBotVersion,
 )
 
 __all__ = [
@@ -48,4 +49,5 @@ __all__ = [
     "Trunk",
     "User",
     "VoiceBot",
+    "VoiceBotVersion",
 ]

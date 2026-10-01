@@ -938,3 +938,28 @@ class AuditLog(Base):
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(200), nullable=True)
     request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+
+class VoiceBotVersion(Base):
+    """Foto de un voizbot cada vez que se guarda (flujo, saludo, config).
+
+    Un cambio en el flujo se aplica a las llamadas siguientes al instante:
+    si rompe el bot, la forma de volver atrás es restaurar una versión
+    anterior, no reconstruir el flujo de memoria."""
+
+    __tablename__ = "voicebot_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    voicebot_id: Mapped[int] = mapped_column(ForeignKey("voicebots.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(100))
+    bot_type: Mapped[str] = mapped_column(String(20))
+    welcome_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    flow_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Quién la guardó ("usuario (rol)") y por qué ("flujo", "ajustes",
+    # "restaurada v3").
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

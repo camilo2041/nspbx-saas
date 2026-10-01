@@ -343,7 +343,9 @@ _COLUMN_PATCHES += _parches_multiempresa()
 #
 # `users` también entra: guarda correos y hashes de contraseña, así que
 # una consulta sin filtrar ahí es peor que una de negocio.
-_TABLAS_CON_RLS = _TABLAS_CON_TENANT + ["users", "audit_log"]
+# Las tablas nuevas con tenant_id que llegan por revisiones de Alembic se
+# agregan acá (no a _TABLAS_CON_TENANT, que es parte del esquema base).
+_TABLAS_CON_RLS = _TABLAS_CON_TENANT + ["users", "audit_log", "voicebot_versions"]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
 # en cada transacción (ver core/database.py).

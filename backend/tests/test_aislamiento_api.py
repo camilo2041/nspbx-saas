@@ -34,6 +34,7 @@ _RECURSO_POR_PARAMETRO = {
     "appointment_id": "appointment",
     "debt_id": "debt",
     "user_id": "user",
+    "version_id": "voicebot_version",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por

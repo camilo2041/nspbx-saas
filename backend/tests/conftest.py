@@ -93,6 +93,7 @@ from app.models import (  # noqa: E402
     Trunk,
     User,
     VoiceBot,
+    VoiceBotVersion,
 )
 from app.services.ajustes import get_or_create_settings  # noqa: E402
 
@@ -192,7 +193,11 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         amount_promised=500, promise_date=datetime.utcnow() + timedelta(days=5),
     )
     uso = AiCallUsage(tenant_id=tid, call_uuid=f"ia-{marca}", phone=f"{telefono}05", action_patient_name=f"Paciente {marca}")
-    session.add_all([promesa, uso])
+    version = VoiceBotVersion(
+        tenant_id=tid, voicebot_id=bot.id, version=1, name=bot.name, bot_type="ivr",
+        welcome_message=f"Hola {marca}", reason="semilla",
+    )
+    session.add_all([promesa, uso, version])
     await session.flush()
 
     for rol in (permissions.ADMIN, permissions.SUPERVISOR, permissions.ASESOR):
@@ -224,6 +229,7 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         "debt": deuda.id,
         "promise": promesa.id,
         "user": e.usuarios[permissions.SUPERVISOR],
+        "voicebot_version": version.id,
     }
     return e
 

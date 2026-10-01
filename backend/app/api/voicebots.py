@@ -2,7 +2,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import limitador, validacion
@@ -10,7 +10,7 @@ from app.core.auth import usuario_actual
 from app.core.database import get_session, tenant_de_sesion, traer_propio
 from app.core import permissions
 from app.core.clock import now_local
-from app.models import Appointment, Debt, User, VoiceBot
+from app.models import Appointment, Debt, User, VoiceBot, VoiceBotVersion
 from app.schemas import (
     VoiceBotCreate,
     VoiceBotFlowUpdate,
@@ -91,15 +91,41 @@ async def get_voicebot(bot_id: int, session: AsyncSession = Depends(get_session)
     return bot
 
 
+async def _guardar_version(session: AsyncSession, bot: VoiceBot, usuario: User | None, motivo: str) -> VoiceBotVersion:
+    """Foto del bot tal como queda (ver VoiceBotVersion). El commit lo hace
+    quien llama."""
+    ultima = (
+        await session.execute(select(func.max(VoiceBotVersion.version)).where(VoiceBotVersion.voicebot_id == bot.id))
+    ).scalar() or 0
+    version = VoiceBotVersion(
+        tenant_id=bot.tenant_id,
+        voicebot_id=bot.id,
+        version=ultima + 1,
+        name=bot.name,
+        bot_type=bot.bot_type,
+        welcome_message=bot.welcome_message,
+        config=bot.config,
+        flow_json=bot.flow_json,
+        created_by=f"{usuario.username} ({usuario.role})"[:100] if usuario else None,
+        reason=motivo[:60],
+    )
+    session.add(version)
+    return version
+
+
 @router.put("/{bot_id}", response_model=VoiceBotOut)
 async def update_voicebot(
-    bot_id: int, payload: VoiceBotUpdate, session: AsyncSession = Depends(get_session)
+    bot_id: int,
+    payload: VoiceBotUpdate,
+    session: AsyncSession = Depends(get_session),
+    usuario: User = Depends(usuario_actual),
 ):
     bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(bot, field, value)
+    await _guardar_version(session, bot, usuario, "ajustes")
     await session.commit()
     await session.refresh(bot)
     return bot
@@ -136,17 +162,75 @@ async def get_flow(bot_id: int, session: AsyncSession = Depends(get_session)):
 
 
 @router.put("/{bot_id}/flow")
-async def save_flow(bot_id: int, payload: VoiceBotFlowUpdate, session: AsyncSession = Depends(get_session)):
+async def save_flow(
+    bot_id: int,
+    payload: VoiceBotFlowUpdate,
+    session: AsyncSession = Depends(get_session),
+    usuario: User = Depends(usuario_actual),
+):
     bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     bot.flow_json = json.dumps({"nodes": payload.nodes, "edges": payload.edges})
+    version = await _guardar_version(session, bot, usuario, "flujo")
     await session.commit()
     try:
         await reloadxml()
     except Exception:
         pass  # el flujo queda guardado igual; el próximo reload lo recoge
-    return {"ok": True}
+    return {"ok": True, "version": version.version}
+
+
+@router.get("/{bot_id}/versiones")
+async def listar_versiones(bot_id: int, session: AsyncSession = Depends(get_session)):
+    """Historial del bot, la más nueva primero."""
+    if not await traer_propio(session, VoiceBot, bot_id):
+        raise HTTPException(status_code=404, detail="Bot no encontrado")
+    filas = (
+        await session.execute(
+            select(VoiceBotVersion)
+            .where(VoiceBotVersion.voicebot_id == bot_id)
+            .order_by(VoiceBotVersion.version.desc())
+            .limit(100)
+        )
+    ).scalars().all()
+
+    def nodos(v: VoiceBotVersion) -> int:
+        try:
+            return len(json.loads(v.flow_json or "{}").get("nodes", []))
+        except (ValueError, AttributeError):
+            return 0
+
+    return [
+        {"id": v.id, "version": v.version, "cuando": v.created_at, "quien": v.created_by,
+         "motivo": v.reason, "nodos": nodos(v)}
+        for v in filas
+    ]
+
+
+@router.post("/{bot_id}/versiones/{version_id}/restaurar", response_model=VoiceBotOut)
+async def restaurar_version(
+    bot_id: int,
+    version_id: int,
+    session: AsyncSession = Depends(get_session),
+    usuario: User = Depends(usuario_actual),
+):
+    """Vuelve el bot a una versión anterior. No borra nada: la restauración
+    queda como una versión nueva, así que también se puede deshacer."""
+    bot = await traer_propio(session, VoiceBot, bot_id)
+    version = await traer_propio(session, VoiceBotVersion, version_id)
+    if not bot or not version or version.voicebot_id != bot.id:
+        raise HTTPException(status_code=404, detail="Versión no encontrada")
+    for campo in ("name", "bot_type", "welcome_message", "config", "flow_json"):
+        setattr(bot, campo, getattr(version, campo))
+    await _guardar_version(session, bot, usuario, f"restaurada v{version.version}")
+    await session.commit()
+    await session.refresh(bot)
+    try:
+        await reloadxml()
+    except Exception:
+        pass
+    return bot
 
 
 @router.post("/{bot_id}/flow/nodes/{node_id}/audio")
