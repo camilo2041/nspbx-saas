@@ -239,7 +239,12 @@ export default function ExtensionsPage() {
       >
         <div className="space-y-4">
           <Input label="Número" value={form.number} onChange={(v) => setForm({ ...form, number: v })} required mono />
-          <Input label="Password" value={form.password} onChange={(v) => setForm({ ...form, password: v })} required />
+          <Input
+            label="Password"
+            value={form.password}
+            onChange={(v) => setForm({ ...form, password: v })}
+            hint="Vacía = se genera una segura. Mínimo 12 caracteres, no solo números ni el número de la extensión."
+          />
           <Input
             label="Nombre (Caller ID)"
             value={form.caller_id_name ?? ""}

@@ -3,8 +3,13 @@
 Solo lectura, a propósito — ver el docstring de services/fail2ban.py.
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import validacion
+from app.core.database import get_session
+from app.models import Extension
 from app.services import fail2ban
 
 router = APIRouter(prefix="/api/security", tags=["security"])
@@ -37,3 +42,16 @@ async def bans(limite: int = Query(default=100, ge=1, le=500)):
         "vigentes": [_salida(b) for b in fail2ban.bloqueos()],
         "historico": [_salida(b) for b in fail2ban.historico(limite)],
     }
+
+
+@router.get("/claves-debiles")
+async def claves_debiles(session: AsyncSession = Depends(get_session)):
+    """Extensiones de la empresa con una contraseña SIP que no pasaría la
+    validación actual. Las anteriores a la validación no se cambian solas
+    (desregistraría teléfonos sin aviso): esta lista dice cuáles cambiar."""
+    exts = (await session.execute(select(Extension).order_by(Extension.number))).scalars().all()
+    return [
+        {"id": e.id, "number": e.number, "motivo": motivo}
+        for e in exts
+        if (motivo := validacion.problema_clave_sip(e.password, e.number))
+    ]

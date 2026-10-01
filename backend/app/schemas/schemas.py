@@ -130,7 +130,8 @@ class TrunkOut(BaseModel):
 
 class ExtensionBase(BaseModel):
     number: Extension
-    password: TextoSinControl
+    # Vacía o ausente = la genera el sistema (ver validacion.generar_clave_sip).
+    password: Optional[TextoSinControl] = None
     caller_id_name: Optional[NombreVisible] = None
     voicemail: bool = True
     enabled: bool = True

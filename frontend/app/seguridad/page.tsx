@@ -26,6 +26,12 @@ interface Bloqueo {
   vigente: boolean;
 }
 
+interface ClaveDebil {
+  id: number;
+  number: string;
+  motivo: string;
+}
+
 interface Datos {
   disponible: boolean;
   vigentes: Bloqueo[];
@@ -59,6 +65,12 @@ export default function SeguridadPage() {
   const [datos, setDatos] = useState<Datos | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [debiles, setDebiles] = useState<ClaveDebil[] | null>(null);
+
+  useEffect(() => {
+    // Independiente de fail2ban: aunque no se pueda leer, esto sí.
+    api.get<ClaveDebil[]>("/api/security/claves-debiles").then(setDebiles).catch(() => setDebiles(null));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -115,6 +127,25 @@ export default function SeguridadPage() {
         <div className="mb-4">
           <ErrorBanner message={error} onClose={() => setError("")} />
         </div>
+      )}
+
+      {debiles && debiles.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader
+            title="Contraseñas SIP débiles"
+            subtitle={`${debiles.length} extensión(es) con una contraseña que los escáneres de Internet adivinan. Cámbialas en Extensiones.`}
+          />
+          <Table head={["Extensión", "Problema"]}>
+            {debiles.map((d) => (
+              <Tr key={d.id}>
+                <Td mono strong>
+                  {d.number}
+                </Td>
+                <Td>{d.motivo}</Td>
+              </Tr>
+            ))}
+          </Table>
+        </Card>
       )}
 
       {loading ? (

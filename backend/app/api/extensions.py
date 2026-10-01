@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import validacion
 from app.core.database import get_session, tenant_de_sesion
 from app.models import Extension, Tenant, Trunk
 from app.schemas import CallRequest, ExtensionCreate, ExtensionOut, ExtensionUpdate
@@ -19,6 +20,18 @@ async def list_extensions(session: AsyncSession = Depends(get_session)):
     return result.scalars().all()
 
 
+def _clave_valida(clave: str | None, numero: str) -> str:
+    """La contraseña SIP a guardar: la generada si viene vacía, o la dada
+    si pasa la validación. Se exige al crear y al cambiarla; las que ya
+    existían no se tocan (cambiarlas sin aviso desregistraría teléfonos)."""
+    if not clave:
+        return validacion.generar_clave_sip()
+    problema = validacion.problema_clave_sip(clave, numero)
+    if problema:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=problema)
+    return clave
+
+
 @router.post("", response_model=ExtensionOut, status_code=status.HTTP_201_CREATED)
 async def create_extension(payload: ExtensionCreate, session: AsyncSession = Depends(get_session)):
     # Límite de la licencia: no se pueden superar las extensiones del plan.
@@ -30,7 +43,9 @@ async def create_extension(payload: ExtensionCreate, session: AsyncSession = Dep
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Alcanzaste el límite de extensiones de tu plan. Mejora la licencia para agregar más.",
             )
-    ext = Extension(**payload.model_dump())
+    datos = payload.model_dump()
+    datos["password"] = _clave_valida(datos.get("password"), datos["number"])
+    ext = Extension(**datos)
     session.add(ext)
     try:
         await session.commit()
@@ -56,7 +71,16 @@ async def update_extension(
     ext = await session.get(Extension, extension_id)
     if not ext:
         raise HTTPException(status_code=404, detail="Extensión no encontrada")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    cambios = payload.model_dump(exclude_unset=True)
+    if "password" in cambios:
+        # Vacía o la misma = "no la toqué" (el panel manda el formulario
+        # completo, con la contraseña actual): una extensión con una clave
+        # débil heredada se puede seguir editando sin cambiarla.
+        if cambios["password"] and cambios["password"] != ext.password:
+            cambios["password"] = _clave_valida(cambios["password"], cambios.get("number") or ext.number)
+        else:
+            cambios.pop("password")
+    for field, value in cambios.items():
         setattr(ext, field, value)
     await session.commit()
     await session.refresh(ext)

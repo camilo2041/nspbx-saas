@@ -9,6 +9,9 @@ import re
 import xml.etree.ElementTree as ET
 
 import pytest
+from sqlalchemy import text
+
+from app.core.database import engine
 
 from .conftest import FS_SECRET
 
@@ -42,8 +45,16 @@ async def test_directorio_cada_dominio_solo_con_sus_extensiones(cliente, mundo):
     for propia, ajena in ((mundo.alfa, mundo.beta), (mundo.beta, mundo.alfa)):
         dominio = raiz.find(f".//domain[@name='{propia.dominio}']")
         assert dominio is not None, f"falta el dominio {propia.dominio}"
-        usuarios = dominio.findall(".//user")
-        assert [u.get("id") for u in usuarios] == ["1000"]
+        usuarios = sorted(u.get("id") for u in dominio.findall(".//user"))
+        # Exactamente las extensiones habilitadas de esa empresa en la base
+        # (otras pruebas le agregan algunas).
+        async with engine.connect() as conn:
+            esperadas = sorted(
+                (await conn.execute(
+                    text("SELECT number FROM extensions WHERE tenant_id = :t AND enabled"), {"t": propia.id}
+                )).scalars().all()
+            )
+        assert usuarios == esperadas and "1000" in usuarios
         texto = ET.tostring(dominio, encoding="unicode")
         assert f"clave-sip-{propia.marca}" in texto
         assert ajena.marca not in texto, f"el dominio de {propia.slug} contiene datos de {ajena.slug}"
