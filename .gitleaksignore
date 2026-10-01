@@ -15,3 +15,8 @@ d8e224d89c7c367291971d32d9b69bfee57ca99b:mobile/SETUP.md:private-key:27
 # NUEVOS; reescribir el historial es una decisión aparte.
 12eec00d7b7e0ab4d3a194dd45041dc1a02fc3e8:freeswitch/conf/tls/dtls-srtp.pem:private-key:1
 12eec00d7b7e0ab4d3a194dd45041dc1a02fc3e8:freeswitch/conf/tls/wss.pem:private-key:1
+
+# Falso positivo: contraseña de prueba de una extensión en la suite de
+# fallo seguro, en el commit que la agregó (la línea actual ya lleva
+# `gitleaks:allow`).
+1cdf3a4d25127bf2f4fd7ed9b07f19eabd1643e4:backend/tests/test_fallo_seguro.py:generic-api-key:161
