@@ -158,7 +158,7 @@ async def test_licencia_suspendida_deja_ver_pero_no_operar(cliente, mundo, gamma
         await s.execute(update(License).where(License.tenant_id == tid).values(status="suspended"))
         await s.commit()
     assert (await cliente.get(_RUTA, headers=cab)).status_code == 200
-    crear = await cliente.post(_RUTA, headers=cab, json={"number": "2000", "password": "Clave-Larga-123456"})
+    crear = await cliente.post(_RUTA, headers=cab, json={"number": "2000", "password": "Clave-Larga-123456"})  # gitleaks:allow (clave de prueba)
     assert crear.status_code == 402
 
 
