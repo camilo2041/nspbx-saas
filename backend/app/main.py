@@ -418,7 +418,17 @@ def _parches_rls() -> list[str]:
     return stmts
 
 
-_COLUMN_PATCHES += _parches_rls()
+# Hasta acá, el esquema BASE: lo aplica la revisión 0001 de Alembic
+# (app/migraciones). Congelado: los cambios nuevos van en revisiones
+# nuevas, no en esta lista.
+_PARCHES_BASE = list(_COLUMN_PATCHES)
+
+# Convergencia: rol de la aplicación, permisos, políticas de RLS y la
+# auditoría de solo agregar. Corre en CADA arranque, después de las
+# revisiones, y no es una revisión porque depende del entorno (el nombre y
+# la clave del rol salen de DATABASE_URL_APP) y porque los GRANT tienen que
+# volver a cubrir las tablas que agregue cualquier revisión nueva.
+_PARCHES_CONVERGENCIA = _parches_rls()
 
 
 def _parches_auditoria() -> list[str]:
@@ -449,7 +459,7 @@ def _parches_auditoria() -> list[str]:
     return stmts
 
 
-_COLUMN_PATCHES += _parches_auditoria()
+_PARCHES_CONVERGENCIA += _parches_auditoria()
 
 
 async def _asegurar_admin(session) -> None:
@@ -538,7 +548,7 @@ async def _asegurar_plataforma(session) -> None:
 
 
 async def migrar() -> None:
-    """Esquema, parches, rol de la aplicación y políticas de RLS.
+    """Revisiones de Alembic, rol de la aplicación y políticas de RLS.
 
     Separado del arranque para que las pruebas (backend/tests) migren su
     base exactamente por el mismo camino que producción: un aislamiento
@@ -549,9 +559,12 @@ async def migrar() -> None:
     mismas sentencias crean, así que un UPDATE de relleno vería cero
     filas y la migración "terminaría bien" sin haber hecho nada.
     """
+    from app import migraciones
+
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        for stmt in _COLUMN_PATCHES:
+        # Revisiones de Alembic hasta la última (app/migraciones/versiones).
+        await conn.run_sync(migraciones.actualizar)
+        for stmt in _PARCHES_CONVERGENCIA:
             await conn.execute(text(stmt))
     # Después de crear el rol y las políticas, comprobar que el rol con
     # el que se va a atender NO puede saltárselas. Va acá y no antes
