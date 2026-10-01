@@ -23,6 +23,8 @@ _ABIERTAS = {
     "/api/auth/logout",
     # Segundo paso del login: se autentica con el token del paso intermedio.
     "/api/auth/mfa/verificar",
+    # Avisos de CSP del navegador: sin token, tope por IP (app/api/csp.py).
+    "/api/csp-report",
 }
 _ABIERTAS_PREFIJO = (
     # Agente de IA: secreto compartido en cabecera (X-Agent-Secret).

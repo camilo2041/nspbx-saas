@@ -65,7 +65,11 @@ def verificar_secreto_fs(secret: str | None = None) -> None:
 # /refresh y /logout se autentican con el refresh token del cuerpo, no con
 # el JWT: si exigieran un JWT vigente, el refresh no serviría justo cuando
 # hace falta (JWT vencido).
-_ABIERTAS = ("/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/api/auth/mfa/verificar")
+_ABIERTAS = (
+    "/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/api/auth/mfa/verificar",
+    # Lo manda el navegador, sin token (ver app/api/csp.py).
+    "/api/csp-report",
+)
 
 # Lo único que puede hacer una sesión de un rol que exige MFA y todavía no
 # lo activó (ver core/mfa.py): activarlo, saber quién es y cambiar la

@@ -21,6 +21,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { AuditTable } from "@/components/audit-table";
+import { AvisosCsp } from "@/components/avisos-csp";
 import { ConsumoMensual } from "@/components/consumo-mensual";
 import { api } from "@/lib/api";
 import { AlertaTrafico, Empresa, EmpresaCreada } from "@/lib/types";
@@ -565,6 +566,7 @@ export default function EmpresasPage() {
         </div>
       </Modal>
       <ConsumoMensual plataforma />
+      <AvisosCsp />
       <AuditTable
         endpoint="/api/plataforma/auditoria"
         title="Auditoría de la plataforma"

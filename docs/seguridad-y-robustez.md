@@ -218,7 +218,7 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | CORS abierto **sin credenciales**, token en cabecera | 🟢 | `main.py:576` | prueba de que no hay cookies de sesión |
 | Sin stack traces en producción | por verificar | — | prueba: error 500 devuelve mensaje genérico + `request_id` |
 | `request_id` en cada petición y en cada log | ✅ | `core/auditoria.py` | cabecera `X-Request-ID` en cada respuesta y en cada línea de log; `LOG_FORMATO=json` para un recolector; `test_auditoria.py` |
-| Cabeceras de seguridad (CSP, HSTS, X-Frame-Options, Referrer-Policy) | 🟡 | `next.config.ts`, `core/cabeceras.py` | aplicadas: nosniff, HSTS, sin iframes (salvo `/webcall`), Permissions-Policy, `no-store` en la API. La CSP completa está en **solo reporte**: pasarla a aplicada cuando la consola del navegador no muestre avisos en producción |
+| Cabeceras de seguridad (CSP, HSTS, X-Frame-Options, Referrer-Policy) | 🟡 | `next.config.ts`, `core/cabeceras.py`, `api/csp.py` | aplicadas: nosniff, HSTS, sin iframes (salvo `/webcall`), Permissions-Policy, `no-store` en la API. La CSP completa está en **solo reporte** y los navegadores mandan cada aviso a `/api/csp-report` (probado con Chromium; `test_csp.py`). La plataforma los ve en Empresas: pasarla a aplicada cuando esa lista quede vacía después de un tiempo de uso normal (softphone y llamadas incluidos) |
 | Límite de peticiones por usuario/empresa (no solo login) | 🟡 | `limitar_uso` en endpoints puntuales; por clave en `/api/v1` (`API_LIMITE_POR_MINUTO`, `test_api_v1.py`) | límite general por token y por empresa en el panel; en memoria de cada proceso hasta tener Redis |
 | Idempotencia en operaciones críticas (iniciar campaña, cobros) | ❌ | — | cabecera `Idempotency-Key` |
 | Webhooks firmados (HMAC + timestamp + tolerancia de 5 min) | 🟡 | `agent_webhook_secret`, `core/firmas.py` | prueba de firma inválida y de repetición |
@@ -291,7 +291,7 @@ llamante ─► STT ─► LLM ─► pide herramienta(args)
 | El LLM no tiene acceso directo a la base ni a SQL | 🟢 | solo herramientas cerradas | — |
 | Cada herramienta valida empresa y reglas fuera del modelo | 🟢 | `_run_tool` | prueba por herramienta: args de otra empresa → rechazo |
 | El llamante solo actúa sobre **sus** datos (citas/deudas ligadas a su número o a la campaña) | ✅ | teléfono, empresa y cita salen de la llamada, nunca de los argumentos del modelo | `test_voicebot_herramientas.py` (argumentos inyectados, otro llamante, nombre del paciente) |
-| El contexto del prompt no incluye datos de otros clientes | por verificar | — | revisión de `voice_prompts.py` |
+| El contexto del prompt no incluye datos de otros clientes | ✅ | `_datos_de_la_llamada` usa las mismas búsquedas que las herramientas | `test_voicebot_herramientas.py`: una cita fijada de otra empresa no entra al contexto, ni como "fijada" (que se nombra sin verificar). Antes sí entraba: se leía por id sin mirar la empresa |
 | Éxito de herramienta explícito (no deducido del texto) | 🟢 | `_run_tool` devuelve `(ok, …)` | — |
 | Topes por llamada: turnos, duración, tokens | 🟡 | `max_turns`, duración | tope de tokens por llamada y por empresa/día |
 | Concurrencia de bots por empresa | 🟡 | concurrencia general | tope propio del bot |
@@ -391,10 +391,10 @@ una empresa, kill switches.
 |---|---|---|---|
 | Postgres sin puerto publicado | 🟢 | solo red `nspbx_net` | escaneo externo |
 | Rotación de logs de Docker | 🟢 | `x-logging` | — |
-| `no-new-privileges` | 🟡 | backend sí; resto por verificar | — |
-| Contenedores sin root | 🟡 | frontend `USER node`; backend corre como root | usuario sin privilegios en `backend/Dockerfile` |
-| Límites de CPU/memoria por contenedor | ❌ | — | evita que el voizbot o el dialer tumben FreeSWITCH |
-| Filesystem de solo lectura donde se pueda | ❌ | — | backend y frontend con `read_only` + `tmpfs` |
+| `no-new-privileges` | 🟢 | backend, voicebot y frontend | FreeSWITCH y Postgres sin tocar a propósito |
+| Contenedores sin root | 🟡 | voicebot como usuario 10001 (`backend/entrypoint.sh`); frontend como `node`; backend root **sin capacidades** salvo `DAC_OVERRIDE` y `FOWNER` | probado con Docker. El backend no puede dejar root mientras FreeSWITCH corra como root y cree las grabaciones en carpetas 0755: la retención no podría borrarlas. El paso siguiente es correr FreeSWITCH con el mismo usuario |
+| Límites de CPU/memoria por contenedor | 🟢 | backend 1 GB, voicebot 2 GB, frontend 1 GB, 512 procesos; configurables en `.env` | en reposo usan ~100 MB; ajustar a 2× el pico de un día de campaña. Nunca en FreeSWITCH ni Postgres |
+| Filesystem de solo lectura donde se pueda | 🟢 | backend y voicebot `read_only` + `/tmp` en memoria | probado con Docker: escriben solo en sus volúmenes. El frontend no, porque Next escribe su caché |
 | Healthchecks | 🟢 | postgres, freeswitch, backend, voicebot | — |
 | SSH solo con llave, sin root, con allowlist o VPN | por verificar | — | checklist del servidor |
 | Firewall del host: solo 80/443, 5060, 8443, 15080, rango RTP | por verificar | — | escaneo externo trimestral |
@@ -622,30 +622,31 @@ el simulacro en el servidor).
 
 - ✅ Secretos de proveedores, troncales, extensiones y MFA cifrados en DB
   (AES-256-GCM) y enmascarados en la API.
-- 🟡 Cabeceras de seguridad aplicadas; CSP completa en solo reporte.
+- 🟡 Cabeceras de seguridad aplicadas; CSP completa en solo reporte, con
+  los avisos de los navegadores recogidos en el servidor para decidir con
+  datos cuándo aplicarla.
 - ✅ Herramientas del voizbot a prueba de manipulación (I4) y versionado
   de flujos con restauración.
 - ✅ Grabaciones por carpeta de empresa y retención por empresa; las
   escuchas ya se auditaban.
-- ❌ **Contenedores** (backend y voicebot sin root, límites de memoria y
-  CPU, filesystem de solo lectura). Pendiente a propósito: no se puede
-  probar sin Docker, y un error tumba la central. Plan para hacerlo en un
-  servidor de pruebas:
-  1. Medir con `docker stats` durante un día normal y uno de campaña.
-  2. Límites a 2× el pico medido (`mem_limit`, `cpus`), primero en el
-     voicebot y el backend; nunca en FreeSWITCH ni Postgres.
-  3. Usuario sin root en `backend/Dockerfile` con un entrypoint que
-     ajusta el dueño de los volúmenes montados (`/freeswitch-conf`,
-     sonidos, grabaciones, respaldos) y baja privilegios con `gosu`.
-  4. `read_only: true` + `tmpfs: /tmp` en el voicebot, que no escribe en disco.
-- Redis para limitadores y estado compartido (requisito para más de un proceso).
+- 🟡 **Contenedores**: voicebot sin root; backend root pero sin
+  capacidades (ver §5.13 por qué); imagen de solo lectura en los dos;
+  topes de memoria, CPU y procesos. Probado con Docker. Falta: medir el
+  pico real en un día de campaña y ajustar los topes, y correr FreeSWITCH
+  sin root para que el backend también pueda dejarlo.
+- ✅ El contexto inicial del voizbot sigue las mismas reglas que sus
+  herramientas.
+- Redis para limitadores y estado compartido: no hace falta mientras el
+  backend corra en un solo proceso (hoy es así). Es requisito antes de
+  levantar más de un proceso o réplica.
 - SBC (Kamailio/OpenSIPS) delante de FreeSWITCH cuando el volumen lo justifique.
 
 Lo que dejó a la vista la fase 3, ya corregido: el voizbot buscaba en
 todas las empresas si una llamada llegaba sin empresa; la verificación del
 nombre del paciente se saltaba con cualquier cita fijada; el contexto
 público grababa las entrantes de empresas que no graban; un secreto
-cifrado corrupto hacía fallar el descifrado.
+cifrado corrupto hacía fallar el descifrado; una cita fijada de otra
+empresa entraba al contexto del voizbot (y se nombraba sin verificar).
 
 ### Fase 4 — Producto SaaS maduro 🟡
 

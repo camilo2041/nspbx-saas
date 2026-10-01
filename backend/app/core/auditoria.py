@@ -44,8 +44,9 @@ _METODOS_QUE_MODIFICAN = {"POST", "PUT", "PATCH", "DELETE"}
 # que lee, no solo en lo que escribe.
 _LECTURAS_SENSIBLES = re.compile(r"^(/api/calls/\d+/recording|/api/v1/.*)$")
 # No se auditan: el widget anónimo de llamada web (mucho volumen, sin
-# usuario) y la renovación de sesión de la app móvil (rutinaria).
-_EXCLUIDAS = ("/api/webcall/", "/api/auth/refresh")
+# usuario), la renovación de sesión de la app móvil (rutinaria) y los avisos
+# de CSP de los navegadores (ver app/api/csp.py).
+_EXCLUIDAS = ("/api/webcall/", "/api/auth/refresh", "/api/csp-report")
 # Claves cuyo valor nunca se guarda.
 _CLAVE_SECRETA = re.compile(r"pass|secret|token|clave|api_?key|apikey|auth|firma|signature|pem|private", re.I)
 # Teléfonos de terceros (pacientes, deudores, destinos): el registro es de

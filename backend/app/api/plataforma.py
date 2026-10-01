@@ -124,3 +124,11 @@ async def consumo_de_todas_csv(mes: str | None = None, session: AsyncSession = D
     filas = await consumo_de_todas(mes, session)
     etiqueta = consumo.rango_del_mes(mes)[0]
     return csv_respuesta(consumo.a_csv(filas), f"consumo-{etiqueta}.csv")
+
+
+@router.get("/csp")
+async def avisos_csp():
+    """Lo que la CSP completa bloquearía si se aplicara (ver app/api/csp.py)."""
+    from app.api import csp
+
+    return csp.resumen()

@@ -12,7 +12,9 @@ import type { NextConfig } from "next";
 //   bloquearía, sin bloquearlo. El softphone conecta por WSS a FreeSWITCH
 //   y al relay TURN, que dependen de cada instalación; aplicarla sin haber
 //   mirado esos avisos en producción podía dejar el softphone mudo.
-//   Cuando la consola esté limpia, se pasa a Content-Security-Policy.
+//   Los avisos llegan al backend (/api/csp-report) y la plataforma los ve
+//   en Empresas. Cuando esa lista quede vacía, se pasa a
+//   Content-Security-Policy.
 
 const POLITICA_COMPLETA = [
   "default-src 'self'",
@@ -28,6 +30,10 @@ const POLITICA_COMPLETA = [
   "frame-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",
+  // A dónde mandan los avisos los navegadores. Solo report-uri: con
+  // report-to presente, Chrome pasa a la Reporting API, que agrupa y demora
+  // los envíos; report-uri llega al instante (probado con Chromium).
+  "report-uri /api/csp-report",
 ].join("; ");
 
 const comunes = [
