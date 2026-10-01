@@ -914,15 +914,19 @@ class AuditLog(Base):
 
     `tenant_id` admite NULL, como `users`: las acciones de la plataforma y
     los intentos de login de usuarios inexistentes no son de ninguna
-    empresa. Con RLS, una empresa ve solo las suyas."""
+    empresa. Con RLS, una empresa ve solo las suyas.
+
+    Sin clave foránea a `tenants` a propósito: con ON DELETE SET NULL,
+    borrar una empresa intentaba modificar sus registros, el disparador de
+    solo agregar lo rechazaba y la empresa no se podía borrar. Además el
+    registro tiene que seguir diciendo de qué empresa era después de que
+    se borre; lo elimina la retención (AUDITORIA_RETENCION_DIAS)."""
 
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    tenant_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tenants.id", ondelete="SET NULL"), index=True, nullable=True
-    )
+    tenant_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # "usuario (rol)" al momento de la acción: si el usuario se borra o
     # cambia de rol, el registro sigue diciendo quién fue.

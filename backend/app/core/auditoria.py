@@ -46,6 +46,11 @@ _LECTURAS_SENSIBLES = re.compile(r"^/api/calls/\d+/recording$")
 _EXCLUIDAS = ("/api/webcall/", "/api/auth/refresh")
 # Claves cuyo valor nunca se guarda.
 _CLAVE_SECRETA = re.compile(r"pass|secret|token|clave|api_?key|apikey|auth|firma|signature|pem|private", re.I)
+# Teléfonos de terceros (pacientes, deudores, destinos): el registro es de
+# solo agregar, así que lo que entra no se puede borrar cuando el titular lo
+# pide (ver services/privacidad.py). Se guardan los últimos 4 dígitos, que
+# alcanzan para reconocer la acción sin identificar a la persona.
+_CLAVE_TELEFONO = re.compile(r"^(phone|tel[eé]fono|destination)$", re.I)
 _MAX_VALOR = 200
 _MAX_CUERPO = 64 * 1024
 
@@ -90,16 +95,26 @@ class _FormatoJson(logging.Formatter):
         return json.dumps(datos, ensure_ascii=False)
 
 
+def enmascarar_telefono(valor) -> str:
+    digitos = re.sub(r"\D", "", str(valor))
+    return "…" + digitos[-4:] if len(digitos) > 4 else "…"
+
+
+def _ocultar_clave(k: str, v, profundidad: int):
+    if _CLAVE_SECRETA.search(k):
+        return "***"
+    if _CLAVE_TELEFONO.search(k) and isinstance(v, (str, int)) and not isinstance(v, bool):
+        return enmascarar_telefono(v)
+    return ocultar_secretos(v, profundidad + 1)
+
+
 def ocultar_secretos(valor, profundidad: int = 0):
-    """Copia de `valor` con los secretos reemplazados por "***" y los textos
-    largos recortados."""
+    """Copia de `valor` con los secretos reemplazados por "***", los
+    teléfonos enmascarados y los textos largos recortados."""
     if profundidad > 4:
         return "…"
     if isinstance(valor, dict):
-        return {
-            str(k)[:60]: ("***" if _CLAVE_SECRETA.search(str(k)) else ocultar_secretos(v, profundidad + 1))
-            for k, v in list(valor.items())[:50]
-        }
+        return {str(k)[:60]: _ocultar_clave(str(k), v, profundidad) for k, v in list(valor.items())[:50]}
     if isinstance(valor, list):
         resto = len(valor) - 20
         salida = [ocultar_secretos(v, profundidad + 1) for v in valor[:20]]

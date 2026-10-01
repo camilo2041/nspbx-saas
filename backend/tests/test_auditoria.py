@@ -139,6 +139,17 @@ def test_ocultar_secretos():
     assert len(limpio["texto"]) < 210
 
 
+def test_los_telefonos_quedan_enmascarados():
+    """El registro no se puede borrar: el teléfono de un tercero no entra entero."""
+    datos = {"numbers": [{"phone": "+57 300 123 4567"}], "telefono": "3001234567", "destination": 1001,
+             "softphone": True, "name": "Ana"}
+    limpio = auditoria.ocultar_secretos(datos)
+    assert limpio["numbers"] == [{"phone": "…4567"}]
+    assert limpio["telefono"] == "…4567"
+    assert limpio["destination"] == "…"
+    assert limpio["softphone"] is True and limpio["name"] == "Ana"
+
+
 def test_los_logs_llevan_el_request_id():
     token = auditoria.request_id_actual.set("rid-de-prueba")
     try:

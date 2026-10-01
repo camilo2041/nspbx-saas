@@ -24,9 +24,9 @@ from app.core import permissions
 from app.core.auth import requiere
 from app.core.database import get_admin_session
 from app.core.security import hash_password
-from app.models import Extension, License, Tenant, User
+from app.models import Extension, License, Tenant, User, VoiceBot
 from app.schemas import LicenseOut, LicenseUpdate, TenantCreate, TenantCreatedOut, TenantOut, TenantUpdate
-from app.services import esl, licensing
+from app.services import esl, licensing, privacidad
 from app.services.ajustes import get_or_create_settings
 
 logger = logging.getLogger(__name__)
@@ -193,5 +193,8 @@ async def delete_tenant(tenant_id: int, session: AsyncSession = Depends(get_admi
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
     if ten.id == 1:
         raise HTTPException(status_code=400, detail="No se puede eliminar la empresa inicial")
+    bot_ids = list((await session.execute(select(VoiceBot.id).where(VoiceBot.tenant_id == tenant_id))).scalars())
     await session.delete(ten)
     await session.commit()
+    # Después del commit: si la base fallara, los archivos siguen ahí.
+    privacidad.borrar_archivos_de_empresa(tenant_id, bot_ids)
