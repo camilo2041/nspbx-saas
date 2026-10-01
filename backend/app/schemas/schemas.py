@@ -143,6 +143,7 @@ class ExtensionBase(BaseModel):
     caller_id_name: Optional[NombreVisible] = None
     voicemail: bool = True
     enabled: bool = True
+    outbound_after_hours: bool = False
 
 
 class ExtensionCreate(ExtensionBase):
@@ -155,6 +156,7 @@ class ExtensionUpdate(BaseModel):
     caller_id_name: Optional[NombreVisible] = None
     voicemail: Optional[bool] = None
     enabled: Optional[bool] = None
+    outbound_after_hours: Optional[bool] = None
 
 
 class ExtensionOut(BaseModel):
@@ -166,6 +168,7 @@ class ExtensionOut(BaseModel):
     caller_id_name: Optional[str] = None
     voicemail: bool = True
     enabled: bool = True
+    outbound_after_hours: bool = False
     created_at: datetime
 
 
@@ -304,6 +307,10 @@ class SystemSettingsOut(BaseModel):
     campaign_hours_weekdays: str = "07:00-19:00"
     campaign_hours_saturday: str = "08:00-15:00"
     campaign_sundays_holidays: bool = False
+    outbound_hours_enabled: bool = False
+    outbound_hours_weekdays: str = "07:00-19:00"
+    outbound_hours_saturday: str = "08:00-13:00"
+    outbound_hours_sundays_holidays: bool = False
     ai_stt_provider: str = "elevenlabs"
     ai_voice_provider: str = "elevenlabs"
     ai_voice_id: str = "Xb7hH8MSUJpSbSDYk0k2"
@@ -381,8 +388,12 @@ class SystemSettingsUpdate(BaseModel):
     campaign_hours_weekdays: Optional[str] = Field(default=None, max_length=11)
     campaign_hours_saturday: Optional[str] = Field(default=None, max_length=11)
     campaign_sundays_holidays: Optional[bool] = None
+    outbound_hours_enabled: Optional[bool] = None
+    outbound_hours_weekdays: Optional[str] = Field(default=None, max_length=11)
+    outbound_hours_saturday: Optional[str] = Field(default=None, max_length=11)
+    outbound_hours_sundays_holidays: Optional[bool] = None
 
-    @field_validator("campaign_hours_weekdays", "campaign_hours_saturday")
+    @field_validator("campaign_hours_weekdays", "campaign_hours_saturday", "outbound_hours_weekdays", "outbound_hours_saturday")
     @classmethod
     def _franja_valida(cls, v):
         if v is None:

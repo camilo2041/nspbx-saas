@@ -145,6 +145,9 @@ class Extension(Base):
     caller_id_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     voicemail: Mapped[bool] = mapped_column(Boolean, default=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Puede llamar afuera fuera del horario laboral de la empresa (guardias).
+    # Solo cuenta si la empresa limita las salientes al horario (Ajustes).
+    outbound_after_hours: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -368,6 +371,12 @@ class SystemSettings(Base):
     campaign_hours_weekdays: Mapped[str] = mapped_column(String(11), default="07:00-19:00", server_default="07:00-19:00")
     campaign_hours_saturday: Mapped[str] = mapped_column(String(11), default="08:00-15:00", server_default="08:00-15:00")
     campaign_sundays_holidays: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Salientes de los teléfonos solo en horario laboral (opcional). Fuera de
+    # él, solo las extensiones con `outbound_after_hours` (ver salientes.py).
+    outbound_hours_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    outbound_hours_weekdays: Mapped[str] = mapped_column(String(11), default="07:00-19:00", server_default="07:00-19:00")
+    outbound_hours_saturday: Mapped[str] = mapped_column(String(11), default="08:00-13:00", server_default="08:00-13:00")
+    outbound_hours_sundays_holidays: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     # Widget de "llamar a un agente" embebible en sitios web públicos (ver
     # app/api/webcall.py y app/services/webcall.py). Un visitante anónimo

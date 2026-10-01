@@ -136,6 +136,33 @@ def puede_marcar(ajustes, intencion: str | None, ahora: datetime) -> bool:
     return f is not None and f[0] <= ahora.time() < f[1]
 
 
+# --- Horario laboral de las salientes de los teléfonos ---------------------------
+# Opcional por empresa (Ajustes): fuera de él solo llaman afuera las
+# extensiones con permiso (ver services/salientes.py). Usa los mismos
+# festivos y la misma lógica de franjas que las campañas.
+
+
+def horario_salientes_de(ajustes) -> Horario | None:
+    """None = la empresa no limita las salientes por horario."""
+    if ajustes is None or not getattr(ajustes, "outbound_hours_enabled", False):
+        return None
+    try:
+        return Horario(
+            lunes_a_viernes=leer_franja(getattr(ajustes, "outbound_hours_weekdays", None) or "07:00-19:00"),
+            sabado=leer_franja(getattr(ajustes, "outbound_hours_saturday", None) or "08:00-13:00"),
+            domingos_y_festivos=bool(getattr(ajustes, "outbound_hours_sundays_holidays", False)),
+        )
+    except ValueError:
+        # Mal guardado: se trata como "fuera de horario" siempre, no como
+        # "sin límite" (fallo seguro).
+        return Horario(lunes_a_viernes=None, sabado=None)
+
+
+def en_horario(h: Horario, ahora: datetime) -> bool:
+    f = _franja_del_dia(h, ahora.date())
+    return f is not None and f[0] <= ahora.time() < f[1]
+
+
 def proxima_apertura(ajustes, intencion: str | None, ahora: datetime) -> datetime | None:
     """Cuándo vuelve a poder marcar (para decírselo a la empresa)."""
     if puede_marcar(ajustes, intencion, ahora):

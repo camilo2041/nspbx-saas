@@ -259,7 +259,7 @@ cortar la pérdida:
 | Duración | duración máxima por llamada | 🟢 (`max_call_duration_minutes`) | 60 min |
 | Dinero | minutos salientes por día por empresa | ✅ (`License.max_outbound_minutes_day`) | prueba 60, gratis 120, pro 5000, enterprise sin tope; al llegar **se cortan las salientes** hasta medianoche. Cuenta solo la pata que salió por troncal (`CallLog.via_trunk`) y solo llamadas terminadas: las que están en curso las acotan la duración máxima y las simultáneas |
 | Dinero | gasto estimado por día y por mes | ❌ | tarifa por prefijo × minutos |
-| Horario | salientes fuera de horario laboral requieren permiso | ❌ | opcional por empresa |
+| Horario | salientes fuera de horario laboral requieren permiso | ✅ | opcional por empresa (Ajustes); fuera de la franja solo llaman afuera las extensiones marcadas para guardias. Se decide al generar el dialplan de cada llamada, con el usuario SIP autenticado; los desvíos del menú a un celular de guardia (sin teléfono detrás) no se cortan. Clic para llamar igual. Un horario mal guardado cierra, no abre. Probado con FreeSWITCH real (sin permiso: `CALL_REJECTED`; con permiso: sale). `test_salientes_horario.py` |
 | Detección | alerta si la última hora supera 3× el promedio de esa hora en los 7 días previos (mín. 30 min) | ✅ (`services/alertas.py`) | alerta en el panel y webhook. **No corta**: una campaña nueva también es un pico; el corte lo da el cupo |
 | Detección | alerta por salientes de madrugada, prefijo internacional nuevo y 80 % del cupo | ✅ | alerta |
 | Detección | alerta por extensión registrada desde un país distinto al habitual | ❌ | alerta |

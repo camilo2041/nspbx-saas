@@ -71,6 +71,10 @@ const empty: SystemSettings = {
   campaign_hours_weekdays: "07:00-19:00",
   campaign_hours_saturday: "08:00-15:00",
   campaign_sundays_holidays: false,
+  outbound_hours_enabled: false,
+  outbound_hours_weekdays: "07:00-19:00",
+  outbound_hours_saturday: "08:00-13:00",
+  outbound_hours_sundays_holidays: false,
   ai_stt_provider: "elevenlabs",
   ai_voice_provider: "elevenlabs",
   ai_voice_id: "",
@@ -447,6 +451,47 @@ export default function SettingsPage() {
               </Button>
             </div>
             {colgadas && <Note tone="warn">Salientes en curso colgadas. Pueden tardar unos segundos en cortarse.</Note>}
+            <div className="rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm text-fg-soft">Salientes de los teléfonos solo en horario laboral</div>
+                  <div className="mt-0.5 text-[11px] leading-snug text-faint">
+                    Fuera de esta franja solo llaman afuera las extensiones marcadas para guardias (Extensiones). Una
+                    extensión robada se usa de noche y en fin de semana. Los desvíos del menú a un celular de guardia
+                    no se cortan.
+                  </div>
+                </div>
+                <Toggle checked={form.outbound_hours_enabled} onChange={(v) => set("outbound_hours_enabled", v)} />
+              </div>
+              {form.outbound_hours_enabled && (
+                <div className="mt-2 space-y-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input
+                      label="Lunes a viernes"
+                      value={form.outbound_hours_weekdays}
+                      onChange={(v) => set("outbound_hours_weekdays", v)}
+                      placeholder="07:00-19:00"
+                      mono
+                    />
+                    <Input
+                      label="Sábados"
+                      value={form.outbound_hours_saturday}
+                      onChange={(v) => set("outbound_hours_saturday", v)}
+                      placeholder="08:00-13:00"
+                      hint="Vacío o - = ese día no."
+                      mono
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-fg-soft">Domingos y festivos (con la franja del sábado)</span>
+                    <Toggle
+                      checked={form.outbound_hours_sundays_holidays}
+                      onChange={(v) => set("outbound_hours_sundays_holidays", v)}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
               <div className="text-sm text-fg-soft">Horario de marcación de campañas</div>
               <div className="mt-0.5 mb-2 text-[11px] leading-snug text-faint">

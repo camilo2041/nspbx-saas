@@ -28,6 +28,8 @@ export interface Extension {
   caller_id_name: string | null;
   voicemail: boolean;
   enabled: boolean;
+  /** Puede llamar afuera fuera del horario laboral (si la empresa lo limita). */
+  outbound_after_hours: boolean;
   created_at: string;
 }
 
@@ -243,6 +245,10 @@ export interface SystemSettings {
   campaign_hours_weekdays: string;
   campaign_hours_saturday: string;
   campaign_sundays_holidays: boolean;
+  outbound_hours_enabled: boolean;
+  outbound_hours_weekdays: string;
+  outbound_hours_saturday: string;
+  outbound_hours_sundays_holidays: boolean;
   ai_stt_provider: "elevenlabs" | "deepgram";
   ai_voice_provider: "edge" | "elevenlabs" | "deepgram";
   ai_voice_id: string;

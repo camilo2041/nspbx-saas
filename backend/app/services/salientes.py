@@ -78,6 +78,12 @@ class Politica:
     # Lo aplican el dialplan (limit hash) y el clic para llamar
     # (`exigir_ritmo`); las campañas tienen su propio ritmo (concurrencia).
     cps: int | None = None
+    # La empresa limita las salientes de los teléfonos al horario laboral y
+    # ahora está fuera de él: solo llaman afuera estas extensiones (guardias).
+    # Las campañas no (tienen su franja propia), ni lo que sale sin un
+    # teléfono detrás (un desvío del IVR al celular de guardia).
+    fuera_de_horario: bool = False
+    permitidas_fuera_de_horario: tuple[str, ...] = ()
 
 
 def paises_desde_texto(texto: str | None) -> tuple[str, ...]:
@@ -279,8 +285,9 @@ async def politicas(session, tenant_ids) -> dict[int, Politica]:
     restrictiva."""
     from sqlalchemy import select
 
-    from app.models import License, PlatformState, SystemSettings, Tenant
-    from app.services import licensing
+    from app.core.clock import now_local
+    from app.models import Extension, License, PlatformState, SystemSettings, Tenant
+    from app.services import horario_marcacion, licensing
 
     ids = list(tenant_ids)
     if not ids:
@@ -301,6 +308,7 @@ async def politicas(session, tenant_ids) -> dict[int, Politica]:
     usados = await minutos_salientes_hoy(session, ids)
 
     salida: dict[int, Politica] = {}
+    ahora = now_local()
     for tid in ids:
         bloqueo = None
         empresa = empresas.get(tid)
@@ -317,7 +325,16 @@ async def politicas(session, tenant_ids) -> dict[int, Politica]:
             bloqueo = f"Cupo diario de {cupo} minutos salientes agotado; se renueva a medianoche"
         # Sin licencia todavía: el tope de la prueba, no "sin tope".
         cps = licensing.limite(lic, "max_outbound_cps") if lic else licensing.PLANES["trial"]["max_outbound_cps"]
-        salida[tid] = replace(politica_desde_ajustes(fila, bloqueo), cps=cps)
+        politica = replace(politica_desde_ajustes(fila, bloqueo), cps=cps)
+        horario = horario_marcacion.horario_salientes_de(fila)
+        if horario is not None and not horario_marcacion.en_horario(horario, ahora):
+            permitidas = (await session.execute(
+                select(Extension.number).where(
+                    Extension.tenant_id == tid, Extension.enabled.is_(True), Extension.outbound_after_hours.is_(True)
+                ).order_by(Extension.number)
+            )).scalars().all()
+            politica = replace(politica, fuera_de_horario=True, permitidas_fuera_de_horario=tuple(permitidas))
+        salida[tid] = politica
     return salida
 
 

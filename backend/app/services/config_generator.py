@@ -461,6 +461,8 @@ def _append_outbound_route(
         return
     if not cadena:
         return
+    if politica.fuera_de_horario:
+        _append_outbound_fuera_de_horario(context, politica.permitidas_fuera_de_horario)
 
     activas = sorted(
         (r for r in (rutas or []) if getattr(r, "enabled", True)),
@@ -519,6 +521,25 @@ def _append_outbound_route(
             f"{prefijo}$1", slug_por_tenant, tope_simultaneas, slug, ruta.name,
             cps=politica.cps if politica else None,
         )
+
+
+def _append_outbound_fuera_de_horario(context: ET.Element, permitidas: tuple[str, ...]) -> None:
+    """Fuera del horario laboral de la empresa (ver salientes.Politica): un
+    número externo marcado desde un teléfono se rechaza, salvo que la
+    extensión tenga permiso. Va antes de las rutas de salida con
+    continue="true": si pasa, el dialplan sigue a la ruta de siempre.
+
+    `${user_name}` es el usuario SIP autenticado (no el caller ID, que pone
+    el teléfono). Vacío = la llamada no viene de un teléfono (un desvío del
+    IVR a un celular de guardia, un voizbot que transfiere): esas pasan, que
+    fuera de horario es justo cuando hacen falta."""
+    extension = ET.SubElement(context, "extension", attrib={"name": "Outbound_FueraDeHorario", "continue": "true"})
+    ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": r"^\+?[0-9]{5,}$"})
+    validas = [n for n in permitidas if validacion.EXTENSION_RE.fullmatch(n or "")]
+    expresion = "^(" + "|".join([""] + validas) + ")$"
+    usuario = ET.SubElement(extension, "condition", attrib={"field": "${user_name}", "expression": expresion})
+    ET.SubElement(usuario, "anti-action", attrib={"application": "log", "data": "WARNING Saliente rechazada: fuera del horario laboral de la empresa"})
+    ET.SubElement(usuario, "anti-action", attrib={"application": "hangup", "data": "CALL_REJECTED"})
 
 
 def _append_outbound_blocked(context: ET.Element, motivo: str) -> None:

@@ -145,6 +145,12 @@ async def call_extension(
         motivo = salientes.motivo_bloqueo(destination, politica)
         if motivo:
             raise HTTPException(status_code=403, detail=motivo)
+        # El mismo horario laboral que el dialplan (si la empresa lo usa).
+        if politica.fuera_de_horario and ext.number not in politica.permitidas_fuera_de_horario:
+            raise HTTPException(
+                status_code=403,
+                detail="Fuera del horario laboral de la empresa: esta extensión no tiene permiso para llamar afuera",
+            )
         # El mismo tope de llamadas por segundo que el dialplan.
         try:
             salientes.exigir_ritmo(ext.tenant_id, politica.cps)
