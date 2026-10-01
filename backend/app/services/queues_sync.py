@@ -87,8 +87,10 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
             "agent-no-answer-status": "Available",
         }
         if queue.record:
+            # queue_t<id>_…: de qué empresa es cada grabación de cola (en la
+            # raíz y no en la carpeta t<id>, que mod_callcenter no crea solo).
             params["record-template"] = (
-                "$${recordings_dir}/queue_"
+                f"$${{recordings_dir}}/queue_t{int(queue.tenant_id)}_"
                 + queue.name
                 + "_${strftime(%Y-%m-%d-%H-%M-%S)}_${caller_id_number}.wav"
             )

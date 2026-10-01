@@ -660,7 +660,13 @@ def _append_inbound_routes(
     ET.SubElement(fb_cond, "action", attrib={"application": "hangup", "data": "UNALLOCATED_NUMBER"})
 
 
-def _append_recording_hook(context: ET.Element) -> None:
+def carpeta_grabaciones(tenant_id: int) -> str:
+    """Subcarpeta de grabaciones de una empresa: aislamiento físico de los
+    archivos, y retención por empresa (ver workers/maintenance.py)."""
+    return f"t{int(tenant_id)}"
+
+
+def _append_recording_hook(context: ET.Element, tenant_id: int) -> None:
     """Graba TODA llamada del contexto. Va primero y con continue="true"
     para que la llamada siga su ruteo normal después.
 
@@ -674,7 +680,9 @@ def _append_recording_hook(context: ET.Element) -> None:
     # Organizadas por fecha (AAAA/MM/DD) en vez de todas sueltas en un solo
     # directorio — con meses de campañas activas, un directorio plano se
     # vuelve imposible de navegar a mano y de acotar por retención.
-    dia = "${strftime(%Y)}/${strftime(%m)}/${strftime(%d)}"
+    # Y dentro de la carpeta de la empresa (t<id>), para que los archivos de
+    # una no se mezclen con los de otra y cada una tenga su retención.
+    dia = carpeta_grabaciones(tenant_id) + "/${strftime(%Y)}/${strftime(%m)}/${strftime(%d)}"
     ET.SubElement(
         condition,
         "action",
@@ -723,7 +731,8 @@ def _append_call_limits_hook(context: ET.Element, max_minutes: int) -> None:
 
 
 def _append_webcall_context(
-    section: ET.Element, context_name: str, queue, dominio: str, record_all: bool, max_call_minutes: int
+    section: ET.Element, context_name: str, queue, dominio: str, record_all: bool, max_call_minutes: int,
+    tenant_id: int,
 ) -> None:
     """Contexto `webcall_<slug>`: el ÚNICO al que llegan las credenciales
     temporales del widget de llamada web de esa empresa (ver
@@ -747,7 +756,7 @@ def _append_webcall_context(
     cond = ET.SubElement(ext, "condition", attrib={"field": "destination_number", "expression": "^webqueue$"})
     ET.SubElement(cond, "action", attrib={"application": "answer"})
     if queue.record and not record_all:
-        _append_recording_hook_call(cond)
+        _append_recording_hook_call(cond, tenant_id)
     ET.SubElement(cond, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
     # Dominio literal de la empresa (no $${domain}, variable global que no
     # sirve con varias empresas) — mismo patrón que _append_queue_routes.
@@ -759,13 +768,13 @@ def _append_webcall_context(
     ET.SubElement(dcond, "action", attrib={"application": "hangup", "data": "CALL_REJECTED"})
 
 
-def _append_recording_hook_call(cond: ET.Element) -> None:
+def _append_recording_hook_call(cond: ET.Element, tenant_id: int) -> None:
     """Graba esta llamada puntual (cola con `record` propio, sin que la
     grabación global ya esté activa) — mismas acciones que
     `_append_recording_hook` pero dentro de una condición existente en vez
     de una extensión nueva."""
     ET.SubElement(cond, "action", attrib={"application": "set", "data": "RECORD_STEREO=false"})
-    dia = "${strftime(%Y)}/${strftime(%m)}/${strftime(%d)}"
+    dia = carpeta_grabaciones(tenant_id) + "/${strftime(%Y)}/${strftime(%m)}/${strftime(%d)}"
     ET.SubElement(
         cond,
         "action",
@@ -795,7 +804,6 @@ def build_dialplan_xml(
     root = _e("document", attrib={"type": "freeswitch/xml"})
     section = ET.SubElement(root, "section", attrib={"name": "dialplan"})
 
-    record_public = any(t["record_all"] for t in tenantes)
     max_minutes_public = max((t["max_call_minutes"] for t in tenantes), default=60)
 
     for t in tenantes:
@@ -809,7 +817,7 @@ def build_dialplan_xml(
 
         _append_call_limits_hook(context, t["max_call_minutes"])
         if t["record_all"]:
-            _append_recording_hook(context)
+            _append_recording_hook(context, t["tenant_id"])
         _append_dnd_feature_codes(context)
         _append_dnd_hook(context, extensions)
         _append_mobile_push_hook(context, extensions, t.get("push_extensions") or set(), slugs.get(t["tenant_id"], ""))
@@ -838,13 +846,16 @@ def build_dialplan_xml(
         if webcall_queue is not None:
             slug = slugs.get(t["tenant_id"], t.get("slug", ""))
             _append_webcall_context(
-                section, f"webcall_{slug}", webcall_queue, dominio, t["record_all"], t["max_call_minutes"]
+                section, f"webcall_{slug}", webcall_queue, dominio, t["record_all"], t["max_call_minutes"],
+                t["tenant_id"],
             )
 
     public_context = ET.SubElement(section, "context", attrib={"name": "public"})
     _append_call_limits_hook(public_context, max_minutes_public)
-    if record_public:
-        _append_recording_hook(public_context)
+    # Sin grabación acá: antes se grababa TODA entrante si CUALQUIER empresa
+    # tenía "grabar todo", así que una empresa que no graba quedaba grabada
+    # por la configuración de otra. La entrante se transfiere al contexto de
+    # su empresa, y ese ya graba (o no) según la empresa.
     _append_inbound_routes(public_context, routes or [], contextos, dominios)
 
     return validacion.limpiar_xml(ET.tostring(root, encoding="unicode"))
