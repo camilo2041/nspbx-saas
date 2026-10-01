@@ -23,7 +23,9 @@ miles de combinaciones de prefijo y número marcado.
 """
 
 import re
-from dataclasses import dataclass
+import time
+from collections import deque
+from dataclasses import dataclass, replace
 
 # Cómo se marca un destino internacional. "011" es el de Norteamérica;
 # en Colombia, los prefijos de operador de larga distancia (005, 007,
@@ -72,6 +74,10 @@ class Politica:
     # Si no es None, las salientes están cortadas y este es el motivo
     # (interruptor de la empresa o de la plataforma, cupo diario agotado).
     bloqueo: str | None = None
+    # Llamadas salientes nuevas por segundo (licencia). None = sin tope.
+    # Lo aplican el dialplan (limit hash) y el clic para llamar
+    # (`exigir_ritmo`); las campañas tienen su propio ritmo (concurrencia).
+    cps: int | None = None
 
 
 def paises_desde_texto(texto: str | None) -> tuple[str, ...]:
@@ -309,9 +315,37 @@ async def politicas(session, tenant_ids) -> dict[int, Politica]:
             bloqueo = MOTIVO_EMPRESA
         elif cupo is not None and usados.get(tid, 0) >= cupo:
             bloqueo = f"Cupo diario de {cupo} minutos salientes agotado; se renueva a medianoche"
-        salida[tid] = politica_desde_ajustes(fila, bloqueo)
+        # Sin licencia todavía: el tope de la prueba, no "sin tope".
+        cps = licensing.limite(lic, "max_outbound_cps") if lic else licensing.PLANES["trial"]["max_outbound_cps"]
+        salida[tid] = replace(politica_desde_ajustes(fila, bloqueo), cps=cps)
     return salida
 
 
 async def politica_de(session, tenant_id: int) -> Politica:
     return (await politicas(session, [tenant_id]))[tenant_id]
+
+
+# --- Ritmo del clic para llamar ---------------------------------------------
+# El dialplan aplica el tope de llamadas por segundo con `limit hash` en
+# FreeSWITCH; el clic para llamar hace originate directo y no pasa por ahí,
+# así que se aplica acá. En memoria del proceso (hoy el backend es uno solo).
+
+_ULTIMAS: dict[int, deque] = {}
+
+
+class RitmoExcedido(Exception):
+    pass
+
+
+def exigir_ritmo(tenant_id: int, cps: int | None) -> None:
+    """Lanza RitmoExcedido si la empresa ya originó `cps` llamadas en el
+    último segundo."""
+    if not cps:
+        return
+    ahora = time.monotonic()
+    marcas = _ULTIMAS.setdefault(tenant_id, deque())
+    while marcas and marcas[0] <= ahora - 1:
+        marcas.popleft()
+    if len(marcas) >= cps:
+        raise RitmoExcedido(f"Más de {cps} llamadas salientes por segundo; espera un momento")
+    marcas.append(ahora)

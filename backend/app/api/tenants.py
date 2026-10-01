@@ -71,6 +71,7 @@ async def _lic_out(session: AsyncSession, lic: License) -> LicenseOut:
         max_concurrent_calls=licensing.limite(lic, "max_concurrent_calls"),
         max_campaigns=licensing.limite(lic, "max_campaigns"),
         max_outbound_minutes_day=licensing.limite(lic, "max_outbound_minutes_day"),
+        max_outbound_cps=licensing.limite(lic, "max_outbound_cps"),
     )
 
 

@@ -587,6 +587,9 @@ class License(Base):
     # salientes hasta el día siguiente: un tope que solo avisa no frena un
     # fraude de madrugada.
     max_outbound_minutes_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Llamadas salientes nuevas por segundo (ver services/salientes.py). NULL
+    # = la del plan.
+    max_outbound_cps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

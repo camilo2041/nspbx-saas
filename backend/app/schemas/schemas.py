@@ -814,6 +814,7 @@ class LicenseOut(BaseModel):
     max_concurrent_calls: Optional[int] = None
     max_campaigns: Optional[int] = None
     max_outbound_minutes_day: Optional[int] = None
+    max_outbound_cps: Optional[int] = None
 
 
 class LicenseUpdate(BaseModel):
@@ -825,6 +826,7 @@ class LicenseUpdate(BaseModel):
     max_concurrent_calls: Optional[int] = Field(default=None, ge=0)
     max_campaigns: Optional[int] = Field(default=None, ge=0)
     max_outbound_minutes_day: Optional[int] = Field(default=None, ge=0)
+    max_outbound_cps: Optional[int] = Field(default=None, ge=1, le=1000)
 
 
 class TenantCreatedOut(TenantOut):

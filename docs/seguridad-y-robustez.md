@@ -255,7 +255,7 @@ cortar la pérdida:
 | Destino | lista de países permitidos (no un sí/no a "internacional") | ✅ (`international_countries`) | vacía = ningún internacional |
 | Destino | lista negra de prefijos premium/satelitales siempre bloqueados | ✅ | `+870`, `+881`, `+882`, `+883`, `+979`, `+808`, `+1 900` |
 | Volumen | llamadas salientes simultáneas por empresa | 🟢 (`max_concurrent_calls`, licencia) | según plan |
-| Volumen | llamadas por segundo por empresa | ❌ | 1 CPS (campañas aparte) |
+| Volumen | llamadas por segundo por empresa | ✅ (`License.max_outbound_cps`) | prueba y gratis 1, pro 5, enterprise 10 (también enterprise: es freno de fraude, no límite comercial); la plataforma lo cambia por empresa. Dialplan: `limit hash cps <empresa> N/1`, probado con FreeSWITCH real (ráfaga de 5 en un segundo con tope 2: pasaron 2). Clic para llamar: el mismo tope en el backend (429). Campañas aparte: van por su concurrencia. `test_cps.py` |
 | Duración | duración máxima por llamada | 🟢 (`max_call_duration_minutes`) | 60 min |
 | Dinero | minutos salientes por día por empresa | ✅ (`License.max_outbound_minutes_day`) | prueba 60, gratis 120, pro 5000, enterprise sin tope; al llegar **se cortan las salientes** hasta medianoche. Cuenta solo la pata que salió por troncal (`CallLog.via_trunk`) y solo llamadas terminadas: las que están en curso las acotan la duración máxima y las simultáneas |
 | Dinero | gasto estimado por día y por mes | ❌ | tarifa por prefijo × minutos |
@@ -263,7 +263,7 @@ cortar la pérdida:
 | Detección | alerta si la última hora supera 3× el promedio de esa hora en los 7 días previos (mín. 30 min) | ✅ (`services/alertas.py`) | alerta en el panel y webhook. **No corta**: una campaña nueva también es un pico; el corte lo da el cupo |
 | Detección | alerta por salientes de madrugada, prefijo internacional nuevo y 80 % del cupo | ✅ | alerta |
 | Detección | alerta por extensión registrada desde un país distinto al habitual | ❌ | alerta |
-| Reacción | botón "cortar todas las salientes" por empresa (la empresa y la plataforma) y global | ✅ | ver §5.15. Corta toda llamada **nueva**; las que están en curso terminan por la duración máxima |
+| Reacción | botón "cortar todas las salientes" por empresa (la empresa y la plataforma) y global | ✅ | ver §5.15. Corta toda llamada **nueva**, y se pueden colgar al instante las que están en curso |
 | Auditoría | todo cambio de rutas salientes, internacional o topes queda registrado | ✅ | el middleware audita toda petición que modifica algo; `test_auditoria.py` lo comprueba contra todas las rutas de la aplicación y en las de fraude (rutas salientes, campañas, colgar en curso) |
 
 Verificación: prueba de dialplan con destinos `00…`, `011…`, premium y

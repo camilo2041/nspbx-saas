@@ -425,6 +425,8 @@ export interface Licencia {
   max_campaigns: number | null;
   /** Minutos salientes por día; al llegar se cortan hasta medianoche. null = sin tope. */
   max_outbound_minutes_day: number | null;
+  /** Llamadas salientes nuevas por segundo (freno de fraude). */
+  max_outbound_cps: number | null;
 }
 
 export interface EmpresaCreada extends Empresa {

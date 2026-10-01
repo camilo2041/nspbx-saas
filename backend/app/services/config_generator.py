@@ -475,7 +475,7 @@ def _append_outbound_route(
         expresion = r"^(" + restriccion + r"\+?[0-9]{7,18})$"
         _append_outbound_extension(
             context, "Outbound_External", expresion, cadena,
-            "$1", slug_por_tenant, tope_simultaneas, slug,
+            "$1", slug_por_tenant, tope_simultaneas, slug, cps=politica.cps if politica else None,
         )
         return
 
@@ -517,6 +517,7 @@ def _append_outbound_route(
         _append_outbound_extension(
             context, f"Outbound_{ruta.id}", expresion, elegidas,
             f"{prefijo}$1", slug_por_tenant, tope_simultaneas, slug, ruta.name,
+            cps=politica.cps if politica else None,
         )
 
 
@@ -542,12 +543,19 @@ def _append_outbound_extension(
     tope_simultaneas: int,
     slug: str,
     etiqueta: str = "",
+    cps: int | None = None,
 ) -> None:
     """Una extensión de salida ya resuelta: a quién atrapa y por dónde sale."""
     extension = ET.SubElement(context, "extension", attrib={"name": nombre, "continue": "false"})
     condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": expresion})
     # Tope de salientes simultáneas de la empresa: al superarlo se rechaza
     # la llamada en vez de saturar la troncal (y el saldo).
+    # Tope de llamadas NUEVAS por segundo (licencia, ver salientes.Politica):
+    # el patrón de un fraude son cientos de llamadas cortas por minuto, que
+    # ni el tope de simultáneas ni el cupo de minutos frenan a tiempo.
+    # `N/1` en mod_hash es "N por segundo"; la que se pasa se rechaza.
+    if cps and cps > 0 and validacion.NOMBRE_RE.fullmatch(slug or ""):
+        ET.SubElement(condition, "action", attrib={"application": "limit", "data": f"hash cps {slug} {int(cps)}/1 !CALL_REJECTED"})
     if tope_simultaneas and tope_simultaneas > 0 and validacion.NOMBRE_RE.fullmatch(slug or ""):
         ET.SubElement(condition, "action", attrib={"application": "limit", "data": f"hash outbound {slug} {int(tope_simultaneas)} !CALL_REJECTED"})
     nombres = " -> ".join(t.name for t in cadena)

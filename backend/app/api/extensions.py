@@ -141,9 +141,15 @@ async def call_extension(
             raise HTTPException(status_code=400, detail="La troncal está deshabilitada")
         # Esto sale directo a la troncal (originate), sin pasar por el
         # dialplan: la política de salientes se aplica acá o no se aplica.
-        motivo = salientes.motivo_bloqueo(destination, await salientes.politica_de(session, ext.tenant_id))
+        politica = await salientes.politica_de(session, ext.tenant_id)
+        motivo = salientes.motivo_bloqueo(destination, politica)
         if motivo:
             raise HTTPException(status_code=403, detail=motivo)
+        # El mismo tope de llamadas por segundo que el dialplan.
+        try:
+            salientes.exigir_ritmo(ext.tenant_id, politica.cps)
+        except salientes.RitmoExcedido as e:
+            raise HTTPException(status_code=429, detail=str(e), headers={"Retry-After": "1"})
         # La troncal elegida va primero; si hay otras habilitadas de la
         # misma empresa, quedan de respaldo — si esta no contesta o la
         # rechaza, FreeSWITCH prueba la siguiente sola, sin que el clic a

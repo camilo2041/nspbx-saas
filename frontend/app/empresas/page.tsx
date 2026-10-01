@@ -70,7 +70,7 @@ const PLANES = [
 // `minutos` vacío = el del plan. Solo se envía si se cambió: la API
 // devuelve el límite efectivo, y reenviarlo tal cual lo dejaría fijo aunque
 // después se cambie de plan.
-const vacioLic = { plan: "trial", status: "trial", expires_at: "", minutos: "", minutosInicial: "" };
+const vacioLic = { plan: "trial", status: "trial", expires_at: "", minutos: "", minutosInicial: "", cps: "", cpsInicial: "" };
 
 function urlPanel(subdomain: string | null) {
   if (!subdomain) return null;
@@ -107,6 +107,8 @@ export default function EmpresasPage() {
       expires_at: lic?.expires_at ? lic.expires_at.slice(0, 10) : "",
       minutos: lic?.max_outbound_minutes_day != null ? String(lic.max_outbound_minutes_day) : "",
       minutosInicial: lic?.max_outbound_minutes_day != null ? String(lic.max_outbound_minutes_day) : "",
+      cps: lic?.max_outbound_cps != null ? String(lic.max_outbound_cps) : "",
+      cpsInicial: lic?.max_outbound_cps != null ? String(lic.max_outbound_cps) : "",
     });
   };
 
@@ -122,6 +124,9 @@ export default function EmpresasPage() {
       };
       if (licForm.minutos.trim() !== licForm.minutosInicial) {
         cuerpo.max_outbound_minutes_day = licForm.minutos.trim() === "" ? null : Number(licForm.minutos);
+      }
+      if (licForm.cps.trim() !== licForm.cpsInicial) {
+        cuerpo.max_outbound_cps = licForm.cps.trim() === "" ? null : Number(licForm.cps);
       }
       await api.put(`/api/tenants/${licTarget.id}/licencia`, cuerpo);
       setLicTarget(null);
@@ -559,6 +564,13 @@ export default function EmpresasPage() {
             onChange={(v) => setLicForm((f) => ({ ...f, minutos: v }))}
             hint="Al llegar se cortan las salientes hasta medianoche. Vacío = el del plan (Prueba 60, Gratis 120, Pro 5000, Enterprise sin tope)."
           />
+          <Input
+            label="Llamadas salientes por segundo"
+            type="number"
+            value={licForm.cps}
+            onChange={(v) => setLicForm((f) => ({ ...f, cps: v }))}
+            hint="Freno de fraude: las que pasan de este ritmo se rechazan (teléfonos y clic para llamar; las campañas van por su concurrencia). Vacío = el del plan (Prueba y Gratis 1, Pro 5, Enterprise 10)."
+          />
           <div className="rounded-xl border border-line bg-surface-2 p-3 text-xs text-fg-soft">
             <div className="mb-1 font-medium text-fg">Límites del plan</div>
             {licTarget?.licencia && (
@@ -568,6 +580,7 @@ export default function EmpresasPage() {
                 <span>Concurrentes: <b className="text-fg">{licTarget.licencia.max_concurrent_calls ?? "∞"}</b></span>
                 <span>Campañas: <b className="text-fg">{licTarget.licencia.max_campaigns ?? "∞"}</b></span>
                 <span>Min. salientes/día: <b className="text-fg">{licTarget.licencia.max_outbound_minutes_day ?? "∞"}</b></span>
+                <span>Salientes/segundo: <b className="text-fg">{licTarget.licencia.max_outbound_cps ?? "∞"}</b></span>
               </div>
             )}
             <p className="mt-2 text-faint">
