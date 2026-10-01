@@ -198,6 +198,8 @@ services:
       # Alertas de tráfico saliente anómalo de todas las empresas (Slack,
       # Teams, un relay de correo). Vacío = solo en el panel.
       ALERTAS_WEBHOOK_URL: ${ALERTAS_WEBHOOK_URL:-}
+      AUDITORIA_RETENCION_DIAS: ${AUDITORIA_RETENCION_DIAS:-365}
+      LOG_FORMATO: ${LOG_FORMATO:-}
       # Solo se usa la primera vez, para crear el usuario "admin". Si se
       # deja vacío, la contraseña se genera y sale en el log del arranque.
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

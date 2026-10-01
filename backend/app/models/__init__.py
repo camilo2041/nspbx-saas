@@ -1,5 +1,6 @@
 from app.models.models import (
     AiCallUsage,
+    AuditLog,
     Appointment,
     CallLog,
     Campaign,
@@ -25,6 +26,7 @@ from app.models.models import (
 
 __all__ = [
     "AiCallUsage",
+    "AuditLog",
     "Appointment",
     "CallLog",
     "Campaign",

@@ -20,6 +20,7 @@ import {
   Td,
   Tr,
 } from "@/components/ui";
+import { AuditTable } from "@/components/audit-table";
 import { api } from "@/lib/api";
 import { AlertaTrafico, Empresa, EmpresaCreada } from "@/lib/types";
 
@@ -562,6 +563,11 @@ export default function EmpresasPage() {
           </div>
         </div>
       </Modal>
+      <AuditTable
+        endpoint="/api/plataforma/auditoria"
+        title="Auditoría de la plataforma"
+        subtitle="Acciones de todas las empresas y de la plataforma, incluidos los intentos de acceso fallidos."
+      />
     </div>
   );
 }

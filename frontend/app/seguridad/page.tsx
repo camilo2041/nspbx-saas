@@ -14,6 +14,7 @@ import {
   Td,
   Tr,
 } from "@/components/ui";
+import { AuditTable } from "@/components/audit-table";
 import { api } from "@/lib/api";
 import { AlertaTrafico } from "@/lib/types";
 
@@ -242,6 +243,11 @@ export default function SeguridadPage() {
           </Card>
         </div>
       )}
+      <AuditTable
+        endpoint="/api/security/auditoria"
+        title="Registro de auditoría"
+        subtitle="Cada cambio y cada escucha de grabación: quién, cuándo, desde dónde y con qué resultado. Las contraseñas y claves no se guardan."
+      />
     </div>
   );
 }

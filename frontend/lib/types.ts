@@ -500,3 +500,18 @@ export interface AlertaTrafico {
   /** Solo en la vista de la plataforma. */
   empresa?: string;
 }
+
+/** Fila del registro de auditoría (backend core/auditoria.py). */
+export interface RegistroAuditoria {
+  id: number;
+  cuando: string;
+  actor: string | null;
+  accion: string;
+  recurso: string | null;
+  detalle: Record<string, unknown> | null;
+  resultado: "ok" | "denegado" | "rechazado" | "error" | string;
+  ip: string | null;
+  request_id: string | null;
+  /** Solo en la vista de la plataforma. */
+  tenant_id?: number | null;
+}

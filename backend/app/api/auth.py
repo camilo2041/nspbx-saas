@@ -121,6 +121,9 @@ async def login(payload: LoginRequest, request: Request, session: AsyncSession =
     # hash de descarte. Sin esto, un usuario inexistente responde al
     # instante y uno real tarda lo que tarda el PBKDF2: esa diferencia de
     # tiempo permite averiguar qué usuarios existen.
+    # Para la auditoría (core/auditoria.py): a quién corresponde el intento,
+    # salga bien o mal. Sin sesión todavía, el middleware no lo sabría.
+    request.state.auditoria_usuario = usuario
     hash_referencia = usuario.password_hash if usuario else _HASH_DESCARTE
     correcta = await asyncio.to_thread(verificar_password, payload.password, hash_referencia)
 

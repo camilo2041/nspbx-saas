@@ -170,7 +170,9 @@ def test_los_modelos_de_negocio_exigen_tenant():
     """`tenant_id` NOT NULL en toda tabla de negocio (menos `users`, donde
     NULL es el usuario de la plataforma)."""
     for modelo in _modelos_con_tenant():
-        if modelo.__tablename__ == "users":
+        # NULL es la plataforma (usuarios) o algo que no es de ninguna empresa
+        # (auditoría de la plataforma, logins de usuarios inexistentes).
+        if modelo.__tablename__ in ("users", "audit_log"):
             continue
         col = inspect(modelo).columns["tenant_id"]
         assert not col.nullable, f"{modelo.__tablename__}.tenant_id admite NULL"

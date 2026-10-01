@@ -2,13 +2,17 @@ import logging
 import os
 import secrets
 
+from app.core.auditoria import MiddlewareAuditoria, configurar_logging
+
 # Sin esto, los logger.info() de todo el proyecto se perdían en silencio:
 # uvicorn configura SUS PROPIOS loggers ("uvicorn", "uvicorn.error") pero
 # nunca toca el logger raíz, así que sin ningún handler propio Python solo
 # saca por stderr los WARNING+ (el "handler de último recurso"). Costó
 # darse cuenta al verificar el contenedor "voicebot" recién separado: no
 # aparecía ni el log de "arrancó" aunque todo funcionaba bien.
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# El formato lleva el request_id (y es JSON con LOG_FORMATO=json): ver
+# core/auditoria.py.
+configurar_logging()
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -334,7 +338,7 @@ _COLUMN_PATCHES += _parches_multiempresa()
 #
 # `users` también entra: guarda correos y hashes de contraseña, así que
 # una consulta sin filtrar ahí es peor que una de negocio.
-_TABLAS_CON_RLS = _TABLAS_CON_TENANT + ["users"]
+_TABLAS_CON_RLS = _TABLAS_CON_TENANT + ["users", "audit_log"]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
 # en cada transacción (ver core/database.py).
@@ -411,6 +415,37 @@ def _parches_rls() -> list[str]:
 
 
 _COLUMN_PATCHES += _parches_rls()
+
+
+def _parches_auditoria() -> list[str]:
+    """`audit_log` es de solo agregar.
+
+    Va DESPUÉS de los GRANT de `_parches_rls`, que en cada arranque vuelven
+    a dar UPDATE/DELETE sobre todas las tablas: el REVOKE tiene que ser lo
+    último. El trigger rechaza UPDATE incluso del dueño, para que ni un
+    error en un worker pueda reescribir la historia; borrar (retención) solo
+    lo puede el dueño."""
+    stmts = [
+        """
+        CREATE OR REPLACE FUNCTION audit_log_inmutable() RETURNS trigger AS $$
+        BEGIN
+          RAISE EXCEPTION 'audit_log es de solo agregar';
+        END $$ LANGUAGE plpgsql
+        """,
+        "DROP TRIGGER IF EXISTS audit_log_sin_update ON audit_log",
+        "CREATE TRIGGER audit_log_sin_update BEFORE UPDATE ON audit_log "
+        "FOR EACH ROW EXECUTE FUNCTION audit_log_inmutable()",
+    ]
+    if settings.database_url_app:
+        from urllib.parse import unquote, urlsplit
+
+        rol = unquote(urlsplit(settings.database_url_app).username or "")
+        if rol:
+            stmts.append(f"REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM {rol}")
+    return stmts
+
+
+_COLUMN_PATCHES += _parches_auditoria()
 
 
 async def _asegurar_admin(session) -> None:
@@ -596,6 +631,9 @@ app = FastAPI(
 # devolviendo el origen que pida cada petición con credenciales permitidas,
 # que equivale a autorizar a cualquier sitio y es justo lo que hay que evitar
 # el día que alguien agregue una cookie.
+# Auditoría y request_id. Se agrega antes que CORS para quedar por dentro:
+# las respuestas a preflight de CORS no son acciones de nadie.
+app.add_middleware(MiddlewareAuditoria)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

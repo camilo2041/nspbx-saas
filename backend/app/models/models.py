@@ -6,6 +6,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -894,3 +895,36 @@ class SecurityAlert(Base):
     kind: Mapped[str] = mapped_column(String(30))
     detail: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class AuditLog(Base):
+    """Quién hizo qué, cuándo, desde dónde y con qué resultado (ver
+    core/auditoria.py). Solo se agrega: la aplicación no puede modificar ni
+    borrar filas.
+
+    `tenant_id` admite NULL, como `users`: las acciones de la plataforma y
+    los intentos de login de usuarios inexistentes no son de ninguna
+    empresa. Con RLS, una empresa ve solo las suyas."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    tenant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tenants.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # "usuario (rol)" al momento de la acción: si el usuario se borra o
+    # cambia de rol, el registro sigue diciendo quién fue.
+    actor: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # "PUT /api/trunks/{trunk_id}"
+    action: Mapped[str] = mapped_column(String(120), index=True)
+    # "trunk_id=7"
+    resource: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Campos enviados, con los secretos ocultos.
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # ok | denegado | rechazado | error
+    result: Mapped[str] = mapped_column(String(12))
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

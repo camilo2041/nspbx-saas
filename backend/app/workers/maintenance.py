@@ -26,7 +26,7 @@ from sqlalchemy.engine import make_url
 
 from app.core.config import settings
 from app.core.database import async_session
-from app.models import RefreshToken, SystemSettings
+from app.models import AuditLog, RefreshToken, SystemSettings
 from app.services import alertas, webcall
 
 logger = logging.getLogger(__name__)
@@ -125,9 +125,23 @@ class MaintenanceWorker:
             tope_backup_gb, tope_gb = _topes_de_disco(filas)
 
         await self._purgar_refresh_tokens()
+        await self._purgar_auditoria()
         if necesita_backup:
             await self._respaldar_postgres(retencion_backup, tope_backup_gb)
         await self._limpiar_grabaciones(retencion_grabaciones, tope_gb)
+
+    async def _purgar_auditoria(self) -> None:
+        """Retención del registro de auditoría (AUDITORIA_RETENCION_DIAS).
+        El rol de la aplicación no puede borrar en audit_log; este worker
+        usa el dueño."""
+        dias = max(30, settings.auditoria_retencion_dias)
+        async with async_session() as session:
+            borradas = await session.execute(
+                delete(AuditLog).where(AuditLog.created_at < datetime.utcnow() - timedelta(days=dias))
+            )
+            await session.commit()
+        if borradas.rowcount:
+            logger.info("Auditoría: %d registros de más de %d días borrados", borradas.rowcount, dias)
 
     async def _purgar_refresh_tokens(self) -> None:
         """Borra refresh tokens vencidos o revocados hace más de una semana.

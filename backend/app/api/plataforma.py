@@ -8,14 +8,15 @@ inmediato para toda llamada nueva.
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import usuario_actual
 from app.core.database import get_admin_session
-from app.models import PlatformState, SecurityAlert, Tenant, User
+from app.api.security import _auditoria_salida, _filtrar_auditoria
+from app.models import AuditLog, PlatformState, SecurityAlert, Tenant, User
 from app.services import esl
 
 logger = logging.getLogger(__name__)
@@ -80,3 +81,24 @@ async def alertas_de_todas(session: AsyncSession = Depends(get_admin_session)):
         {"id": a.id, "empresa": nombre, "tenant_id": a.tenant_id, "tipo": a.kind, "detalle": a.detail, "cuando": a.created_at}
         for a, nombre in filas
     ]
+
+
+@router.get("/auditoria")
+async def auditoria_de_todas(
+    accion: str | None = None,
+    actor: str | None = None,
+    resultado: str | None = None,
+    tenant_id: int | None = None,
+    limite: int = Query(default=100, ge=1, le=500),
+    desplazamiento: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_admin_session),
+):
+    """Registro de auditoría de toda la plataforma, incluidas las acciones
+    sin empresa (las de la plataforma y los logins de usuarios inexistentes)."""
+    consulta = _filtrar_auditoria(select(AuditLog), accion, actor, resultado)
+    if tenant_id is not None:
+        consulta = consulta.where(AuditLog.tenant_id == tenant_id)
+    filas = (
+        await session.execute(consulta.order_by(AuditLog.id.desc()).limit(limite).offset(desplazamiento))
+    ).scalars().all()
+    return [{**_auditoria_salida(f), "tenant_id": f.tenant_id} for f in filas]

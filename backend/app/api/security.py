@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import validacion
 from app.core.database import get_session
-from app.models import Extension, SecurityAlert
+from app.models import AuditLog, Extension, SecurityAlert
 from app.services import fail2ban
 
 router = APIRouter(prefix="/api/security", tags=["security"])
@@ -64,3 +64,40 @@ async def alertas_de_la_empresa(session: AsyncSession = Depends(get_session)):
         await session.execute(select(SecurityAlert).order_by(SecurityAlert.created_at.desc()).limit(50))
     ).scalars().all()
     return [{"id": a.id, "tipo": a.kind, "detalle": a.detail, "cuando": a.created_at} for a in filas]
+
+
+def _auditoria_salida(fila) -> dict:
+    return {
+        "id": fila.id, "cuando": fila.created_at, "actor": fila.actor, "accion": fila.action,
+        "recurso": fila.resource, "detalle": fila.detail, "resultado": fila.result,
+        "ip": fila.ip, "request_id": fila.request_id,
+    }
+
+
+def _filtrar_auditoria(consulta, accion: str | None, actor: str | None, resultado: str | None):
+    from app.models import AuditLog
+
+    if accion:
+        consulta = consulta.where(AuditLog.action.ilike(f"%{accion[:60]}%"))
+    if actor:
+        consulta = consulta.where(AuditLog.actor.ilike(f"%{actor[:60]}%"))
+    if resultado:
+        consulta = consulta.where(AuditLog.result == resultado[:12])
+    return consulta
+
+
+@router.get("/auditoria")
+async def auditoria_de_la_empresa(
+    accion: str | None = None,
+    actor: str | None = None,
+    resultado: str | None = None,
+    limite: int = Query(default=100, ge=1, le=500),
+    desplazamiento: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+):
+    """Registro de auditoría de la empresa (ver core/auditoria.py)."""
+    consulta = _filtrar_auditoria(select(AuditLog), accion, actor, resultado)
+    filas = (
+        await session.execute(consulta.order_by(AuditLog.id.desc()).limit(limite).offset(desplazamiento))
+    ).scalars().all()
+    return [_auditoria_salida(f) for f in filas]
