@@ -26,8 +26,12 @@ de abajo y anotar el tiempo total: **ese es el RTO real**.
 ## Qué hace falta tener fuera del servidor
 
 - El último paquete off-site (`nspbx-*.tar.gz.enc`) y su `.sha256`.
-- **La clave de cifrado** (`BACKUP_PASSPHRASE_FILE`). Sin ella no hay
-  restauración posible.
+- **La clave de cifrado de los respaldos** (`BACKUP_PASSPHRASE_FILE`). Sin
+  ella no hay restauración posible.
+- **`DATA_ENCRYPTION_KEY`** (está en el `.env`). Sin ella la base se
+  restaura y funciona, pero las claves de proveedores de IA y las
+  contraseñas de troncales y extensiones quedan ilegibles: hay que volver a
+  cargarlas todas y reconfigurar los teléfonos.
 - El `.env` de producción (secretos) o, si se perdió, generar uno nuevo
   (paso 3) y aceptar rotar todo.
 - Acceso al DNS y al proveedor SIP (la IP pública cambia).

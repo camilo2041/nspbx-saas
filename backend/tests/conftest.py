@@ -44,6 +44,7 @@ os.environ.update(
         "DATABASE_URL": _DUENO,
         "DATABASE_URL_APP": _APP,
         "AUTH_SECRET": "x" * 48,
+        "DATA_ENCRYPTION_KEY": "Y2xhdmUtZGUtcHJ1ZWJhLWRlLTMyLWJ5dGVzLW9rISE=",  # gitleaks:allow (clave de prueba)
         "FS_XML_SECRET": "secreto-de-prueba-fs",
         "ENTORNO": "desarrollo",
         # Puerto cerrado: si un endpoint intenta hablar con FreeSWITCH,

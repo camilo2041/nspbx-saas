@@ -14,6 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.cifrado import TextoCifrado
 from app.core.database import Base
 
 
@@ -112,7 +113,7 @@ class Trunk(Base):
     gateway_host: Mapped[str] = mapped_column(String(255))
     gateway_port: Mapped[int] = mapped_column(Integer, default=5060)
     username: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     from_domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
     register_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     caller_id_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
@@ -140,7 +141,7 @@ class Extension(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = _tenant_fk()
     number: Mapped[str] = mapped_column(String(20), index=True)
-    password: Mapped[str] = mapped_column(String(255))
+    password: Mapped[str] = mapped_column(TextoCifrado())
     caller_id_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     voicemail: Mapped[bool] = mapped_column(Boolean, default=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -254,13 +255,13 @@ class SystemSettings(Base):
     fs_domain: Mapped[str] = mapped_column(String(255), default="nspbx.local")
     fs_esl_host: Mapped[str] = mapped_column(String(255), default="localhost")
     fs_esl_port: Mapped[int] = mapped_column(Integer, default=8021)
-    fs_esl_password: Mapped[str] = mapped_column(String(255), default="ClueCon")
+    fs_esl_password: Mapped[str] = mapped_column(TextoCifrado(), default="ClueCon")
     fs_http_base: Mapped[str] = mapped_column(String(255), default="http://localhost:8080")
     sip_ws_url: Mapped[str] = mapped_column(String(255), default="wss://localhost:7443")
     sip_server_ip: Mapped[str] = mapped_column(String(255), default="192.168.100.6")
     sip_server_port: Mapped[int] = mapped_column(Integer, default=5060)
-    elevenlabs_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    agent_webhook_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    elevenlabs_api_key: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
+    agent_webhook_secret: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     # El "cerebro" del voizbot no está atado a un proveedor fijo: cualquiera
     # compatible con la API de chat completions de OpenAI (DeepSeek, OpenAI,
     # Groq, Together AI, un servidor propio) sirve con solo cambiar estos
@@ -269,13 +270,13 @@ class SystemSettings(Base):
     ai_llm_provider_name: Mapped[str] = mapped_column(String(60), default="DeepSeek")
     ai_llm_base_url: Mapped[str] = mapped_column(String(255), default="https://api.deepseek.com/v1")
     ai_llm_model: Mapped[str] = mapped_column(String(100), default="deepseek-chat")
-    ai_llm_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ai_llm_api_key: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     record_all_calls: Mapped[bool] = mapped_column(Boolean, default=False)
     # Voz del voizbot con IA. edge-tts es gratis (voces nativas de Colombia);
     # ElevenLabs suena más natural pero cuesta ~15x más por llamada — el TTS
     # es el ~95% del costo de una conversación con IA (medido: 936
     # caracteres por llamada típica).
-    deepgram_api_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    deepgram_api_key: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     # Voz y transcripción se eligen POR SEPARADO a propósito: la
     # combinación más barata es voz gratis (edge) con transcripción de
     # Deepgram, y atarlas a un solo campo la haría imposible.
@@ -322,7 +323,7 @@ class SystemSettings(Base):
     # (NSPBX sigue usando su propio FreeSWITCH).
     ari_base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ari_user: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    ari_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ari_password: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     ari_app: Mapped[str] = mapped_column(String(80), default="nspbx")
     backup_retention_days: Mapped[int] = mapped_column(Integer, default=14)
     last_backup_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -376,7 +377,7 @@ class SystemSettings(Base):
     )
     webcall_max_concurrent: Mapped[int] = mapped_column(Integer, default=5)
     webcall_turnstile_site_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    webcall_turnstile_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    webcall_turnstile_secret: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     # JSON semanal {"mon": ["08:00","18:00"], ...}. Día ausente = cerrado;
     # NULL/vacío = 24/7. Se evalúa en hora local del negocio (core/clock.py).
     webcall_schedule: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -797,7 +798,7 @@ class User(Base):
     # Verificación en dos pasos (ver core/mfa.py). El secreto se guarda al
     # empezar la activación y `mfa_enabled` pasa a true al confirmar con un
     # código: hasta entonces no se exige.
-    mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mfa_secret: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # Último paso TOTP aceptado: un código ya usado no vuelve a servir.
     mfa_last_step: Mapped[int | None] = mapped_column(Integer, nullable=True)

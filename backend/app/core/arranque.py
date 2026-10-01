@@ -60,6 +60,20 @@ def problemas_de_configuracion(cfg: Settings | None = None, auth_secret: str | N
             f"AUTH_SECRET tiene {len(auth_secret)} caracteres; el mínimo es "
             f"{LARGO_MINIMO_AUTH_SECRET}. Generala con: openssl rand -base64 48"
         )
+    clave_datos = os.getenv("DATA_ENCRYPTION_KEY", "").strip()
+    if not clave_datos:
+        problemas.append(
+            "DATA_ENCRYPTION_KEY no está definida: las claves de proveedores y las "
+            "contraseñas de troncales quedarían en claro en la base. scripts/setup.sh la "
+            "agrega al .env; guardala también junto a la clave de los respaldos."
+        )
+    else:
+        from app.core.cifrado import _clave_de
+
+        try:
+            _clave_de(clave_datos)
+        except RuntimeError as e:
+            problemas.append(str(e))
     if not cfg.fs_xml_secret:
         problemas.append(
             "FS_XML_SECRET no está definida: FreeSWITCH no podría pedir el directorio "

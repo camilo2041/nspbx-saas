@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import cifrado
 from app.core.database import get_session, tenant_de_sesion, traer_propio
 from app.models import Tenant, Trunk
 from app.schemas import TrunkCreate, TrunkOut, TrunkUpdate
@@ -64,7 +65,11 @@ async def update_trunk(
     trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    cambios = payload.model_dump(exclude_unset=True)
+    # El panel reenvía la contraseña enmascarada que recibió: no se cambió.
+    if cifrado.es_mascara(cambios.get("password")):
+        cambios.pop("password")
+    for field, value in cambios.items():
         setattr(trunk, field, value)
     await session.commit()
     await session.refresh(trunk)

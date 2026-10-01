@@ -25,6 +25,10 @@ AUTOLOAD="freeswitch/conf/autoload_configs"
 # o una '/' sueltos rompen alguno de los tres usos.
 gen() { openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c "${1:-32}"; }
 
+# 32 bytes al azar en base64 URL-safe: el formato que espera
+# DATA_ENCRYPTION_KEY (ver backend/app/core/cifrado.py).
+nueva_clave_datos() { openssl rand 32 | base64 | tr '+/' '-_' | tr -d '\n'; }
+
 # Los tres archivos de FreeSWITCH que llevan secretos, generados desde
 # sus plantillas .example con los MISMOS valores del .env.
 generar_xml_faltantes() {
@@ -80,6 +84,13 @@ if [ -f .env ]; then
   # IP pública de nadie.
   generar_xml_faltantes "$(grep '^FS_ESL_PASSWORD=' .env | cut -d= -f2-)" "$(grep '^FS_XML_SECRET=' .env | cut -d= -f2-)"
   generar_vars_xml
+  # Instalaciones de antes del cifrado de secretos: se agrega la clave. En
+  # producción el backend no arranca sin ella (ver app/core/arranque.py).
+  if ! grep -qE '^DATA_ENCRYPTION_KEY=.+' .env; then
+    sed -i '/^DATA_ENCRYPTION_KEY=$/d' .env
+    printf '\n# Cifra en la base las claves de proveedores y las contraseñas de troncales.\n# GUARDALA FUERA DEL SERVIDOR junto con la clave de los respaldos.\nDATA_ENCRYPTION_KEY=%s\n' "$(nueva_clave_datos)" >> .env
+    echo "  DATA_ENCRYPTION_KEY agregada al .env. Guardala fuera del servidor."
+  fi
   mkdir -p backups freeswitch/recordings freeswitch/certs
   # Pero sí se revisa que los XML coincidan con él. La versión anterior
   # salía acá directo, y eso permitía el peor de los casos: alguien
@@ -122,6 +133,7 @@ AUTH_SECRET="$(gen 43)"
 POSTGRES_PASSWORD="$(gen 24)"
 POSTGRES_APP_PASSWORD="$(gen 32)"
 TURN_SECRET="$(gen 43)"
+DATA_ENCRYPTION_KEY="$(nueva_clave_datos)"
 
 # El host va SOLO como nombre, sin esquema ni barra ni ruta: se inserta
 # literal en la regla Host(`...`) de Traefik. Escrito como una URL
@@ -162,6 +174,10 @@ POSTGRES_APP_PASSWORD=${POSTGRES_APP_PASSWORD}
 FS_ESL_PASSWORD=${FS_ESL_PASSWORD}
 FS_XML_SECRET=${FS_XML_SECRET}
 AUTH_SECRET=${AUTH_SECRET}
+
+# Cifra en la base las claves de proveedores y las contraseñas de troncales.
+# GUARDALA FUERA DEL SERVIDOR junto con la clave de los respaldos.
+DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
 
 PBX_HOST=${PBX_HOST}
 ACME_RESOLVER=${ACME_RESOLVER}

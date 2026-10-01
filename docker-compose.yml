@@ -192,6 +192,12 @@ services:
       # tokens de admin a cualquiera que lo lea. En producción el backend
       # no arranca si falta o es corta (ver app/core/arranque.py).
       AUTH_SECRET: ${AUTH_SECRET:-}
+      # Cifra en la base las claves de proveedores y las contraseñas de
+      # troncales (ver app/core/cifrado.py). Obligatoria en producción.
+      # Guardala junto a la clave de los respaldos: sin ella, una base
+      # restaurada tiene esos secretos ilegibles.
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
+      DATA_ENCRYPTION_KEY_ANTERIOR: ${DATA_ENCRYPTION_KEY_ANTERIOR:-}
       # produccion | desarrollo. En producción el arranque falla si falta
       # un secreto que sostiene el aislamiento; en desarrollo solo avisa.
       ENTORNO: ${ENTORNO:-produccion}
@@ -324,6 +330,9 @@ services:
       # las políticas. Sin esta variable el backend arranca igual, avisa
       # por log y NO aísla nada — ver app/core/database.py.
       DATABASE_URL_APP: postgresql+asyncpg://nspbx_app:${POSTGRES_APP_PASSWORD:?Definí POSTGRES_APP_PASSWORD en .env porque sin él el aislamiento por empresa queda apagado}@postgres:5432/${POSTGRES_DB:-nspbx}
+      # Lee las claves de los proveedores de IA, que se guardan cifradas.
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
+      DATA_ENCRYPTION_KEY_ANTERIOR: ${DATA_ENCRYPTION_KEY_ANTERIOR:-}
       FS_SOUNDS_DIR: /freeswitch-sounds
     volumes:
       # Solo el de sonidos: acá se escribe el audio de "tecleo" y las

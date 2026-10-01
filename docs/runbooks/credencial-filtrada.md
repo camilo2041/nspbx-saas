@@ -60,6 +60,20 @@ docker compose up -d backend voicebot
 Si se filtró `FS_XML_SECRET`, tratar además **todas** las contraseñas SIP
 como filtradas.
 
+### `DATA_ENCRYPTION_KEY` (cifrado de secretos en la base)
+
+Sola no sirve: hace falta además un volcado de la base. Si se filtraron las
+dos, tratar como filtradas todas las claves de proveedores y contraseñas de
+troncales y extensiones (rotarlas). Para rotar la clave:
+```bash
+# en .env: la actual pasa a DATA_ENCRYPTION_KEY_ANTERIOR y se genera una nueva
+python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+docker compose up -d backend voicebot   # el arranque vuelve a cifrar todo con la nueva
+docker compose logs backend | grep "Cifrado de secretos"
+```
+Cuando el log confirma el recifrado, quitar `DATA_ENCRYPTION_KEY_ANTERIOR`
+y reiniciar. Guardar la nueva fuera del servidor.
+
 ### Clave de los respaldos off-site (`BACKUP_PASSPHRASE_FILE`)
 
 Los paquetes ya subidos siguen cifrados con la vieja: rotar la clave para

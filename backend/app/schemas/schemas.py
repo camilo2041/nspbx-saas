@@ -2,9 +2,10 @@ import re
 from datetime import datetime
 from typing import Annotated, Optional
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 from app.core import urls, validacion as val
+from app.core.cifrado import enmascarar
 from app.core.clock import a_hora_local
 
 
@@ -126,6 +127,13 @@ class TrunkOut(BaseModel):
     codec_prefs: Optional[str] = None
     enabled: bool = True
     created_at: datetime
+
+    # La contraseña del proveedor no sale completa (ver core/cifrado.py): con
+    # ella se hacen llamadas facturadas a la empresa. Si el panel reenvía la
+    # máscara al guardar, no se cambia.
+    @field_serializer("password")
+    def _ocultar_password(self, v: Optional[str]) -> Optional[str]:
+        return enmascarar(v)
 
 
 class ExtensionBase(BaseModel):

@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
 from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, plataforma as plataforma_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
-from app.core import permissions
+from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
@@ -566,6 +566,9 @@ async def migrar() -> None:
         await conn.run_sync(migraciones.actualizar)
         for stmt in _PARCHES_CONVERGENCIA:
             await conn.execute(text(stmt))
+        # Secretos todavía en claro (o con la clave anterior): se cifran con
+        # la actual. Ver core/cifrado.py.
+        await conn.run_sync(cifrado.cifrar_pendientes)
     # Después de crear el rol y las políticas, comprobar que el rol con
     # el que se va a atender NO puede saltárselas. Va acá y no antes
     # porque el rol se crea recién en la migración de arriba.
