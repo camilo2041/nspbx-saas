@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, plataforma as plataforma_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -50,6 +50,13 @@ _COLUMN_PATCHES = [
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS record_all_calls BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS allow_international BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS international_countries VARCHAR(200) NOT NULL DEFAULT ''",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS outbound_paused BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS outbound_blocked BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS max_outbound_minutes_day INTEGER",
+    "ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS via_trunk BOOLEAN",
+    # El cupo diario suma los minutos de hoy por empresa en cada llamada
+    # saliente (el dialplan se pide en cada llamada).
+    "CREATE INDEX IF NOT EXISTS ix_call_logs_tenant_started ON call_logs (tenant_id, started_at)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS sesiones_desde TIMESTAMP",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ai_voice_provider VARCHAR(20) NOT NULL DEFAULT 'elevenlabs'",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ai_voice_id VARCHAR(100) NOT NULL DEFAULT 'Xb7hH8MSUJpSbSDYk0k2'",
@@ -676,6 +683,12 @@ app.include_router(
 # Empresas: SOLO el rol de plataforma (usa la sesión del dueño).
 app.include_router(
     tenants_api.router,
+    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
+)
+# Controles de emergencia de toda la plataforma (interruptor global de
+# salientes). Mismo permiso y misma sesión del dueño.
+app.include_router(
+    plataforma_api.router,
     dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
 )
 app.include_router(appointments_api.router)  # permisos por endpoint: el agente de IA entra acá

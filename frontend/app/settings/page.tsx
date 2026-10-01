@@ -19,7 +19,7 @@ import {
 } from "@/components/ui";
 import { WebcallEmbed } from "@/components/webcall-embed";
 import { api } from "@/lib/api";
-import { DetectedIp, Diagnostics, MaintenanceStatus, Queue, SystemSettings, TtsVoice } from "@/lib/types";
+import { DetectedIp, Diagnostics, EstadoSalientes, MaintenanceStatus, Queue, SystemSettings, TtsVoice } from "@/lib/types";
 
 function fecha(iso: string | null) {
   if (!iso) return "Nunca";
@@ -66,6 +66,7 @@ const empty: SystemSettings = {
   record_all_calls: false,
   allow_international: false,
   international_countries: "",
+  outbound_paused: false,
   ai_stt_provider: "elevenlabs",
   ai_voice_provider: "elevenlabs",
   ai_voice_id: "",
@@ -124,6 +125,7 @@ export default function SettingsPage() {
   const [errorDiag, setErrorDiag] = useState("");
 
   const [queues, setQueues] = useState<Queue[]>([]);
+  const [salientes, setSalientes] = useState<EstadoSalientes | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,6 +136,9 @@ export default function SettingsPage() {
       ]);
       setForm(st);
       setQueues(qs);
+      // Estado en vivo de las salientes (interruptores y cupo del día). Si
+      // falla no bloquea la pantalla: es informativo.
+      api.get<EstadoSalientes>("/api/system/salientes").then(setSalientes).catch(() => setSalientes(null));
       // Respaldos y diagnóstico son de TODA la plataforma: el backend los
       // rechaza (403) cuando la instalación tiene varias empresas.
       if (st.puede_infraestructura !== false) {
@@ -399,6 +404,22 @@ export default function SettingsPage() {
               </div>
               <Toggle checked={form.allow_international} onChange={(v) => set("allow_international", v)} />
             </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div>
+                <div className="text-sm text-fg-soft">Pausar llamadas salientes</div>
+                <div className="mt-0.5 text-[11px] leading-snug text-faint">
+                  Corta en el acto toda llamada nueva hacia afuera (teléfonos, clic para llamar y campañas). Úsalo si sospechas que alguien está llamando sin permiso.
+                </div>
+              </div>
+              <Toggle checked={form.outbound_paused} onChange={(v) => set("outbound_paused", v)} />
+            </div>
+            {salientes && (
+              <Note tone={salientes.bloqueo ? "warn" : "muted"}>
+                {salientes.bloqueo ? <>Salientes cortadas: {salientes.bloqueo}.</> : <>Salientes habilitadas.</>}{" "}
+                Hoy: {salientes.minutos_hoy} min por troncal
+                {salientes.cupo_diario != null ? ` de ${salientes.cupo_diario} del cupo diario` : " (sin cupo diario)"}.
+              </Note>
+            )}
             {form.allow_international && (
               <Input
                 label="Países permitidos"

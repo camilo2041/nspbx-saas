@@ -107,6 +107,11 @@ class CampaignDialer:
                         topes_por_tenant[c.tenant_id] = await licensing.tope_concurrentes(session, c.tenant_id, cap)
                 if topes_por_tenant[c.tenant_id] > 0:
                     campaigns.append(c)
+            # Salientes cortadas (interruptor o cupo diario agotado): sus
+            # campañas esperan sin tomar números, en vez de tomarlos y
+            # devolverlos en cada ciclo. Ver services/salientes.py.
+            politicas = await salientes.politicas(session, {c.tenant_id for c in campaigns})
+            campaigns = [c for c in campaigns if not politicas[c.tenant_id].bloqueo]
             # Lo máximo que pueden marcar TODAS juntas: la suma de lo que cada una tiene
             # permitido, sin pasar del tope de la plataforma. (Con el máximo, una
             # empresa marcando le quitaba margen a otra que aún estaba bajo su tope.)

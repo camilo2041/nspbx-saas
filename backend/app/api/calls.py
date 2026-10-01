@@ -240,6 +240,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         duration=int(variables.get("duration") or 0),
         billsec=billsec,
         hangup_cause=cause,
+        via_trunk=_salio_por_troncal(variables),
         recording_path=_ruta_grabacion_valida(variables.get("nspbx_recording")),
         started_at=_epoch_us_to_dt(variables.get("start_uepoch")),
         answered_at=_epoch_us_to_dt(variables.get("answer_uepoch")),
@@ -251,6 +252,16 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     except Exception:
         await session.rollback()  # carrera con otro POST del mismo uuid
     return {"ok": True}
+
+
+def _salio_por_troncal(variables: dict) -> bool:
+    """¿Es la pata que fue al proveedor? Es la que se factura y la que suma
+    al cupo diario (ver services/salientes.py). Las entrantes del proveedor
+    también usan el perfil "external", por eso se exige dirección saliente."""
+    if variables.get("direction") == "inbound":
+        return False
+    canal = variables.get("channel_name") or ""
+    return canal.startswith("sofia/external/") or bool(variables.get("sip_gateway_name"))
 
 
 async def _tenant_de_cdr(session: AsyncSession, variables: dict) -> int | None:

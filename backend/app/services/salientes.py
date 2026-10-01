@@ -218,8 +218,54 @@ def politica_desde_ajustes(ajustes, bloqueo: str | None = None) -> Politica:
     )
 
 
+MOTIVO_GLOBAL = "Salientes suspendidas en toda la plataforma"
+MOTIVO_PLATAFORMA = "Salientes suspendidas por la plataforma para esta empresa"
+MOTIVO_EMPRESA = "Salientes pausadas por el administrador de la empresa"
+
+
+def inicio_del_dia_utc():
+    """Medianoche de hoy en la zona del negocio, en UTC naive (la escala de
+    `CallLog.started_at`)."""
+    from datetime import datetime, timezone
+
+    from app.core.clock import business_tz
+
+    ahora = datetime.now(business_tz())
+    medianoche = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+    return medianoche.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+async def minutos_salientes_hoy(session, tenant_ids) -> dict[int, float]:
+    """Minutos hablados hoy por troncal, por empresa. Solo cuentan las
+    llamadas que ya terminaron (el CDR llega al colgar); las que están en
+    curso las acotan el tope de duración y el de simultáneas."""
+    from sqlalchemy import func, select
+
+    from app.models import CallLog
+
+    ids = list(tenant_ids)
+    if not ids:
+        return {}
+    filas = (
+        await session.execute(
+            select(CallLog.tenant_id, func.coalesce(func.sum(CallLog.billsec), 0))
+            .where(
+                CallLog.tenant_id.in_(ids),
+                CallLog.via_trunk.is_(True),
+                CallLog.started_at >= inicio_del_dia_utc(),
+            )
+            .group_by(CallLog.tenant_id)
+        )
+    ).all()
+    return {tid: segundos / 60 for tid, segundos in filas}
+
+
 async def politicas(session, tenant_ids) -> dict[int, Politica]:
     """La política vigente de cada empresa pedida.
+
+    En orden, corta las salientes: el interruptor global de la plataforma,
+    el de la plataforma para la empresa, la pausa de la propia empresa y el
+    cupo diario de minutos de su licencia.
 
     Sirve con la sesión del dueño (dialplan, marcador) o con la de la
     aplicación (clic-para-llamar): en ese caso RLS solo deja leer la propia
@@ -227,16 +273,44 @@ async def politicas(session, tenant_ids) -> dict[int, Politica]:
     restrictiva."""
     from sqlalchemy import select
 
-    from app.models import SystemSettings
+    from app.models import License, PlatformState, SystemSettings, Tenant
+    from app.services import licensing
 
     ids = list(tenant_ids)
     if not ids:
         return {}
-    filas = (
-        await session.execute(select(SystemSettings).where(SystemSettings.tenant_id.in_(ids)))
-    ).scalars().all()
-    por_tenant = {f.tenant_id: f for f in filas}
-    return {tid: politica_desde_ajustes(por_tenant.get(tid)) for tid in ids}
+    estado = await session.get(PlatformState, 1)
+    global_cortado = bool(estado and estado.outbound_blocked)
+    empresas = {
+        t.id: t for t in (await session.execute(select(Tenant).where(Tenant.id.in_(ids)))).scalars().all()
+    }
+    ajustes = {
+        f.tenant_id: f
+        for f in (await session.execute(select(SystemSettings).where(SystemSettings.tenant_id.in_(ids)))).scalars().all()
+    }
+    licencias = {
+        lic.tenant_id: lic
+        for lic in (await session.execute(select(License).where(License.tenant_id.in_(ids)))).scalars().all()
+    }
+    usados = await minutos_salientes_hoy(session, ids)
+
+    salida: dict[int, Politica] = {}
+    for tid in ids:
+        bloqueo = None
+        empresa = empresas.get(tid)
+        fila = ajustes.get(tid)
+        lic = licencias.get(tid)
+        cupo = licensing.limite(lic, "max_outbound_minutes_day") if lic else None
+        if global_cortado:
+            bloqueo = MOTIVO_GLOBAL
+        elif empresa is not None and empresa.outbound_blocked:
+            bloqueo = MOTIVO_PLATAFORMA
+        elif fila is not None and fila.outbound_paused:
+            bloqueo = MOTIVO_EMPRESA
+        elif cupo is not None and usados.get(tid, 0) >= cupo:
+            bloqueo = f"Cupo diario de {cupo} minutos salientes agotado; se renueva a medianoche"
+        salida[tid] = politica_desde_ajustes(fila, bloqueo)
+    return salida
 
 
 async def politica_de(session, tenant_id: int) -> Politica:

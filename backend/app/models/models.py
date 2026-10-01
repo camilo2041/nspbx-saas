@@ -9,6 +9,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -72,6 +73,10 @@ class Tenant(Base):
     # panel y en la API por empresa.
     modules: Mapped[str] = mapped_column(String(120), default="voicebot,pbx")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Interruptor de la PLATAFORMA: corta todas las llamadas salientes de la
+    # empresa (fraude en curso, falta de pago) sin desactivarla. Solo lo
+    # cambia el rol plataforma; la empresa no puede deshacerlo.
+    outbound_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     @property
@@ -352,7 +357,10 @@ class SystemSettings(Base):
     allow_international: Mapped[bool] = mapped_column(Boolean, default=False)
     # Códigos de país permitidos con internacional activado, separados por
     # coma ("57,1,34"). Vacío = ninguno.
-    international_countries: Mapped[str] = mapped_column(String(200), default="")
+    international_countries: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    # Interruptor de la EMPRESA: su administrador pausa las salientes (y lo
+    # deshace) sin depender de la plataforma. Ver services/salientes.py.
+    outbound_paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     # Widget de "llamar a un agente" embebible en sitios web públicos (ver
     # app/api/webcall.py y app/services/webcall.py). Un visitante anónimo
@@ -407,6 +415,11 @@ class CallLog(Base):
     duration: Mapped[int] = mapped_column(Integer, default=0)  # total, incluye timbrado
     billsec: Mapped[int] = mapped_column(Integer, default=0)  # solo tiempo hablado
     hangup_cause: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Pata que salió por una troncal hacia el proveedor (lo que se factura).
+    # `direction` no alcanza: FreeSWITCH marca "outbound" también las
+    # llamadas entre extensiones. Es lo que suma el cupo diario de minutos.
+    # NULL en filas anteriores a la columna.
+    via_trunk: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     recording_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # Resumen de lo que pasó, generado al pedirlo y guardado acá para no
     # volver a pagar transcripción cada vez que alguien lo abre. Va en
@@ -568,6 +581,10 @@ class License(Base):
     max_trunks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_concurrent_calls: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_campaigns: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Minutos salientes (por troncal) por día. Al llegar, se cortan las
+    # salientes hasta el día siguiente: un tope que solo avisa no frena un
+    # fraude de madrugada.
+    max_outbound_minutes_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -841,6 +858,22 @@ class DeviceToken(Base):
     # `useVoIPPushToken()` del lado de la app.
     token_type: Mapped[str] = mapped_column(String(20))
     token: Mapped[str] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class PlatformState(Base):
+    """Estado de toda la plataforma (una sola fila, id=1).
+
+    Sin `tenant_id` a propósito: no es de ninguna empresa. Solo lo cambia
+    el rol plataforma (ver app/api/plataforma.py)."""
+
+    __tablename__ = "platform_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Interruptor global: corta TODAS las salientes de TODAS las empresas.
+    outbound_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )

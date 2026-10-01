@@ -124,9 +124,30 @@ async def update_settings(
     # (ver config_generator.build_dialplan_xml). Se sirve en vivo por
     # xml_curl, pero un reloadxml purga el árbol cacheado para que el
     # próximo lookup traiga el nuevo.
-    if any(k.startswith("webcall_") for k in cambios):
+    if any(k.startswith("webcall_") for k in cambios) or "outbound_paused" in cambios:
         try:
             await esl.reloadxml()
         except Exception:
             pass
     return _salida(row, puede_infra)
+
+
+@router.get("/salientes")
+async def estado_salientes(session: AsyncSession = Depends(get_session), usuario: User = Depends(usuario_actual)):
+    """Si la empresa puede llamar afuera ahora, y cuánto lleva del cupo de
+    hoy. Es lo que el administrador mira cuando "no salen las llamadas"."""
+    from app.services import licensing
+
+    tid = usuario.tenant_id
+    if tid is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo para usuarios de una empresa")
+    politica = await salientes.politica_de(session, tid)
+    lic = await licensing.obtener(session, tid)
+    usados = (await salientes.minutos_salientes_hoy(session, [tid])).get(tid, 0)
+    return {
+        "bloqueo": politica.bloqueo,
+        "minutos_hoy": round(usados, 1),
+        "cupo_diario": licensing.limite(lic, "max_outbound_minutes_day"),
+        "permitir_internacional": politica.permitir_internacional,
+        "paises": list(politica.paises),
+    }

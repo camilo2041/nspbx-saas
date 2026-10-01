@@ -64,7 +64,10 @@ const PLANES = [
   { value: "custom", label: "Personalizado" },
 ];
 
-const vacioLic = { plan: "trial", status: "trial", expires_at: "" };
+// `minutos` vacío = el del plan. Solo se envía si se cambió: la API
+// devuelve el límite efectivo, y reenviarlo tal cual lo dejaría fijo aunque
+// después se cambie de plan.
+const vacioLic = { plan: "trial", status: "trial", expires_at: "", minutos: "", minutosInicial: "" };
 
 function urlPanel(subdomain: string | null) {
   if (!subdomain) return null;
@@ -88,6 +91,8 @@ export default function EmpresasPage() {
   const [licTarget, setLicTarget] = useState<Empresa | null>(null);
   const [licForm, setLicForm] = useState(vacioLic);
   const [guardandoLic, setGuardandoLic] = useState(false);
+  const [globalCortado, setGlobalCortado] = useState<boolean | null>(null);
+  const [cambiandoGlobal, setCambiandoGlobal] = useState(false);
 
   const abrirLicencia = (e: Empresa) => {
     const lic = e.licencia;
@@ -96,6 +101,8 @@ export default function EmpresasPage() {
       plan: lic?.plan ?? "trial",
       status: lic?.status ?? "trial",
       expires_at: lic?.expires_at ? lic.expires_at.slice(0, 10) : "",
+      minutos: lic?.max_outbound_minutes_day != null ? String(lic.max_outbound_minutes_day) : "",
+      minutosInicial: lic?.max_outbound_minutes_day != null ? String(lic.max_outbound_minutes_day) : "",
     });
   };
 
@@ -104,11 +111,15 @@ export default function EmpresasPage() {
     setGuardandoLic(true);
     setError("");
     try {
-      await api.put(`/api/tenants/${licTarget.id}/licencia`, {
+      const cuerpo: Record<string, unknown> = {
         plan: licForm.plan,
         status: licForm.status,
         expires_at: licForm.expires_at ? `${licForm.expires_at}T23:59:59` : null,
-      });
+      };
+      if (licForm.minutos.trim() !== licForm.minutosInicial) {
+        cuerpo.max_outbound_minutes_day = licForm.minutos.trim() === "" ? null : Number(licForm.minutos);
+      }
+      await api.put(`/api/tenants/${licTarget.id}/licencia`, cuerpo);
       setLicTarget(null);
       await load();
     } catch (e) {
@@ -121,7 +132,12 @@ export default function EmpresasPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(await api.get<Empresa[]>("/api/tenants"));
+      const [empresas, global] = await Promise.all([
+        api.get<Empresa[]>("/api/tenants"),
+        api.get<{ outbound_blocked: boolean }>("/api/plataforma/salientes"),
+      ]);
+      setItems(empresas);
+      setGlobalCortado(global.outbound_blocked);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
@@ -207,6 +223,34 @@ export default function EmpresasPage() {
 
   const set = <K extends keyof typeof vacio>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  // Controles de emergencia: cortan toda llamada saliente NUEVA al instante
+  // (dialplan, clic para llamar y campañas). Las que están en curso terminan
+  // solas por el tope de duración.
+  const cambiarSalientesEmpresa = async (e: Empresa) => {
+    const cortar = !e.outbound_blocked;
+    if (cortar && !confirm(`¿Cortar todas las llamadas salientes de ${e.name}? La empresa no podrá reactivarlas.`)) return;
+    try {
+      await api.put(`/api/tenants/${e.id}`, { outbound_blocked: cortar });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cambiar las salientes");
+    }
+  };
+
+  const cambiarSalientesGlobal = async () => {
+    const cortar = !globalCortado;
+    if (cortar && !confirm("¿Cortar las llamadas salientes de TODAS las empresas?")) return;
+    setCambiandoGlobal(true);
+    try {
+      const r = await api.put<{ outbound_blocked: boolean }>("/api/plataforma/salientes", { outbound_blocked: cortar });
+      setGlobalCortado(r.outbound_blocked);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cambiar las salientes");
+    } finally {
+      setCambiandoGlobal(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -240,6 +284,31 @@ export default function EmpresasPage() {
           </div>
           <Button size="sm" variant="secondary" className="mt-3" onClick={() => setCreada(null)}>
             Entendido
+          </Button>
+        </div>
+      )}
+
+      {globalCortado !== null && (
+        <div
+          className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${
+            globalCortado ? "border-danger/30 bg-danger-soft" : "border-line bg-surface-2"
+          }`}
+        >
+          <div>
+            <div className={`text-sm font-semibold ${globalCortado ? "text-danger-text" : "text-fg"}`}>
+              {globalCortado ? "Salientes cortadas en toda la plataforma" : "Salientes de la plataforma"}
+            </div>
+            <p className="mt-0.5 text-xs text-fg-soft">
+              Interruptor de emergencia: corta toda llamada saliente nueva de todas las empresas (fraude en curso,
+              problema con el proveedor).
+            </p>
+          </div>
+          <Button
+            variant={globalCortado ? "secondary" : "danger"}
+            loading={cambiandoGlobal}
+            onClick={cambiarSalientesGlobal}
+          >
+            {globalCortado ? "Reactivar salientes" : "Cortar todas las salientes"}
           </Button>
         </div>
       )}
@@ -302,6 +371,15 @@ export default function EmpresasPage() {
                       <Badge color={e.enabled ? "green" : "red"} dot>
                         {e.enabled ? "Activa" : "Inactiva"}
                       </Badge>
+                      {e.outbound_blocked && <Badge color="red">Salientes cortadas</Badge>}
+                      <Button
+                        size="sm"
+                        variant={e.outbound_blocked ? "secondary" : "ghost"}
+                        onClick={() => cambiarSalientesEmpresa(e)}
+                        title="Cortar o reactivar las llamadas salientes de esta empresa"
+                      >
+                        {e.outbound_blocked ? "Reactivar salientes" : "Cortar salientes"}
+                      </Button>
                       <Button size="sm" variant="secondary" onClick={() => abrirEditar(e)}>
                         Editar
                       </Button>
@@ -438,6 +516,13 @@ export default function EmpresasPage() {
             onChange={(v) => setLicForm((f) => ({ ...f, expires_at: v }))}
             hint="Vacío = sin vencimiento."
           />
+          <Input
+            label="Minutos salientes por día"
+            type="number"
+            value={licForm.minutos}
+            onChange={(v) => setLicForm((f) => ({ ...f, minutos: v }))}
+            hint="Al llegar se cortan las salientes hasta medianoche. Vacío = el del plan (Prueba 60, Gratis 120, Pro 5000, Enterprise sin tope)."
+          />
           <div className="rounded-xl border border-line bg-surface-2 p-3 text-xs text-fg-soft">
             <div className="mb-1 font-medium text-fg">Límites del plan</div>
             {licTarget?.licencia && (
@@ -446,6 +531,7 @@ export default function EmpresasPage() {
                 <span>Troncales: <b className="text-fg">{licTarget.licencia.max_trunks ?? "∞"}</b></span>
                 <span>Concurrentes: <b className="text-fg">{licTarget.licencia.max_concurrent_calls ?? "∞"}</b></span>
                 <span>Campañas: <b className="text-fg">{licTarget.licencia.max_campaigns ?? "∞"}</b></span>
+                <span>Min. salientes/día: <b className="text-fg">{licTarget.licencia.max_outbound_minutes_day ?? "∞"}</b></span>
               </div>
             )}
             <p className="mt-2 text-faint">

@@ -291,6 +291,7 @@ class SystemSettingsOut(BaseModel):
     record_all_calls: bool = False
     allow_international: bool = False
     international_countries: str = ""
+    outbound_paused: bool = False
     ai_stt_provider: str = "elevenlabs"
     ai_voice_provider: str = "elevenlabs"
     ai_voice_id: str = "Xb7hH8MSUJpSbSDYk0k2"
@@ -363,6 +364,7 @@ class SystemSettingsUpdate(BaseModel):
 
     record_all_calls: Optional[bool] = None
     allow_international: Optional[bool] = None
+    outbound_paused: Optional[bool] = None
     # Códigos de país separados por coma ("57, 1, 34"); se guardan normalizados.
     international_countries: Optional[str] = Field(
         default=None, max_length=200, pattern=r"^[0-9+,;\s]*$"
@@ -770,6 +772,7 @@ class TenantUpdate(BaseModel):
     business_type: Optional[str] = Field(default=None, pattern="^(general|clinica|cobranza)$")
     modules: Optional[list[str]] = None
     enabled: Optional[bool] = None
+    outbound_blocked: Optional[bool] = None
 
 
 class TenantOut(BaseModel):
@@ -783,6 +786,7 @@ class TenantOut(BaseModel):
     business_type: str = "general"
     modules: list[str] = Field(default_factory=lambda: ["voicebot", "pbx"])
     enabled: bool
+    outbound_blocked: bool = False
     created_at: datetime
     users_count: int = 0
     extensions_count: int = 0
@@ -800,6 +804,7 @@ class LicenseOut(BaseModel):
     max_trunks: Optional[int] = None
     max_concurrent_calls: Optional[int] = None
     max_campaigns: Optional[int] = None
+    max_outbound_minutes_day: Optional[int] = None
 
 
 class LicenseUpdate(BaseModel):
@@ -810,6 +815,7 @@ class LicenseUpdate(BaseModel):
     max_trunks: Optional[int] = Field(default=None, ge=0)
     max_concurrent_calls: Optional[int] = Field(default=None, ge=0)
     max_campaigns: Optional[int] = Field(default=None, ge=0)
+    max_outbound_minutes_day: Optional[int] = Field(default=None, ge=0)
 
 
 class TenantCreatedOut(TenantOut):

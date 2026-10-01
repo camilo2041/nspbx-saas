@@ -237,6 +237,8 @@ export interface SystemSettings {
   record_all_calls: boolean;
   allow_international: boolean;
   international_countries: string;
+  /** Pausa de salientes decidida por la propia empresa. */
+  outbound_paused: boolean;
   ai_stt_provider: "elevenlabs" | "deepgram";
   ai_voice_provider: "edge" | "elevenlabs" | "deepgram";
   ai_voice_id: string;
@@ -402,6 +404,8 @@ export interface Empresa {
   business_type: string;
   modules: string[];
   enabled: boolean;
+  /** Salientes cortadas por la plataforma (la empresa no puede deshacerlo). */
+  outbound_blocked: boolean;
   created_at: string;
   users_count: number;
   extensions_count: number;
@@ -419,6 +423,8 @@ export interface Licencia {
   max_trunks: number | null;
   max_concurrent_calls: number | null;
   max_campaigns: number | null;
+  /** Minutos salientes por día; al llegar se cortan hasta medianoche. null = sin tope. */
+  max_outbound_minutes_day: number | null;
 }
 
 export interface EmpresaCreada extends Empresa {
@@ -474,4 +480,13 @@ export interface MiEntorno {
   // no se cachea ni se guarda: se pide junto con el resto del entorno
   // cada vez que el softphone arranca.
   ice_servers: RTCIceServer[] | null;
+}
+
+/** GET /api/system/salientes: si la empresa puede llamar afuera ahora. */
+export interface EstadoSalientes {
+  bloqueo: string | null;
+  minutos_hoy: number;
+  cupo_diario: number | null;
+  permitir_internacional: boolean;
+  paises: string[];
 }

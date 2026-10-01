@@ -23,6 +23,9 @@ _GLOBALES = [
     ("GET", "/api/system/maintenance", None),
     ("POST", "/api/system/maintenance/backup-now", None),
     ("GET", "/api/system/recursos", None),
+    ("GET", "/api/plataforma/salientes", None),
+    ("PUT", "/api/plataforma/salientes", {"outbound_blocked": True}),
+    ("PUT", "/api/tenants/{alfa}", {"outbound_blocked": False}),
 ]
 
 
