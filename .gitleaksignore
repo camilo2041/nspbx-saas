@@ -20,3 +20,9 @@ d8e224d89c7c367291971d32d9b69bfee57ca99b:mobile/SETUP.md:private-key:27
 # fallo seguro, en el commit que la agregó (la línea actual ya lleva
 # `gitleaks:allow`).
 1cdf3a4d25127bf2f4fd7ed9b07f19eabd1643e4:backend/tests/test_fallo_seguro.py:generic-api-key:161
+
+# Falsos positivos en pruebas, en los commits que los agregaron (las líneas
+# actuales llevan `gitleaks:allow`): el secreto TOTP público del vector de
+# prueba de la RFC 6238 y una contraseña de prueba de la auditoría.
+d52396ba2cc8107379169f30dd6179812c2a9a2f:backend/tests/test_mfa.py:generic-api-key:12
+32ab2b95acbda848d02eb2fc95acd66475a6e0ab:backend/tests/test_auditoria.py:generic-api-key:28

@@ -9,7 +9,7 @@ from app.core.security import hash_password
 from app.models import User
 
 # RFC 6238, apéndice B: secreto ASCII "12345678901234567890" en base32.
-_SECRETO_RFC = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+_SECRETO_RFC = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # gitleaks:allow (vector público de la RFC 6238)
 
 
 @pytest.mark.parametrize("instante,esperado", [(59, "287082"), (1111111109, "081804"), (2000000000, "279037")])

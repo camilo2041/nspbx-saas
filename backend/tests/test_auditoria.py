@@ -25,7 +25,7 @@ async def test_un_cambio_queda_registrado_sin_secretos(cliente, mundo):
     ext = mundo.alfa.ids["extension"]
     resp = await cliente.put(
         f"/api/extensions/{ext}", headers={**mundo.alfa.cabeceras(), "User-Agent": "prueba/1.0"},
-        json={"password": "Otra-Clave-Segura-77", "caller_id_name": "Recepcion alfa"},
+        json={"password": "Otra-Clave-Segura-77", "caller_id_name": "Recepcion alfa"},  # gitleaks:allow (clave de prueba)
     )
     assert resp.status_code == 200, resp.text
     rid = resp.headers["x-request-id"]
