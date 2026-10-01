@@ -76,7 +76,7 @@ async def _usuario_del_token(token: str | None, session: AsyncSession) -> User |
     else:
         fijar_tenant(session, tid)
         usuario = (await session.execute(select(User).where(User.id == user_id))).unique().scalar_one_or_none()
-    if not usuario or not usuario.enabled:
+    if not usuario or not usuario.enabled or usuario.tenant_id != tid:
         return None
     return usuario
 

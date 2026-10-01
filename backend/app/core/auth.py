@@ -144,6 +144,11 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
     # cambio hace efecto ya, sin esperar a que venza su sesión.
     if not usuario or not usuario.enabled:
         raise _NO_AUTENTICADO
+    # La empresa del token tiene que ser la del usuario. RLS ya lo garantiza
+    # (con `tid` de otra empresa la consulta no lo encuentra); se repite acá
+    # para que no dependa solo de la base.
+    if usuario.tenant_id != tid:
+        raise _NO_AUTENTICADO
     # Contraseña cambiada / sesiones cerradas: un JWT anterior a ese instante ya
     # no vale, aunque no haya vencido. Sin `iat` (token de antes de este cambio)
     # se trata como el más viejo posible.

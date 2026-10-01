@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import limitador, validacion
 from app.core.auth import usuario_actual
-from app.core.database import get_session, tenant_de_sesion
+from app.core.database import get_session, tenant_de_sesion, traer_propio
 from app.core import permissions
 from app.core.clock import now_local
 from app.models import Appointment, Debt, User, VoiceBot
@@ -85,7 +85,7 @@ async def create_voicebot(payload: VoiceBotCreate, session: AsyncSession = Depen
 
 @router.get("/{bot_id}", response_model=VoiceBotOut)
 async def get_voicebot(bot_id: int, session: AsyncSession = Depends(get_session)):
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     return bot
@@ -95,7 +95,7 @@ async def get_voicebot(bot_id: int, session: AsyncSession = Depends(get_session)
 async def update_voicebot(
     bot_id: int, payload: VoiceBotUpdate, session: AsyncSession = Depends(get_session)
 ):
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -107,7 +107,7 @@ async def update_voicebot(
 
 @router.delete("/{bot_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_voicebot(bot_id: int, session: AsyncSession = Depends(get_session)):
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     await session.delete(bot)
@@ -118,7 +118,7 @@ async def delete_voicebot(bot_id: int, session: AsyncSession = Depends(get_sessi
 
 @router.get("/{bot_id}/flow")
 async def get_flow(bot_id: int, session: AsyncSession = Depends(get_session)):
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     if not bot.flow_json:
@@ -137,7 +137,7 @@ async def get_flow(bot_id: int, session: AsyncSession = Depends(get_session)):
 
 @router.put("/{bot_id}/flow")
 async def save_flow(bot_id: int, payload: VoiceBotFlowUpdate, session: AsyncSession = Depends(get_session)):
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     bot.flow_json = json.dumps({"nodes": payload.nodes, "edges": payload.edges})
@@ -151,7 +151,7 @@ async def save_flow(bot_id: int, payload: VoiceBotFlowUpdate, session: AsyncSess
 
 @router.post("/{bot_id}/flow/nodes/{node_id}/audio")
 async def upload_node_audio(bot_id: int, node_id: str, file: UploadFile, session: AsyncSession = Depends(get_session)):
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     if not validacion.id_nodo_valido(node_id):
@@ -170,7 +170,7 @@ async def upload_node_audio(bot_id: int, node_id: str, file: UploadFile, session
 async def generate_node_tts(
     bot_id: int, node_id: str, payload: VoiceBotNodeTtsRequest, session: AsyncSession = Depends(get_session)
 ):
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     if not validacion.id_nodo_valido(node_id):
@@ -191,7 +191,7 @@ async def delete_node_audio(bot_id: int, node_id: str, session: AsyncSession = D
     # Sin esta comprobación cualquier empresa podía borrar los audios de un bot
     # AJENO: los archivos están fuera de la base y no los cubre el aislamiento
     # por empresa; `session.get` sí (devuelve None si el bot es de otra).
-    if not await session.get(VoiceBot, bot_id):
+    if not await traer_propio(session, VoiceBot, bot_id):
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     if not validacion.id_nodo_valido(node_id):
         raise HTTPException(status_code=422, detail="Id de nodo no válido")
@@ -203,7 +203,7 @@ async def delete_node_audio(bot_id: int, node_id: str, session: AsyncSession = D
 async def upload_greeting(
     bot_id: int, file: UploadFile, session: AsyncSession = Depends(get_session)
 ):
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     content = await file.read()
@@ -225,7 +225,7 @@ async def generate_greeting_tts(
 ):
     """Genera el audio de saludo con una voz neuronal en español (edge-tts,
     gratis, sin API key) y lo deja como el audio propio del bot."""
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     try:
@@ -243,7 +243,7 @@ async def generate_greeting_tts(
 
 @router.delete("/{bot_id}/greeting", response_model=VoiceBotOut)
 async def delete_greeting(bot_id: int, session: AsyncSession = Depends(get_session)):
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     greetings.remove_greeting(bot_id)
@@ -320,7 +320,7 @@ async def probar_bot(
 ):
     """Simula una conversación con el bot SIN llamar y SIN escribir en la agenda ni en la cobranza
     (ver services/bot_sim.py)."""
-    bot = await session.get(VoiceBot, bot_id)
+    bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
     limitador.limitar_uso(limitador.POR_SIMULADOR, f"sim:{usuario.id}")

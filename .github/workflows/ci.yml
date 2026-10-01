@@ -50,7 +50,16 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
-      - run: python -m pytest -q
+      - name: Pruebas con RLS (como en producción)
+        run: python -m pytest -q
+      # La misma suite con la API usando el rol dueño, que se saltea RLS:
+      # comprueba que la segunda capa (el filtro por empresa en el código,
+      # core/database.py) aísla por sí sola. Si la base quedara mal
+      # configurada, la API igual no mezclaría empresas.
+      - name: Pruebas sin RLS (solo el filtro de la aplicación)
+        env:
+          NSPBX_TEST_SIN_RLS: "1"
+        run: python -m pytest -q
 
   secretos:
     name: Secretos en el repositorio (gitleaks)

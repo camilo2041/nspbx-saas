@@ -251,8 +251,21 @@ async def mundo() -> Mundo:
     return Mundo(alfa=alfa, beta=beta, plataforma_id=plataforma.id)
 
 
+# Modo "solo la aplicación": la sesión de la API usa el rol DUEÑO, que se
+# saltea RLS. Así se prueba que la segunda capa (el filtro por empresa en
+# el código) aísla por sí sola, sin la red de seguridad de la base. Las
+# pruebas que verifican RLS en sí no tienen sentido en este modo y se
+# saltean (ver `requiere_rls`).
+SIN_RLS = os.environ.get("NSPBX_TEST_SIN_RLS") == "1"
+requiere_rls = pytest.mark.skipif(SIN_RLS, reason="prueba RLS en sí; en modo sin RLS no aplica")
+
+
 @pytest.fixture(scope="session")
 async def cliente(mundo) -> httpx.AsyncClient:
+    if SIN_RLS:
+        from app.core import database
+
+        database.app_session.configure(bind=database.engine)
     transporte = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transporte, base_url="http://prueba") as c:
         yield c

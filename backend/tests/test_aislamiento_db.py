@@ -13,6 +13,11 @@ from app.core.database import Base, app_engine, app_session, engine, fijar_tenan
 from app.main import _TABLAS_CON_RLS
 from app.models import Extension, Trunk
 
+from .conftest import requiere_rls
+
+# Estas pruebas verifican RLS en sí: en el modo sin RLS no aplican.
+pytestmark = requiere_rls
+
 
 def _modelos_con_tenant():
     return [

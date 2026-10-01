@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import usuario_out
 from app.core import permissions
 from app.core.auth import requiere, usuario_actual
-from app.core.database import get_session
+from app.core.database import get_session, traer_propio
 from app.core.security import hash_password
 from app.services.sesiones import revocar_sesiones
 from app.models import Extension, User
@@ -32,7 +32,7 @@ async def _validar_extension(session: AsyncSession, rol: str, extension_id: int 
         if rol in permissions.REQUIERE_EXTENSION:
             raise HTTPException(status_code=400, detail="Un asesor necesita una extensión asignada")
         return
-    if not await session.get(Extension, extension_id):
+    if not await traer_propio(session, Extension, extension_id):
         raise HTTPException(status_code=400, detail="La extensión indicada no existe")
 
 
@@ -117,7 +117,7 @@ async def actualizar(
     session: AsyncSession = Depends(get_session),
     quien: User = Depends(usuario_actual),
 ):
-    usuario = await session.get(User, user_id)
+    usuario = await traer_propio(session, User, user_id)
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
@@ -167,7 +167,7 @@ async def eliminar(
     session: AsyncSession = Depends(get_session),
     quien: User = Depends(usuario_actual),
 ):
-    usuario = await session.get(User, user_id)
+    usuario = await traer_propio(session, User, user_id)
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     if usuario.id == quien.id:

@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.database import get_session, tenant_de_sesion
+from app.core.database import get_session, tenant_de_sesion, traer_propio
 from app.models import Appointment, Campaign, CampaignNumber, Debt, Trunk, VoiceBot
 from app.schemas import (
     CampaignCreate,
@@ -200,9 +200,9 @@ async def _validar_referencias(session: AsyncSession, trunk_id: int | None, voic
     """La troncal y el voizbot tienen que ser de ESTA empresa. `session.get` va
     por la sesión atada a la empresa, que no ve las ajenas; sin esta comprobación
     un id adivinado apuntaba a la troncal de otra (la FK no distingue empresas)."""
-    if trunk_id and not await session.get(Trunk, trunk_id):
+    if trunk_id and not await traer_propio(session, Trunk, trunk_id):
         raise HTTPException(status_code=400, detail="Troncal inexistente")
-    if voicebot_id and not await session.get(VoiceBot, voicebot_id):
+    if voicebot_id and not await traer_propio(session, VoiceBot, voicebot_id):
         raise HTTPException(status_code=400, detail="Voizbot inexistente")
 
 
@@ -230,7 +230,7 @@ async def create_campaign(payload: CampaignCreate, session: AsyncSession = Depen
 
 @router.get("/{campaign_id}", response_model=CampaignOut)
 async def get_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     return campaign
@@ -240,7 +240,7 @@ async def get_campaign(campaign_id: int, session: AsyncSession = Depends(get_ses
 async def update_campaign(
     campaign_id: int, payload: CampaignUpdate, session: AsyncSession = Depends(get_session)
 ):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     cambios = payload.model_dump(exclude_unset=True)
@@ -254,7 +254,7 @@ async def update_campaign(
 
 @router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     await session.delete(campaign)
@@ -278,7 +278,7 @@ def _number_out(n: CampaignNumber) -> dict:
 async def add_numbers(
     campaign_id: int, payload: CampaignNumberIn, session: AsyncSession = Depends(get_session)
 ):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     res = await session.execute(
@@ -357,7 +357,7 @@ async def list_numbers(
     apertura del detalle — con el navegador dibujando la lista entera.
     El filtro por estado es lo que hace usable revisar "cuáles fallaron"
     sin tener que recorrer la lista completa a ojo."""
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     query = select(CampaignNumber).where(CampaignNumber.campaign_id == campaign_id)
@@ -378,7 +378,7 @@ async def list_numbers(
 async def update_number(
     campaign_id: int, number_id: int, payload: CampaignNumberUpdate, session: AsyncSession = Depends(get_session)
 ):
-    number = await session.get(CampaignNumber, number_id)
+    number = await traer_propio(session, CampaignNumber, number_id)
     if not number or number.campaign_id != campaign_id:
         raise HTTPException(status_code=404, detail="Número no encontrado")
     number.phone = payload.phone
@@ -391,7 +391,7 @@ async def update_number(
 
 @router.delete("/{campaign_id}/numbers/{number_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_number(campaign_id: int, number_id: int, session: AsyncSession = Depends(get_session)):
-    number = await session.get(CampaignNumber, number_id)
+    number = await traer_propio(session, CampaignNumber, number_id)
     if not number or number.campaign_id != campaign_id:
         raise HTTPException(status_code=404, detail="Número no encontrado")
     await session.delete(number)
@@ -403,7 +403,7 @@ async def clear_numbers(campaign_id: int, session: AsyncSession = Depends(get_se
     """Vacía toda la lista de números ya cargados — para volver a empezar
     sin borrarlos uno por uno. No toca las citas que se hayan
     sincronizado en la Agenda a partir de ellos, esas quedan igual."""
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     if campaign.status == "running":
@@ -415,7 +415,7 @@ async def clear_numbers(campaign_id: int, session: AsyncSession = Depends(get_se
 
 @router.get("/{campaign_id}/stats", response_model=CampaignStats)
 async def campaign_stats(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     res = await session.execute(
@@ -440,7 +440,7 @@ async def campaign_stats(campaign_id: int, session: AsyncSession = Depends(get_s
 
 @router.post("/{campaign_id}/start")
 async def start_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     res = await session.execute(
@@ -462,7 +462,7 @@ async def start_campaign(campaign_id: int, session: AsyncSession = Depends(get_s
 async def retry_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
     """Vuelve a poner en 'pending' los números fallidos o completados, para
     poder relanzar la campaña (ej. tras corregir la troncal o el voizbot)."""
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     result = await session.execute(
@@ -483,7 +483,7 @@ async def retry_campaign(campaign_id: int, session: AsyncSession = Depends(get_s
 
 @router.post("/{campaign_id}/stop")
 async def stop_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     campaign.status = "idle"

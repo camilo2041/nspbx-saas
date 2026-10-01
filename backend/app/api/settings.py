@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import alcance
 from app.core.auth import usuario_actual
-from app.core.database import get_session
+from app.core.database import get_session, traer_propio
 from app.core.runtime_settings import runtime_settings
 from app.models import Queue, SystemSettings, User
 from app.schemas import SystemSettingsOut, SystemSettingsUpdate
@@ -104,7 +104,7 @@ async def update_settings(
     # La cola del widget de llamada web tiene que ser de ESTA empresa: el id
     # se valida con la sesión atada a la empresa (RLS), que no ve las ajenas.
     cola = cambios.get("webcall_queue_id")
-    if cola and not await session.get(Queue, cola):
+    if cola and not await traer_propio(session, Queue, cola):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="La cola indicada no existe")
 
     # Se guarda normalizado ("57,1,34") para que el dialplan y el panel lean

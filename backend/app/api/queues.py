@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import async_session, get_session
+from app.core.database import async_session, get_session, traer_propio
 from app.models import Queue, Tenant
 from app.schemas import QueueCreate, QueueUpdate
 from app.services import esl
@@ -91,7 +91,7 @@ async def create_queue(payload: QueueCreate, session: AsyncSession = Depends(get
 
 @router.get("/{queue_id}")
 async def get_queue(queue_id: int, session: AsyncSession = Depends(get_session)):
-    queue = await session.get(Queue, queue_id)
+    queue = await traer_propio(session, Queue, queue_id)
     if not queue:
         raise HTTPException(status_code=404, detail="Cola no encontrada")
     return _out(queue)
@@ -99,7 +99,7 @@ async def get_queue(queue_id: int, session: AsyncSession = Depends(get_session))
 
 @router.put("/{queue_id}")
 async def update_queue(queue_id: int, payload: QueueUpdate, session: AsyncSession = Depends(get_session)):
-    queue = await session.get(Queue, queue_id)
+    queue = await traer_propio(session, Queue, queue_id)
     if not queue:
         raise HTTPException(status_code=404, detail="Cola no encontrada")
     old_name = queue.name
@@ -124,7 +124,7 @@ async def update_queue(queue_id: int, payload: QueueUpdate, session: AsyncSessio
 
 @router.delete("/{queue_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_queue_endpoint(queue_id: int, session: AsyncSession = Depends(get_session)):
-    queue = await session.get(Queue, queue_id)
+    queue = await traer_propio(session, Queue, queue_id)
     if not queue:
         raise HTTPException(status_code=404, detail="Cola no encontrada")
     name = queue.name
@@ -139,7 +139,7 @@ async def delete_queue_endpoint(queue_id: int, session: AsyncSession = Depends(g
 async def queue_status(queue_id: int, session: AsyncSession = Depends(get_session)):
     """Consulta en vivo a mod_callcenter: agentes y llamadas en espera,
     para un panel tipo Issabel."""
-    queue = await session.get(Queue, queue_id)
+    queue = await traer_propio(session, Queue, queue_id)
     if not queue:
         raise HTTPException(status_code=404, detail="Cola no encontrada")
     qkey = f"{queue.name}@{await _dominio_de(session, queue.tenant_id)}"

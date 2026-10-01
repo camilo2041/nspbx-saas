@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session, tenant_de_sesion
+from app.core.database import get_session, tenant_de_sesion, traer_propio
 from app.models import Tenant, Trunk
 from app.schemas import TrunkCreate, TrunkOut, TrunkUpdate
 from app.services import licensing
@@ -51,7 +51,7 @@ async def create_trunk(payload: TrunkCreate, session: AsyncSession = Depends(get
 
 @router.get("/{trunk_id}", response_model=TrunkOut)
 async def get_trunk(trunk_id: int, session: AsyncSession = Depends(get_session)):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     return trunk
@@ -61,7 +61,7 @@ async def get_trunk(trunk_id: int, session: AsyncSession = Depends(get_session))
 async def update_trunk(
     trunk_id: int, payload: TrunkUpdate, session: AsyncSession = Depends(get_session)
 ):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -78,7 +78,7 @@ async def update_trunk(
 
 @router.delete("/{trunk_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_trunk(trunk_id: int, session: AsyncSession = Depends(get_session)):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     await session.delete(trunk)
@@ -92,7 +92,7 @@ async def delete_trunk(trunk_id: int, session: AsyncSession = Depends(get_sessio
 
 @router.post("/{trunk_id}/rescan")
 async def trunk_rescan(trunk_id: int, session: AsyncSession = Depends(get_session)):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     try:
@@ -104,7 +104,7 @@ async def trunk_rescan(trunk_id: int, session: AsyncSession = Depends(get_sessio
 
 @router.get("/{trunk_id}/status")
 async def trunk_status(trunk_id: int, session: AsyncSession = Depends(get_session)):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     try:

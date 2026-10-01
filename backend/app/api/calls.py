@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import permissions
 from app.core.auth import requiere, usuario_actual, verificar_secreto_fs
 from app.core.config import settings
-from app.core.database import get_admin_session, get_session
+from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
 from app.services import deepgram, llm
@@ -125,7 +125,7 @@ async def _traer(call_id: int, session: AsyncSession, usuario: User) -> CallLog:
     confirmaría que ese identificador existe, y con eso se puede recorrer
     el historial ajeno de a uno.
     """
-    call = await session.get(CallLog, call_id)
+    call = await traer_propio(session, CallLog, call_id)
     if not call:
         raise HTTPException(status_code=404, detail="Llamada no encontrada")
     propia = _solo_suyas(usuario)

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session
+from app.core.database import get_session, traer_propio
 from app.models import Debt, PaymentPromise
 from app.schemas import DebtCreate, DebtOut, DebtUpdate, PaymentPromiseOut
 
@@ -50,7 +50,7 @@ async def create_debt(payload: DebtCreate, session: AsyncSession = Depends(get_s
 
 @router.put("/debts/{debt_id}", response_model=DebtOut)
 async def update_debt(debt_id: int, payload: DebtUpdate, session: AsyncSession = Depends(get_session)):
-    deuda = await session.get(Debt, debt_id)
+    deuda = await traer_propio(session, Debt, debt_id)
     if not deuda:
         raise HTTPException(status_code=404, detail="Deuda no encontrada")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -62,7 +62,7 @@ async def update_debt(debt_id: int, payload: DebtUpdate, session: AsyncSession =
 
 @router.delete("/debts/{debt_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_debt(debt_id: int, session: AsyncSession = Depends(get_session)):
-    deuda = await session.get(Debt, debt_id)
+    deuda = await traer_propio(session, Debt, debt_id)
     if not deuda:
         raise HTTPException(status_code=404, detail="Deuda no encontrada")
     await session.delete(deuda)

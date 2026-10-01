@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import validacion
-from app.core.database import get_session, tenant_de_sesion
+from app.core.database import get_session, tenant_de_sesion, traer_propio
 from app.models import Extension, Tenant, Trunk
 from app.schemas import CallRequest, ExtensionCreate, ExtensionOut, ExtensionUpdate
 from app.services import licensing
@@ -58,7 +58,7 @@ async def create_extension(payload: ExtensionCreate, session: AsyncSession = Dep
 
 @router.get("/{extension_id}", response_model=ExtensionOut)
 async def get_extension(extension_id: int, session: AsyncSession = Depends(get_session)):
-    ext = await session.get(Extension, extension_id)
+    ext = await traer_propio(session, Extension, extension_id)
     if not ext:
         raise HTTPException(status_code=404, detail="Extensión no encontrada")
     return ext
@@ -68,7 +68,7 @@ async def get_extension(extension_id: int, session: AsyncSession = Depends(get_s
 async def update_extension(
     extension_id: int, payload: ExtensionUpdate, session: AsyncSession = Depends(get_session)
 ):
-    ext = await session.get(Extension, extension_id)
+    ext = await traer_propio(session, Extension, extension_id)
     if not ext:
         raise HTTPException(status_code=404, detail="Extensión no encontrada")
     cambios = payload.model_dump(exclude_unset=True)
@@ -89,7 +89,7 @@ async def update_extension(
 
 @router.delete("/{extension_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_extension(extension_id: int, session: AsyncSession = Depends(get_session)):
-    ext = await session.get(Extension, extension_id)
+    ext = await traer_propio(session, Extension, extension_id)
     if not ext:
         raise HTTPException(status_code=404, detail="Extensión no encontrada")
     await session.delete(ext)
@@ -102,7 +102,7 @@ async def call_extension(
 ):
     """Click-to-call: hace sonar la extensión y, al contestar, la bridgea al destino
     (otra extensión interna, o un número externo vía la troncal indicada)."""
-    ext = await session.get(Extension, extension_id)
+    ext = await traer_propio(session, Extension, extension_id)
     if not ext:
         raise HTTPException(status_code=404, detail="Extensión no encontrada")
     if not ext.enabled:
@@ -111,7 +111,7 @@ async def call_extension(
     destination = payload.destination.strip()
 
     if payload.trunk_id is not None:
-        trunk = await session.get(Trunk, payload.trunk_id)
+        trunk = await traer_propio(session, Trunk, payload.trunk_id)
         if not trunk:
             raise HTTPException(status_code=404, detail="Troncal no encontrada")
         if not trunk.enabled:

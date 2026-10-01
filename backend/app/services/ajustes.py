@@ -18,10 +18,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings as env_settings
+from app.core.database import tenant_de_sesion
 from app.models import SystemSettings, Tenant
 
 
 async def ajustes_de(session: AsyncSession, tenant_id: int | None = None) -> SystemSettings | None:
+    # Sin empresa explícita, la de la sesión (segunda capa además de RLS:
+    # sin esto, una sesión que no pasara por RLS tomaba la primera fila de
+    # cualquier empresa).
+    if tenant_id is None:
+        tenant_id = tenant_de_sesion(session)
     consulta = select(SystemSettings)
     if tenant_id is not None:
         consulta = consulta.where(SystemSettings.tenant_id == tenant_id)
