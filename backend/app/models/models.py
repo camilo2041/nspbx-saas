@@ -877,3 +877,20 @@ class PlatformState(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+
+class SecurityAlert(Base):
+    """Algo raro en el tráfico de una empresa (ver services/alertas.py).
+
+    Avisa, no corta: el corte automático lo da el cupo diario de minutos.
+    Una campaña nueva también es un pico, y cortarla por una sospecha
+    pararía una operación legítima."""
+
+    __tablename__ = "security_alerts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    # pico | madrugada | destino_nuevo | cupo
+    kind: Mapped[str] = mapped_column(String(30))
+    detail: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

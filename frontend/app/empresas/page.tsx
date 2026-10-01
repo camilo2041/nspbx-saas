@@ -21,7 +21,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { api } from "@/lib/api";
-import { Empresa, EmpresaCreada } from "@/lib/types";
+import { AlertaTrafico, Empresa, EmpresaCreada } from "@/lib/types";
 
 const vacio = { name: "", slug: "", sip_domain: "", subdomain: "", business_type: "general", modules: ["voicebot", "pbx"] as string[] };
 
@@ -93,6 +93,7 @@ export default function EmpresasPage() {
   const [guardandoLic, setGuardandoLic] = useState(false);
   const [globalCortado, setGlobalCortado] = useState<boolean | null>(null);
   const [cambiandoGlobal, setCambiandoGlobal] = useState(false);
+  const [alertas, setAlertas] = useState<AlertaTrafico[]>([]);
 
   const abrirLicencia = (e: Empresa) => {
     const lic = e.licencia;
@@ -138,6 +139,8 @@ export default function EmpresasPage() {
       ]);
       setItems(empresas);
       setGlobalCortado(global.outbound_blocked);
+      // Informativo: si falla, la lista de empresas igual se muestra.
+      api.get<AlertaTrafico[]>("/api/plataforma/alertas").then(setAlertas).catch(() => setAlertas([]));
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
@@ -311,6 +314,24 @@ export default function EmpresasPage() {
             {globalCortado ? "Reactivar salientes" : "Cortar todas las salientes"}
           </Button>
         </div>
+      )}
+
+      {alertas.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader
+            title="Alertas de tráfico saliente"
+            subtitle="Las más recientes de todas las empresas. Avisan, no cortan: para cortar usa los botones de salientes."
+          />
+          <Table head={["Cuándo", "Empresa", "Detalle"]}>
+            {alertas.slice(0, 20).map((a) => (
+              <Tr key={a.id}>
+                <Td muted>{new Date(a.cuando + "Z").toLocaleString()}</Td>
+                <Td strong>{a.empresa}</Td>
+                <Td>{a.detalle}</Td>
+              </Tr>
+            ))}
+          </Table>
+        </Card>
       )}
 
       <Card>

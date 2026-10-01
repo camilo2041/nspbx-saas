@@ -490,3 +490,13 @@ export interface EstadoSalientes {
   permitir_internacional: boolean;
   paises: string[];
 }
+
+/** Alerta de tráfico saliente anómalo (ver backend services/alertas.py). */
+export interface AlertaTrafico {
+  id: number;
+  tipo: "pico" | "madrugada" | "destino_nuevo" | "cupo" | string;
+  detalle: string;
+  cuando: string;
+  /** Solo en la vista de la plataforma. */
+  empresa?: string;
+}

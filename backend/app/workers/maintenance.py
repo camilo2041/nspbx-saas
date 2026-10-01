@@ -27,7 +27,7 @@ from sqlalchemy.engine import make_url
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import RefreshToken, SystemSettings
-from app.services import webcall
+from app.services import alertas, webcall
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +82,16 @@ class MaintenanceWorker:
                 await self.ejecutar_una_vez()
             except Exception:
                 logger.exception("Error en MaintenanceWorker")
-            for _ in range(6 * 60):  # 6 horas, en pasos de 1 minuto
+            for minuto in range(6 * 60):  # 6 horas, en pasos de 1 minuto
                 if not self._running:
                     return
+                # Tráfico saliente anómalo (fraude en curso), cada 5 minutos.
+                if minuto % 5 == 0:
+                    try:
+                        async with async_session() as session:
+                            await alertas.revisar(session)
+                    except Exception:
+                        logger.exception("Error revisando el tráfico saliente")
                 # Libera cupos de sesiones del widget de llamada web que el
                 # navegador nunca cerró (cerró la pestaña sin colgar,
                 # perdió red) — ver app/services/webcall.py.

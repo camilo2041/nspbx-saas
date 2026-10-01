@@ -134,7 +134,9 @@ async def _cdr(tenant_id: int, segundos: int, via_trunk, cuando: datetime | None
         s.add(
             CallLog(
                 tenant_id=tenant_id, uuid=uuid, direction="outbound", status="answered",
-                billsec=segundos, via_trunk=via_trunk, started_at=cuando or datetime.utcnow(),
+                billsec=segundos, via_trunk=via_trunk,
+                # Dentro de HOY aunque la prueba corra recién pasada la medianoche.
+                started_at=cuando or max(datetime.utcnow(), salientes.inicio_del_dia_utc()),
             )
         )
         await s.commit()

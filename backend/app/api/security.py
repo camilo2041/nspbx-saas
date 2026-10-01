@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import validacion
 from app.core.database import get_session
-from app.models import Extension
+from app.models import Extension, SecurityAlert
 from app.services import fail2ban
 
 router = APIRouter(prefix="/api/security", tags=["security"])
@@ -55,3 +55,12 @@ async def claves_debiles(session: AsyncSession = Depends(get_session)):
         for e in exts
         if (motivo := validacion.problema_clave_sip(e.password, e.number))
     ]
+
+
+@router.get("/alertas")
+async def alertas_de_la_empresa(session: AsyncSession = Depends(get_session)):
+    """Alertas de tráfico saliente de la empresa (ver services/alertas.py)."""
+    filas = (
+        await session.execute(select(SecurityAlert).order_by(SecurityAlert.created_at.desc()).limit(50))
+    ).scalars().all()
+    return [{"id": a.id, "tipo": a.kind, "detalle": a.detail, "cuando": a.created_at} for a in filas]

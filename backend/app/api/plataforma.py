@@ -10,11 +10,12 @@ import logging
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import usuario_actual
 from app.core.database import get_admin_session
-from app.models import PlatformState, User
+from app.models import PlatformState, SecurityAlert, Tenant, User
 from app.services import esl
 
 logger = logging.getLogger(__name__)
@@ -62,3 +63,20 @@ async def cambiar_salientes(
     except Exception:
         pass
     return SalientesGlobal(outbound_blocked=payload.outbound_blocked)
+
+
+@router.get("/alertas")
+async def alertas_de_todas(session: AsyncSession = Depends(get_admin_session)):
+    """Alertas de tráfico saliente de todas las empresas, las más recientes primero."""
+    filas = (
+        await session.execute(
+            select(SecurityAlert, Tenant.name)
+            .join(Tenant, Tenant.id == SecurityAlert.tenant_id)
+            .order_by(SecurityAlert.created_at.desc())
+            .limit(100)
+        )
+    ).all()
+    return [
+        {"id": a.id, "empresa": nombre, "tenant_id": a.tenant_id, "tipo": a.kind, "detalle": a.detail, "cuando": a.created_at}
+        for a, nombre in filas
+    ]

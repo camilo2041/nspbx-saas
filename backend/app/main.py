@@ -204,6 +204,7 @@ _TABLAS_CON_TENANT = [
     "payment_promises",
     "licenses",
     "device_tokens",
+    "security_alerts",
 ]
 
 # Restricciones que Postgres creó con nombre automático cuando la columna

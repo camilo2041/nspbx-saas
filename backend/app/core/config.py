@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     # Solo para desarrollo o un modelo propio dentro de tu red: deja que las URLs
     # que fijan las empresas (modelo de IA) apunten a direcciones privadas.
     permitir_urls_privadas: bool = False
+    # Webhook al que se mandan las alertas de tráfico saliente de TODAS las
+    # empresas (Slack, Teams, un relay de correo…). Vacío = solo quedan en
+    # el panel. Ver services/alertas.py.
+    alertas_webhook_url: str = ""
     # Proxies inversos delante del backend (Traefik = 1). Define de dónde se toma la
     # IP real del cliente; 0 = sin proxy, se usa la conexión directa.
     proxies_confiables: int = 1
