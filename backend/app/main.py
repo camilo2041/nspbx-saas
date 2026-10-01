@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -345,7 +345,7 @@ _COLUMN_PATCHES += _parches_multiempresa()
 # una consulta sin filtrar ahí es peor que una de negocio.
 # Las tablas nuevas con tenant_id que llegan por revisiones de Alembic se
 # agregan acá (no a _TABLAS_CON_TENANT, que es parte del esquema base).
-_TABLAS_CON_RLS = _TABLAS_CON_TENANT + ["users", "audit_log", "voicebot_versions"]
+_TABLAS_CON_RLS = _TABLAS_CON_TENANT + ["users", "audit_log", "voicebot_versions", "api_keys"]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
 # en cada transacción (ver core/database.py).
@@ -766,6 +766,11 @@ app.include_router(assistant.router)  # solo lectura; recorta por rol dentro
 # Estado de las defensas (fail2ban). Solo lectura: ver services/fail2ban.py.
 app.include_router(security_api.router, **_con(permissions.AJUSTES_GESTIONAR))
 app.include_router(privacidad_api.router, **_con(permissions.AJUSTES_GESTIONAR))
+app.include_router(claves_api_api.router, **_con(permissions.AJUSTES_GESTIONAR))
+app.include_router(consumo_api.router, **_con(permissions.AJUSTES_GESTIONAR))
+# API pública: la autentica una clave de API en `sesion_obligatoria`, y cada
+# endpoint exige su permiso (ver core/claves_api.py).
+app.include_router(api_v1.router)
 app.include_router(system.router, **_con(permissions.AJUSTES_GESTIONAR))
 app.include_router(settings_api.router, **_con(permissions.AJUSTES_GESTIONAR))
 

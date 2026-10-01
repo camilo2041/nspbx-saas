@@ -35,6 +35,7 @@ _RECURSO_POR_PARAMETRO = {
     "debt_id": "debt",
     "user_id": "user",
     "version_id": "voicebot_version",
+    "key_id": "api_key",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por
@@ -44,6 +45,7 @@ _FUERA_DE_ESTA_PRUEBA = {
     "/api/tenants/{tenant_id}/licencia": "solo plataforma — test_alcance.py",
     "/api/auth/dispositivo/{platform}": "actúa sobre el propio usuario, no recibe ids",
     "/api/webcall/session/{username}/end": "widget anónimo con credencial temporal propia",
+    "/api/v1/campanas/{campaign_id}/numeros": "API pública, entra con clave de API — test_api_v1.py",
 }
 
 # Cuerpos válidos para que la petición pase la validación y llegue a buscar

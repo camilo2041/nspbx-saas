@@ -78,6 +78,7 @@ from app.core.security import crear_token, hash_password  # noqa: E402
 from app.main import _TABLAS_CON_RLS, app, migrar  # noqa: E402
 from app.models import (  # noqa: E402
     AiCallUsage,
+    ApiKey,
     Appointment,
     CallLog,
     Campaign,
@@ -197,7 +198,11 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         tenant_id=tid, voicebot_id=bot.id, version=1, name=bot.name, bot_type="ivr",
         welcome_message=f"Hola {marca}", reason="semilla",
     )
-    session.add_all([promesa, uso, version])
+    clave_api = ApiKey(
+        tenant_id=tid, name=f"integracion-{marca}", prefix=f"pr{marca}"[:16], key_hash="0" * 64,
+        scopes="llamadas:leer",
+    )
+    session.add_all([promesa, uso, version, clave_api])
     await session.flush()
 
     for rol in (permissions.ADMIN, permissions.SUPERVISOR, permissions.ASESOR):
@@ -217,6 +222,7 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
 
     e.ids = {
         "trunk": trunk.id,
+        "api_key": clave_api.id,
         "extension": ext.id,
         "voicebot": bot.id,
         "queue": queue.id,

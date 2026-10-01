@@ -40,7 +40,9 @@ _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
 _METODOS_QUE_MODIFICAN = {"POST", "PUT", "PATCH", "DELETE"}
 # Lecturas que también se auditan: escuchar o bajar una grabación es acceder
 # a un dato personal (la voz de un tercero).
-_LECTURAS_SENSIBLES = re.compile(r"^/api/calls/\d+/recording$")
+# Y todo lo que entra por la API pública: una clave filtrada se nota en lo
+# que lee, no solo en lo que escribe.
+_LECTURAS_SENSIBLES = re.compile(r"^(/api/calls/\d+/recording|/api/v1/.*)$")
 # No se auditan: el widget anónimo de llamada web (mucho volumen, sin
 # usuario) y la renovación de sesión de la app móvil (rutinaria).
 _EXCLUIDAS = ("/api/webcall/", "/api/auth/refresh")
@@ -264,8 +266,11 @@ class MiddlewareAuditoria:
         detalle = _detalle(cuerpo, cabeceras.get("content-type", ""))
         tenant_id = usuario_id = None
         actor = None
+        clave = estado_req.get("api_key")
         if usuario is not None:
             tenant_id, usuario_id, actor = usuario.tenant_id, usuario.id, f"{usuario.username} ({usuario.role})"
+        elif clave is not None:
+            tenant_id, actor = clave.tenant_id, f"api:{clave.name} ({clave.prefix})"
         else:
             # Login y rutas sin sesión: quien lo intentó, si se sabe.
             intento = estado_req.get("auditoria_usuario")

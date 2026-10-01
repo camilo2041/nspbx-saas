@@ -15,6 +15,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { AuditTable } from "@/components/audit-table";
+import { ClavesApi } from "@/components/claves-api";
 import { PrivacidadTitular } from "@/components/privacidad-titular";
 import { api } from "@/lib/api";
 import { AlertaTrafico } from "@/lib/types";
@@ -245,6 +246,7 @@ export default function SeguridadPage() {
         </div>
       )}
       <PrivacidadTitular />
+      <ClavesApi />
       <AuditTable
         endpoint="/api/security/auditoria"
         title="Registro de auditoría"

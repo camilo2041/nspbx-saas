@@ -17,6 +17,7 @@ import {
   Skeleton,
   Toggle,
 } from "@/components/ui";
+import { ConsumoMensual } from "@/components/consumo-mensual";
 import { WebcallEmbed } from "@/components/webcall-embed";
 import { api } from "@/lib/api";
 import { DetectedIp, Diagnostics, EstadoSalientes, MaintenanceStatus, Queue, SystemSettings, TtsVoice } from "@/lib/types";
@@ -868,6 +869,7 @@ export default function SettingsPage() {
         </Button>
         {saved && <span className="animate-fade-soft text-sm text-ok-text">Guardado correctamente</span>}
       </div>
+      <ConsumoMensual />
     </div>
   );
 }

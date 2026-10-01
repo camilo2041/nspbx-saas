@@ -206,6 +206,7 @@ services:
       ALERTAS_WEBHOOK_URL: ${ALERTAS_WEBHOOK_URL:-}
       AUDITORIA_RETENCION_DIAS: ${AUDITORIA_RETENCION_DIAS:-365}
       MFA_OBLIGATORIO: ${MFA_OBLIGATORIO:-plataforma,admin}
+      API_LIMITE_POR_MINUTO: ${API_LIMITE_POR_MINUTO:-120}
       LOG_FORMATO: ${LOG_FORMATO:-}
       # Solo se usa la primera vez, para crear el usuario "admin". Si se
       # deja vacío, la contraseña se genera y sale en el log del arranque.

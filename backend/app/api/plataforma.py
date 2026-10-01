@@ -8,7 +8,7 @@ inmediato para toda llamada nueva.
 
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +17,8 @@ from app.core.auth import usuario_actual
 from app.core.database import get_admin_session
 from app.api.security import _auditoria_salida, _filtrar_auditoria
 from app.models import AuditLog, PlatformState, SecurityAlert, Tenant, User
-from app.services import esl
+from app.api.consumo import csv_respuesta
+from app.services import consumo, esl
 
 logger = logging.getLogger(__name__)
 
@@ -102,3 +103,24 @@ async def auditoria_de_todas(
         await session.execute(consulta.order_by(AuditLog.id.desc()).limit(limite).offset(desplazamiento))
     ).scalars().all()
     return [{**_auditoria_salida(f), "tenant_id": f.tenant_id} for f in filas]
+
+
+@router.get("/consumo")
+async def consumo_de_todas(mes: str | None = None, session: AsyncSession = Depends(get_admin_session)):
+    """Consumo del mes de cada empresa: la base para facturar."""
+
+    try:
+        consumo.rango_del_mes(mes)
+    except consumo.MesInvalido as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    empresas = (await session.execute(select(Tenant).order_by(Tenant.id))).scalars().all()
+    return [
+        {"empresa": t.name, "slug": t.slug, **await consumo.resumen(session, t.id, mes)} for t in empresas
+    ]
+
+
+@router.get("/consumo/csv")
+async def consumo_de_todas_csv(mes: str | None = None, session: AsyncSession = Depends(get_admin_session)):
+    filas = await consumo_de_todas(mes, session)
+    etiqueta = consumo.rango_del_mes(mes)[0]
+    return csv_respuesta(consumo.a_csv(filas), f"consumo-{etiqueta}.csv")

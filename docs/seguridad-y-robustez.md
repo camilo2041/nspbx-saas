@@ -219,11 +219,11 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | Sin stack traces en producción | por verificar | — | prueba: error 500 devuelve mensaje genérico + `request_id` |
 | `request_id` en cada petición y en cada log | ✅ | `core/auditoria.py` | cabecera `X-Request-ID` en cada respuesta y en cada línea de log; `LOG_FORMATO=json` para un recolector; `test_auditoria.py` |
 | Cabeceras de seguridad (CSP, HSTS, X-Frame-Options, Referrer-Policy) | 🟡 | `next.config.ts`, `core/cabeceras.py` | aplicadas: nosniff, HSTS, sin iframes (salvo `/webcall`), Permissions-Policy, `no-store` en la API. La CSP completa está en **solo reporte**: pasarla a aplicada cuando la consola del navegador no muestre avisos en producción |
-| Límite de peticiones por usuario/empresa (no solo login) | 🟡 | `limitar_uso` en endpoints puntuales | límite general por token y por empresa |
+| Límite de peticiones por usuario/empresa (no solo login) | 🟡 | `limitar_uso` en endpoints puntuales; por clave en `/api/v1` (`API_LIMITE_POR_MINUTO`, `test_api_v1.py`) | límite general por token y por empresa en el panel; en memoria de cada proceso hasta tener Redis |
 | Idempotencia en operaciones críticas (iniciar campaña, cobros) | ❌ | — | cabecera `Idempotency-Key` |
 | Webhooks firmados (HMAC + timestamp + tolerancia de 5 min) | 🟡 | `agent_webhook_secret`, `core/firmas.py` | prueba de firma inválida y de repetición |
-| API keys por empresa con scopes y expiración | ❌ | — | cuando exista API pública: hash en DB, prefijo visible, scopes, revocación |
-| Versionado `/api/v1` | ❌ | — | antes de abrir API a terceros |
+| API keys por empresa con scopes y expiración | ✅ | `core/claves_api.py`, `api/claves_api.py` | `test_api_v1.py`: hash en DB, prefijo visible, scopes, vencimiento, revocación, empresa desactivada, tope por clave, auditoría como `api:<nombre>`; con todos los permisos no alcanza a otra empresa |
+| Versionado `/api/v1` | ✅ | `api/v1.py`, `docs/api-v1.md` | solo acepta claves de API (el token del panel no entra, y la clave no entra al panel); reutiliza los endpoints del panel, así que aplica las mismas validaciones y la política de salientes |
 
 ### 5.5 FreeSWITCH y SIP
 
@@ -322,7 +322,9 @@ llamante ─► STT ─► LLM ─► pide herramienta(args)
 | Registro de cada escucha/descarga | ✅ | auditoría (§5.10) | `test_auditoria.py` |
 | Retención configurable por empresa y borrado real | ✅ | cada empresa su retención (Ajustes) sobre su carpeta; tope de disco de la plataforma encima | `test_grabaciones.py` |
 | Cifrado en reposo | 🟡 | respaldos cifrados; disco en vivo según proveedor | cifrado de volumen del proveedor |
-| Exportar y borrar datos de un cliente final / de una empresa | ❌ | — | requisito de la Ley 1581 (Colombia) y similares |
+| Exportar y borrar datos de un titular (Ley 1581) | ✅ | `services/privacidad.py`, Seguridad → Datos de una persona | `test_privacidad.py`: consulta y supresión por teléfono; citas, deudas, promesas y números de campaña se borran, llamadas y consumo de IA quedan anonimizados y la grabación se borra del disco; el mismo teléfono en otra empresa no se toca |
+| Borrar una empresa de verdad | ✅ | `DELETE /api/tenants/{id}` | `test_privacidad.py`: filas en cascada, carpeta de grabaciones y audios de sus voizbots. Antes fallaba con cualquier empresa con auditoría (la clave foránea intentaba modificar registros de solo agregar) |
+| Lo que la supresión no alcanza | 🟡 | — | la auditoría (solo agregar) guarda los teléfonos enmascarados y vence con `AUDITORIA_RETENCION_DIAS`; los respaldos vencen con su propia retención. Los buzones de voz de FreeSWITCH no se tocan |
 
 ### 5.10 Auditoría
 
@@ -335,7 +337,10 @@ nuevo queda auditado sin que nadie tenga que acordarse. La empresa la ve
 en Seguridad y la plataforma en Empresas. La retención
 (`AUDITORIA_RETENCION_DIAS`, 365) la aplica el worker de mantenimiento.
 Lo que todavía no guarda: el valor **anterior** de lo que cambió (solo lo
-enviado).
+enviado). Los teléfonos de terceros se guardan enmascarados (últimos 4
+dígitos): el registro no se puede borrar cuando el titular pide la
+supresión. Las acciones hechas con una clave de API (lecturas incluidas)
+quedan como `api:<nombre> (<prefijo>)`.
 
 Tabla `audit_log` (append-only: el rol `nspbx_app` solo puede `INSERT` y
 `SELECT`, nunca `UPDATE`/`DELETE`):
@@ -642,13 +647,31 @@ nombre del paciente se saltaba con cualquier cita fijada; el contexto
 público grababa las entrantes de empresas que no graban; un secreto
 cifrado corrupto hacía fallar el descifrado.
 
-### Fase 4 — Producto SaaS maduro
+### Fase 4 — Producto SaaS maduro 🟡
 
-- API pública versionada con API keys por empresa y scopes.
-- Facturación por consumo y alertas de consumo al cliente.
-- Exportación y borrado de datos por empresa y por titular.
-- Pentest externo.
-- Base dedicada para empresas grandes (el modelo de una base + RLS lo permite moviendo un `tenant_id`).
+- ✅ API pública `/api/v1` con claves por empresa, permisos, vencimiento,
+  revocación y tope por clave (`docs/api-v1.md`).
+- ✅ Consumo mensual por empresa (minutos por troncal, IA y su costo
+  estimado, espacio de grabaciones): la empresa en Ajustes, la plataforma
+  en Empresas (CSV para facturar) y las integraciones en `/api/v1/consumo`
+  (`test_consumo.py`).
+- 🟡 Alertas de consumo al cliente: existe el aviso de cupo diario de
+  salientes (§5.6). Falta un aviso de consumo mensual contra lo contratado,
+  que necesita primero definir el plan comercial (minutos o costo de IA
+  incluidos por plan).
+- ✅ Consulta y supresión de los datos de un titular; borrado real de una
+  empresa (§5.9).
+- ❌ Pentest externo. No es código: contratarlo cuando la API pública se
+  abra a terceros, con alcance en el aislamiento entre empresas, la API
+  pública y el SIP expuesto.
+- ❌ Base dedicada para empresas grandes. El modelo de una base + RLS lo
+  permite moviendo un `tenant_id`; no hace falta hasta que una empresa lo
+  pida o su volumen afecte a las demás.
+
+Lo que dejó a la vista la fase 4, ya corregido: ninguna empresa con
+actividad se podía borrar (la clave foránea de la auditoría chocaba con
+el registro de solo agregar), y la auditoría guardaba completos los
+teléfonos de pacientes y deudores, que después no se podían suprimir.
 
 ---
 

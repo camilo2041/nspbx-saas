@@ -21,7 +21,7 @@ from starlette.requests import HTTPConnection
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import mfa, permissions
+from app.core import claves_api, mfa, permissions
 from app.core.config import settings
 from app.core.database import async_session, fijar_tenant, get_session
 from app.core.security import leer_token
@@ -109,6 +109,11 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
     app/api/logs_ws.py). `HTTPConnection` es la base común a los dos y
     trae `.headers`/`.url`; `.method` es solo de HTTP, de ahí el getattr."""
     if getattr(request, "method", None) == "OPTIONS" or _es_abierta(request.url.path):
+        return
+    # API pública: solo claves de API, nunca un token de sesión (ver
+    # core/claves_api.py).
+    if request.url.path.startswith("/api/v1/"):
+        await claves_api.autenticar(request, session)
         return
 
     cabecera = request.headers.get("Authorization", "")

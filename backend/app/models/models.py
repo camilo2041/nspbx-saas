@@ -967,3 +967,32 @@ class VoiceBotVersion(Base):
     created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     reason: Mapped[str | None] = mapped_column(String(60), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ApiKey(Base):
+    """Clave de la API pública (/api/v1) de una empresa, con permisos
+    limitados (ver core/claves_api.py).
+
+    Se guarda solo el SHA-256 de la clave: quien lea la base no puede usarla.
+    `prefix` es la parte visible que identifica la clave sin revelarla (y la
+    que se busca al autenticar). Revocar no borra la fila: la auditoría
+    sigue pudiendo decir qué clave hizo qué."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    name: Mapped[str] = mapped_column(String(80))
+    prefix: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    key_hash: Mapped[str] = mapped_column(String(64))
+    # Separados por coma: "llamadas:leer,citas:leer".
+    scopes: Mapped[str] = mapped_column(String(300))
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    @property
+    def scope_list(self) -> list[str]:
+        return [s for s in (self.scopes or "").split(",") if s]
