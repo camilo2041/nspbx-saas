@@ -393,6 +393,7 @@ una empresa, kill switches.
 | Rotación de logs de Docker | 🟢 | `x-logging` | — |
 | `no-new-privileges` | 🟢 | backend, voicebot, frontend y FreeSWITCH | Postgres sin tocar a propósito |
 | Contenedores sin root | 🟢 | FreeSWITCH y backend como 10001 (comparten grabaciones y configuración); voicebot como 10002 (solo sus carpetas de audio); frontend como `node`. Cada uno arranca como root solo para adueñarse de sus carpetas montadas (`backend/entrypoint.sh`, `freeswitch/entrypoint.sh`) | probado con Docker y FreeSWITCH 1.10.12 real sobre una instalación existente (todo de root): perfiles SIP arriba, FreeSWITCH crea grabaciones que el backend borra, el backend escribe troncales que FreeSWITCH carga, el voicebot no alcanza ni configuración ni grabaciones, renovación del certificado wss. Sin prueba automática: la imagen de FreeSWITCH tarda ~40 min en compilarse |
+| Prioridad de tiempo real para el audio (FreeSWITCH) | 🟢 | `SYS_NICE` + `FS_CPU_RT_RUNTIME` donde haga falta; ver «Prioridad de tiempo real» abajo | probado con Docker: los hilos de FreeSWITCH en `SCHED_FIFO` corriendo como uid 10001. `scripts/verificar.sh` lo comprueba en el servidor |
 | Límites de CPU/memoria por contenedor | 🟢 | backend 1 GB, voicebot 2 GB, frontend 1 GB, 512 procesos; configurables en `.env` | en reposo usan ~100 MB; ajustar a 2× el pico de un día de campaña. Nunca en FreeSWITCH ni Postgres |
 | Filesystem de solo lectura donde se pueda | 🟢 | backend y voicebot `read_only` + `/tmp` en memoria | probado con Docker: escriben solo en sus volúmenes. El frontend no, porque Next escribe su caché |
 | Healthchecks | 🟢 | postgres, freeswitch, backend, voicebot | — |
@@ -641,6 +642,33 @@ el simulacro en el servidor).
   backend corra en un solo proceso (hoy es así). Es requisito antes de
   levantar más de un proceso o réplica.
 - SBC (Kamailio/OpenSIPS) delante de FreeSWITCH cuando el volumen lo justifique.
+
+#### Prioridad de tiempo real
+
+FreeSWITCH pide prioridad de tiempo real (`SCHED_FIFO`) al arrancar, para
+que el audio no se entrecorte cuando la CPU está ocupada (una campaña, el
+voicebot transcribiendo, un respaldo). Docker no la daba: el log decía
+`Failed to set SCHED_FIFO scheduler` desde siempre, también como root.
+
+- El contenedor tiene `SYS_NICE`. FreeSWITCH toma la prioridad todavía
+  como root y sus hilos la conservan después de bajar de usuario (también
+  los que crea después, p. ej. al reiniciar un perfil).
+- En la mayoría de los servidores (cgroup v2: `stat -fc %T /sys/fs/cgroup`
+  dice `cgroup2fs`) con eso alcanza.
+- En cgroup v1 con planificación de tiempo real por grupo (existe
+  `/sys/fs/cgroup/cpu/cpu.rt_runtime_us`), cada contenedor arranca con
+  presupuesto 0 y hay que dárselo:
+  1. En `/etc/docker/daemon.json`: `{"cpu-rt-runtime": 950000}` y
+     `systemctl restart docker` (reinicia todos los contenedores).
+  2. En `.env`: `FS_CPU_RT_RUNTIME=500000` (hasta medio segundo de CPU
+     por segundo y por núcleo en tiempo real; el resto queda garantizado
+     para los demás aunque FreeSWITCH se trabe en un bucle).
+  3. `docker compose up -d freeswitch`.
+  No poner `FS_CPU_RT_RUNTIME` en un servidor cgroup v2: Docker se niega a
+  crear el contenedor.
+
+`bash scripts/verificar.sh` dice cuántos hilos de FreeSWITCH tienen
+tiempo real y, si no tiene, remite acá.
 
 #### Actualizar a contenedores sin root
 

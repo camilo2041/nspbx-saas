@@ -37,6 +37,20 @@ services:
     # ver freeswitch/Dockerfile y freeswitch/entrypoint.sh.
     security_opt:
       - no-new-privileges:true
+    # Solo lo que usa mientras todavía es root: adueñarse de sus carpetas
+    # (CHOWN, DAC_OVERRIDE, FOWNER), bajar de usuario (SETUID, SETGID) y la
+    # prioridad de tiempo real (SYS_NICE). Al bajar de usuario las pierde.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, SYS_NICE]
+    # Prioridad de tiempo real (SCHED_FIFO) para el audio: sin ella, con la
+    # CPU ocupada (una campaña, el voicebot transcribiendo) el audio se
+    # entrecorta. FreeSWITCH la toma al arrancar, todavía como root, y sus
+    # hilos la conservan después de bajar de usuario. Con SYS_NICE alcanza en
+    # la mayoría de los servidores (cgroup v2). En cgroup v1 con
+    # planificación de tiempo real por grupo, además hay que darle
+    # presupuesto: ver «Prioridad de tiempo real» en
+    # docs/seguridad-y-robustez.md. 0 = sin presupuesto propio (lo normal).
+    cpu_rt_runtime: ${FS_CPU_RT_RUNTIME:-0}
     restart: unless-stopped
     environment:
       # Solo para el healthcheck de acá abajo (fs_cli necesita loguearse).
