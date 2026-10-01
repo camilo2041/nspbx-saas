@@ -343,7 +343,7 @@ una empresa, kill switches.
 | Requisito | Estado | Evidencia | Verificación |
 |---|---|---|---|
 | Secretos de infraestructura solo en `.env`, arranque falla si faltan | 🟢 | `:?` en `docker-compose.yml` | — |
-| `.env` fuera de Git | por verificar | `.gitignore` | escaneo de secretos (gitleaks) en CI y sobre el historial completo |
+| `.env` fuera de Git | 🟢 | `.gitignore` (`.env`, `.env.*`) | escaneo de secretos (gitleaks) en CI y sobre el historial completo |
 | Claves de proveedores por empresa (ElevenLabs, Deepgram, LLM, ARI, Turnstile) cifradas en DB | ❌ | columnas en texto claro en `system_settings` | cifrado de aplicación (AES-GCM con clave en `.env`), nunca devueltas completas por la API |
 | Contraseñas de troncales y extensiones | ❌ | texto claro (FreeSWITCH las necesita) | cifradas en DB y descifradas solo al generar el XML; extensiones con `a1-hash` |
 | Rotación documentada (ESL, `AUTH_SECRET`, claves de proveedor, SIP) | ❌ | — | runbook por secreto: cómo rotar y qué se corta |
