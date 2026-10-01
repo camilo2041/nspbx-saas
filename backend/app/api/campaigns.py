@@ -281,10 +281,19 @@ async def add_numbers(
     campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
-    res = await session.execute(
-        select(CampaignNumber).where(CampaignNumber.campaign_id == campaign_id)
-    )
-    existentes = {n.phone: n for n in res.scalars().all()}
+    # Solo los números que vienen en esta carga, no la campaña entera: con
+    # una campaña de 200.000 números, sumar 10.000 traía las 200.000 filas
+    # (casi 300 MB por petición). En tandas, para no pasar el límite de
+    # parámetros de una consulta.
+    entrantes = list(dict.fromkeys(f.phone for f in payload.numbers))
+    existentes = {}
+    for i in range(0, len(entrantes), 1000):
+        res = await session.execute(
+            select(CampaignNumber).where(
+                CampaignNumber.campaign_id == campaign_id, CampaignNumber.phone.in_(entrantes[i:i + 1000])
+            )
+        )
+        existentes.update({n.phone: n for n in res.scalars().all()})
     es_cobranza = (campaign.ai_intent or "").strip().lower() == "cobranza"
     added = 0
     updated = 0
@@ -333,10 +342,13 @@ async def add_numbers(
                     numero.appointment_id = appointment_id
                     agenda_creadas += 1
     await session.commit()
+    total = (await session.execute(
+        select(func.count(CampaignNumber.id)).where(CampaignNumber.campaign_id == campaign_id)
+    )).scalar_one()
     return {
         "added": added,
         "updated": updated,
-        "total": len(existentes),
+        "total": total,
         "agenda_creadas": agenda_creadas,
         "agenda_omitidas": agenda_omitidas,
         "bloqueados": bloqueados,

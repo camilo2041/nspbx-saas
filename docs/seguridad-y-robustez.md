@@ -394,7 +394,8 @@ una empresa, kill switches.
 | `no-new-privileges` | 🟢 | backend, voicebot, frontend y FreeSWITCH | Postgres sin tocar a propósito |
 | Contenedores sin root | 🟢 | FreeSWITCH y backend como 10001 (comparten grabaciones y configuración); voicebot como 10002 (solo sus carpetas de audio); frontend como `node`. Cada uno arranca como root solo para adueñarse de sus carpetas montadas (`backend/entrypoint.sh`, `freeswitch/entrypoint.sh`) | probado con Docker y FreeSWITCH 1.10.12 real sobre una instalación existente (todo de root): perfiles SIP arriba, FreeSWITCH crea grabaciones que el backend borra, el backend escribe troncales que FreeSWITCH carga, el voicebot no alcanza ni configuración ni grabaciones, renovación del certificado wss. Sin prueba automática: la imagen de FreeSWITCH tarda ~40 min en compilarse |
 | Prioridad de tiempo real para el audio (FreeSWITCH) | 🟢 | `SYS_NICE` + `FS_CPU_RT_RUNTIME` donde haga falta; ver «Prioridad de tiempo real» abajo | probado con Docker: los hilos de FreeSWITCH en `SCHED_FIFO` corriendo como uid 10001. `scripts/verificar.sh` lo comprueba en el servidor |
-| Límites de CPU/memoria por contenedor | 🟢 | backend 1 GB, voicebot 2 GB, frontend 1 GB, 512 procesos; configurables en `.env` | en reposo usan ~100 MB; ajustar a 2× el pico de un día de campaña. Nunca en FreeSWITCH ni Postgres |
+| Límites de CPU/memoria por contenedor | 🟢 | backend 1 GB, voicebot 2 GB, frontend 1 GB, 512 procesos; configurables en `.env` | prueba de carga con una empresa grande (1 M llamadas, 300 mil conversaciones de IA, campaña de 200 mil números): pico de 172 MB con 56 peticiones pesadas a la vez. `scripts/medir-recursos.sh` propone los topes con un día real; `verificar.sh` avisa si Docker mató un contenedor por memoria o si alguno pasa el 80%. Nunca en FreeSWITCH ni Postgres |
+| Ninguna petición carga una tabla entera en memoria | 🟢 | resúmenes de IA, cobranza y consumo sumados en la base; carga de números mira solo los que llegan; ventanas de días con tope (366) | `test_resumenes.py` (mismo resultado que fila por fila, sin otra empresa, tope de días). Antes: 790 MB y 10 s por petición, y `daily?days=1000000000` dejaba al backend sin memoria |
 | Filesystem de solo lectura donde se pueda | 🟢 | backend y voicebot `read_only` + `/tmp` en memoria | probado con Docker: escriben solo en sus volúmenes. El frontend no, porque Next escribe su caché |
 | Healthchecks | 🟢 | postgres, freeswitch, backend, voicebot | — |
 | SSH solo con llave, sin root, con allowlist o VPN | por verificar | — | checklist del servidor |
@@ -633,7 +634,10 @@ el simulacro en el servidor).
 - ✅ **Contenedores**: ninguno de los nuestros corre como root (FreeSWITCH
   y backend 10001, voicebot 10002); imagen de solo lectura en backend y
   voicebot; topes de memoria, CPU y procesos. Probado con Docker (§5.13).
-  Falta: medir el pico real en un día de campaña y ajustar los topes.
+  Topes validados con una prueba de carga (§5.13), que encontró y corrigió
+  peticiones que cargaban tablas enteras en memoria. Falta: correr
+  `scripts/medir-recursos.sh` un día de campaña real, sobre todo por el
+  voicebot, que acá no se pudo cargar con llamadas reales.
   Al actualizar un servidor existente, ver «Actualizar a contenedores sin
   root» más abajo.
 - ✅ El contexto inicial del voizbot sigue las mismas reglas que sus
@@ -697,7 +701,11 @@ empresa entraba al contexto del voizbot (y se nombraba sin verificar). Al
 sacar root, las pruebas con Docker encontraron dos más antes de llegar a
 producción: el backend no arrancaba (HOME seguía en /root y asyncpg no
 podía mirar ahí) y la renovación del certificado wss tumbaba el perfil SIP
-`internal`.
+`internal`. La prueba de carga de los topes encontró que los resúmenes de
+IA y de cobranza traían todas las filas a memoria (790 MB por petición con
+una empresa grande: dos a la vez reiniciaban el backend, y FreeSWITCH se
+quedaba sin dialplan) y que `ai-usage/daily` aceptaba cualquier cantidad
+de días.
 
 ### Fase 4 — Producto SaaS maduro 🟡
 

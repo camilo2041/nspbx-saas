@@ -11,10 +11,10 @@ bot — la página de Cobranza del panel muestra deudas y promesas en vivo.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session, traer_propio
+from app.core.database import filtro_empresa, get_session, traer_propio
 from app.models import Debt, PaymentPromise
 from app.schemas import DebtCreate, DebtOut, DebtUpdate, PaymentPromiseOut
 
@@ -91,13 +91,28 @@ async def list_promises(
 async def summary(session: AsyncSession = Depends(get_session)):
     """Totales de la cartera: cuánto se debe, cuánto se prometió pagar y
     cuántas promesas están vigentes."""
-    deudas = (await session.execute(select(Debt))).scalars().all()
-    promesas = (await session.execute(select(PaymentPromise))).scalars().all()
+    # Sumado en la base: antes se traía la cartera entera a Python (con
+    # 100.000 deudas y otras tantas promesas, 3 s y casi 300 MB por petición).
+    vigente = Debt.status.in_(("open", "promised", "overdue"))
+    deudas = (await session.execute(
+        select(
+            func.count(Debt.id),
+            func.count(case((Debt.status == "open", 1))),
+            func.coalesce(func.sum(case((vigente, Debt.amount), else_=0)), 0),
+        ).where(filtro_empresa(session, Debt))
+    )).one()
+    promesas = (await session.execute(
+        select(
+            func.count(PaymentPromise.id),
+            func.count(case((PaymentPromise.status == "pending", 1))),
+            func.coalesce(func.sum(PaymentPromise.amount_promised), 0),
+        ).where(filtro_empresa(session, PaymentPromise))
+    )).one()
     return {
-        "debts_total": len(deudas),
-        "debts_open": sum(1 for d in deudas if d.status == "open"),
-        "amount_owed": round(sum(d.amount for d in deudas if d.status in ("open", "promised", "overdue")), 2),
-        "promises_total": len(promesas),
-        "promises_pending": sum(1 for p in promesas if p.status == "pending"),
-        "amount_promised": round(sum(p.amount_promised for p in promesas), 2),
+        "debts_total": deudas[0],
+        "debts_open": deudas[1],
+        "amount_owed": round(float(deudas[2]), 2),
+        "promises_total": promesas[0],
+        "promises_pending": promesas[1],
+        "amount_promised": round(float(promesas[2]), 2),
     }

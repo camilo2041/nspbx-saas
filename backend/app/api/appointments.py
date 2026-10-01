@@ -1,7 +1,7 @@
 import hmac
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +38,7 @@ _GESTION = Depends(requiere(permissions.CITAS_GESTIONAR))
 
 
 @router.get("/gestion", dependencies=[_GESTION])
-async def gestion(days: int = 30, session: AsyncSession = Depends(get_session)):
+async def gestion(days: int = Query(default=30, ge=1, le=366), session: AsyncSession = Depends(get_session)):
     """Qué hizo cada llamada del voizbot sobre la agenda — confirmó,
     canceló o reagendó, y para cuándo — en vez de solo el estado actual
     de cada cita, que no dice nada sobre cómo se llegó ahí ni deja rastro

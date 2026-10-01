@@ -49,6 +49,25 @@ case "$RT" in
   *)      ok "FreeSWITCH con prioridad de tiempo real ($RT hilos)" ;;
 esac
 
+# Topes de memoria (docker-compose.yml): un contenedor que se pasa lo
+# reinicia Docker. Se mira si ya pasó (OOMKilled, reinicios) y si alguno
+# anda cerca. Para ajustar los topes: bash scripts/medir-recursos.sh
+for c in nspbx_backend nspbx_voicebot nspbx_frontend; do
+  oom=$(docker inspect "$c" --format '{{.State.OOMKilled}}' 2>/dev/null) || continue
+  reinicios=$(docker inspect "$c" --format '{{.RestartCount}}')
+  uso=""
+  [ "$(docker inspect "$c" --format '{{.State.Running}}')" = "true" ] && uso=$(docker stats --no-stream --format '{{.MemPerc}}' "$c" | tr -d '%')
+  if [ "$oom" = "true" ]; then
+    falla "$c: Docker lo mató por pasar su tope de memoria. Medí con scripts/medir-recursos.sh y subí el tope en .env"
+  elif [ "${reinicios:-0}" -gt 0 ]; then
+    aviso "$c se reinició $reinicios vez/veces desde que se creó (docker logs $c para ver por qué)"
+  fi
+  case "$uso" in
+    ""|*[!0-9.]*) ;;
+    *) if [ "${uso%.*}" -ge 80 ]; then aviso "$c usa el ${uso}% de su tope de memoria"; else ok "$c: memoria al ${uso}% de su tope"; fi ;;
+  esac
+done
+
 # coturn solo si está pedido: es opcional y arranca con --profile turn.
 # Se comprueba acá y no en la lista de arriba porque su ausencia es lo
 # normal — el relay hace falta únicamente cuando la red del usuario

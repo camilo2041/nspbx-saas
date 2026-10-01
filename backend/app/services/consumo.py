@@ -60,7 +60,7 @@ def bytes_de_grabaciones(tenant_id: int) -> int:
 
 
 async def resumen(session, tenant_id: int, mes: str | None) -> dict:
-    from app.api.ai_usage import Tarifas
+    from app.api.ai_usage import Tarifas, agregado
 
     etiqueta, inicio, fin = rango_del_mes(mes)
     llamadas = (
@@ -74,13 +74,12 @@ async def resumen(session, tenant_id: int, mes: str | None) -> dict:
             ).where(CallLog.tenant_id == tenant_id, CallLog.started_at >= inicio, CallLog.started_at < fin)
         )
     ).one()
-    conversaciones = (
-        await session.execute(
-            select(AiCallUsage).where(
-                AiCallUsage.tenant_id == tenant_id, AiCallUsage.started_at >= inicio, AiCallUsage.started_at < fin
-            )
-        )
-    ).scalars().all()
+    # Sumado en la base (ver ai_usage.agregado): un mes de una empresa grande
+    # son decenas de miles de conversaciones.
+    conversaciones = await agregado(
+        session, AiCallUsage.tenant_id == tenant_id, AiCallUsage.started_at >= inicio, AiCallUsage.started_at < fin,
+        de_la_sesion=False,
+    )
     tarifas = Tarifas(await ajustes_de(session, tenant_id))
     return {
         "mes": etiqueta,
@@ -90,7 +89,7 @@ async def resumen(session, tenant_id: int, mes: str | None) -> dict:
         "minutos_hablados": round(llamadas[2] / 60, 1),
         "llamadas_por_troncal": llamadas[3],
         "minutos_por_troncal": round(llamadas[4] / 60, 1),
-        "conversaciones_ia": len(conversaciones),
+        "conversaciones_ia": sum(c.calls for c in conversaciones),
         "minutos_ia": round(sum(c.duration_seconds or 0 for c in conversaciones) / 60, 1),
         "tts_caracteres": sum(c.tts_chars or 0 for c in conversaciones),
         "stt_segundos": sum(c.stt_seconds or 0 for c in conversaciones),
