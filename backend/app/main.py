@@ -3,6 +3,7 @@ import os
 import secrets
 
 from app.core.auditoria import MiddlewareAuditoria, configurar_logging
+from app.core.cabeceras import MiddlewareCabeceras
 
 # Sin esto, los logger.info() de todo el proyecto se perdían en silencio:
 # uvicorn configura SUS PROPIOS loggers ("uvicorn", "uvicorn.error") pero
@@ -654,6 +655,8 @@ app = FastAPI(
 # Auditoría y request_id. Se agrega antes que CORS para quedar por dentro:
 # las respuestas a preflight de CORS no son acciones de nadie.
 app.add_middleware(MiddlewareAuditoria)
+# Cabeceras de seguridad (nosniff, sin caché, sin iframes): ver core/cabeceras.py.
+app.add_middleware(MiddlewareCabeceras)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
