@@ -21,7 +21,7 @@ from starlette.requests import HTTPConnection
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import permissions
+from app.core import mfa, permissions
 from app.core.config import settings
 from app.core.database import async_session, fijar_tenant, get_session
 from app.core.security import leer_token
@@ -65,7 +65,18 @@ def verificar_secreto_fs(secret: str | None = None) -> None:
 # /refresh y /logout se autentican con el refresh token del cuerpo, no con
 # el JWT: si exigieran un JWT vigente, el refresh no serviría justo cuando
 # hace falta (JWT vencido).
-_ABIERTAS = ("/api/auth/login", "/api/auth/refresh", "/api/auth/logout")
+_ABIERTAS = ("/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/api/auth/mfa/verificar")
+
+# Lo único que puede hacer una sesión de un rol que exige MFA y todavía no
+# lo activó (ver core/mfa.py): activarlo, saber quién es y cambiar la
+# contraseña.
+_PERMITIDAS_SIN_MFA = (
+    "/api/auth/me",
+    "/api/auth/password",
+    "/api/auth/mfa",
+    "/api/auth/mfa/iniciar",
+    "/api/auth/mfa/activar",
+)
 _ABIERTAS_PREFIJO = ("/api/appointments/agent/", "/api/webcall/")
 
 _NO_AUTENTICADO = HTTPException(
@@ -152,9 +163,13 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
     # Contraseña cambiada / sesiones cerradas: un JWT anterior a ese instante ya
     # no vale, aunque no haya vencido. Sin `iat` (token de antes de este cambio)
     # se trata como el más viejo posible.
+    # Se compara en milisegundos (`iatm`): con `iat`, en segundos, un token
+    # emitido en el mismo segundo del cierre seguía valiendo. Un token sin
+    # `iatm` (de antes de este cambio) se toma al principio de su segundo.
     if usuario.sesiones_desde is not None:
-        corte = int(usuario.sesiones_desde.replace(tzinfo=timezone.utc).timestamp())
-        if int(datos.get("iat") or 0) < corte:
+        corte = int(usuario.sesiones_desde.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        emitido = int(datos.get("iatm") or int(datos.get("iat") or 0) * 1000)
+        if emitido < corte:
             raise _NO_AUTENTICADO
 
     # Desactivar una empresa tiene que cortar el acceso de TODOS sus usuarios
@@ -164,6 +179,13 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
         empresa = await session.get(Tenant, usuario.tenant_id)
         if not empresa or not empresa.enabled:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La empresa está desactivada")
+
+    if mfa.le_falta_mfa(usuario) and request.url.path not in _PERMITIDAS_SIN_MFA:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Activa la verificación en dos pasos para continuar",
+            headers={"X-MFA-Requerido": "1"},
+        )
 
     request.state.usuario = usuario
 

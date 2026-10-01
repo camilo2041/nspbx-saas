@@ -512,6 +512,19 @@ function Marco({ children }: { children: ReactNode }) {
                 </div>
               </div>
             )}
+            <Link
+              href="/mfa"
+              title="Verificación en dos pasos"
+              aria-label="Verificación en dos pasos"
+              className={`press shrink-0 rounded-lg p-1.5 text-faint transition-colors hover:bg-surface-2 hover:text-fg ${
+                collapsed ? "hidden" : ""
+              }`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4" />
+              </svg>
+            </Link>
             <button
               type="button"
               onClick={salir}

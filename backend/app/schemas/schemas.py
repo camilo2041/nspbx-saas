@@ -944,6 +944,8 @@ class UserOut(BaseModel):
     # la lista de extensiones solo para mostrar un número.
     extension_number: Optional[str] = None
     enabled: bool
+    # Si tiene la verificación en dos pasos activa (nunca el secreto).
+    mfa_enabled: bool = False
     last_login_at: Optional[datetime] = None
     created_at: datetime
 
@@ -972,6 +974,33 @@ class SesionOut(BaseModel):
     # la misma seguridad que un almacén de llavero del sistema operativo, y
     # no lo necesita: su sesión dura lo que dura la pestaña abierta).
     refresh_token: Optional[str] = None
+    # Verificación en dos pasos (ver core/mfa.py): si está activa, y si el
+    # rol la exige y falta activarla (la interfaz lleva a activarla).
+    mfa_activo: bool = False
+    mfa_pendiente: bool = False
+
+
+class MfaRequeridoOut(BaseModel):
+    """Respuesta del login cuando la contraseña es correcta pero falta el
+    código: `mfa_token` se canjea en /api/auth/mfa/verificar."""
+
+    mfa_requerido: bool = True
+    mfa_token: str
+
+
+class MfaVerificarRequest(BaseModel):
+    mfa_token: str = Field(..., max_length=2000)
+    # 6 dígitos de la app, o un código de recuperación ("abcd-efgh").
+    codigo: str = Field(..., min_length=6, max_length=20)
+
+
+class MfaCodigoRequest(BaseModel):
+    codigo: str = Field(..., min_length=6, max_length=20)
+
+
+class MfaDesactivarRequest(BaseModel):
+    password: str = Field(..., max_length=128)
+    codigo: str = Field(..., min_length=6, max_length=20)
 
 
 class RefreshRequest(BaseModel):

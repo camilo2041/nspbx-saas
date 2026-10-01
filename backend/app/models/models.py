@@ -794,6 +794,15 @@ class User(Base):
     # Todo JWT emitido antes de este instante ya no sirve (cambio de contraseña,
     # cuenta desactivada, refresh token reutilizado). Ver services/sesiones.py.
     sesiones_desde: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Verificación en dos pasos (ver core/mfa.py). El secreto se guarda al
+    # empezar la activación y `mfa_enabled` pasa a true al confirmar con un
+    # código: hasta entonces no se exige.
+    mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Último paso TOTP aceptado: un código ya usado no vuelve a servir.
+    mfa_last_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Hashes de los códigos de recuperación que quedan sin usar.
+    mfa_recovery: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     extension: Mapped["Extension | None"] = relationship(lazy="joined")

@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     # Días que se conserva el registro de auditoría. Lo borra el worker de
     # mantenimiento con el rol dueño: la aplicación no puede borrar filas.
     auditoria_retencion_dias: int = 365
+    # Roles que DEBEN usar verificación en dos pasos (ver core/mfa.py). Hasta
+    # activarla, su sesión solo sirve para activarla. Vacío = nadie obligado.
+    mfa_obligatorio: str = "plataforma,admin"
     # Proxies inversos delante del backend (Traefik = 1). Define de dónde se toma la
     # IP real del cliente; 0 = sin proxy, se usa la conexión directa.
     proxies_confiables: int = 1

@@ -441,6 +441,8 @@ export interface Usuario {
   extension_id: number | null;
   extension_number: string | null;
   enabled: boolean;
+  /** Verificación en dos pasos activa. */
+  mfa_enabled?: boolean;
   last_login_at: string | null;
   created_at: string;
 }
@@ -452,6 +454,16 @@ export interface Sesion {
   permisos: string[];
   // Módulos habilitados de la empresa (voicebot/pbx) para ocultar secciones.
   modulos: string[];
+  mfa_activo?: boolean;
+  /** El rol exige verificación en dos pasos y falta activarla: hasta hacerlo,
+   *  el backend solo deja entrar a /mfa. */
+  mfa_pendiente?: boolean;
+}
+
+/** Respuesta del login cuando falta el código de la app (ver /api/auth/mfa/verificar). */
+export interface MfaRequerido {
+  mfa_requerido: true;
+  mfa_token: string;
 }
 
 export interface RolInfo {

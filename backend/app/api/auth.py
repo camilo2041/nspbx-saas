@@ -11,12 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel, Field
 
-from app.core import limitador, permissions
+from app.core import limitador, mfa, permissions
 from app.core.auth import usuario_actual
 from app.core.config import settings
 from app.core.database import get_admin_session, get_session
 from app.core.security import (
     crear_token,
+    crear_token_mfa,
+    leer_token_mfa,
     generar_refresh_token,
     hash_password,
     hash_refresh_token,
@@ -28,6 +30,10 @@ from app.schemas import (
     DeviceTokenIn,
     LoginRequest,
     LogoutRequest,
+    MfaCodigoRequest,
+    MfaDesactivarRequest,
+    MfaRequeridoOut,
+    MfaVerificarRequest,
     RefreshRequest,
     SesionOut,
     UserOut,
@@ -72,6 +78,8 @@ def _sesion(u: User, modulos: list[str] | None = None, refresh_token: str | None
         permisos=sorted(permissions.permisos_de(u.role, u.tenant_id)),
         modulos=modulos or [],
         refresh_token=refresh_token,
+        mfa_activo=bool(u.mfa_enabled),
+        mfa_pendiente=mfa.le_falta_mfa(u),
     )
 
 
@@ -93,7 +101,7 @@ async def _nuevo_refresh_token(
     return token
 
 
-@router.post("/login", response_model=SesionOut)
+@router.post("/login", response_model=SesionOut | MfaRequeridoOut)
 async def login(payload: LoginRequest, request: Request, session: AsyncSession = Depends(get_admin_session)):
     """Única puerta que consulta `users` sin estar atada a una empresa.
 
@@ -167,7 +175,148 @@ async def login(payload: LoginRequest, request: Request, session: AsyncSession =
                 detail="Esta cuenta no pertenece a la empresa de este dominio",
             )
 
+    if usuario.mfa_enabled:
+        # Contraseña correcta, falta el código: todavía no hay sesión. El
+        # token del paso intermedio solo sirve en /mfa/verificar.
+        logger.info("Contraseña correcta, falta el código de MFA: %s", usuario.username)
+        return MfaRequeridoOut(mfa_token=crear_token_mfa(usuario.id))
+
     logger.info("Sesión iniciada: %s (%s)", usuario.username, usuario.role)
+    refresh = await _nuevo_refresh_token(session, usuario.id)
+    return _sesion(usuario, await _modulos_de(session, usuario), refresh_token=refresh)
+
+
+# --- Verificación en dos pasos (ver core/mfa.py) --------------------------
+# Todo con la sesión del DUEÑO y el id del usuario autenticado: el usuario
+# de la plataforma no tiene empresa y RLS no le dejaría ver su propia fila.
+
+
+def _codigo_valido(usuario: User, codigo: str) -> bool:
+    """TOTP (sin repetir uno ya usado) o un código de recuperación, que se
+    consume. Actualiza la fila; el commit lo hace quien llama."""
+    paso = mfa.verificar(usuario.mfa_secret or "", codigo, usuario.mfa_last_step)
+    if paso is not None:
+        usuario.mfa_last_step = paso
+        return True
+    restantes = list(usuario.mfa_recovery or [])
+    h = mfa.hash_recuperacion(codigo)
+    if h in restantes:
+        restantes.remove(h)
+        usuario.mfa_recovery = restantes
+        logger.warning("Código de recuperación de MFA usado por %s (%d restantes)", usuario.username, len(restantes))
+        return True
+    return False
+
+
+@router.get("/mfa")
+async def estado_mfa(usuario: User = Depends(usuario_actual)):
+    return {
+        "activo": bool(usuario.mfa_enabled),
+        "obligatorio": usuario.role in mfa.roles_obligatorios(),
+        "codigos_recuperacion_restantes": len(usuario.mfa_recovery or []),
+    }
+
+
+@router.post("/mfa/iniciar")
+async def iniciar_mfa(usuario: User = Depends(usuario_actual), session: AsyncSession = Depends(get_admin_session)):
+    """Genera el secreto para cargarlo en la app. No se exige hasta
+    confirmarlo con un código en /mfa/activar."""
+    fresco = await session.get(User, usuario.id)
+    if fresco.mfa_enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="La verificación en dos pasos ya está activa")
+    fresco.mfa_secret = mfa.nuevo_secreto()
+    fresco.mfa_last_step = None
+    await session.commit()
+    return {"secreto": fresco.mfa_secret, "uri": mfa.uri(fresco.mfa_secret, fresco.username)}
+
+
+@router.post("/mfa/activar")
+async def activar_mfa(
+    payload: MfaCodigoRequest,
+    request: Request,
+    usuario: User = Depends(usuario_actual),
+    session: AsyncSession = Depends(get_admin_session),
+):
+    """Confirma con un código de la app. Devuelve los códigos de
+    recuperación (se muestran UNA vez) y una sesión nueva: las demás se
+    cierran, porque se abrieron sin el segundo paso."""
+    fresco = await session.get(User, usuario.id)
+    if fresco.mfa_enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="La verificación en dos pasos ya está activa")
+    if not fresco.mfa_secret:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Primero genera el código para la app")
+    clave = f"mfa:{fresco.id}"
+    ip = limitador.ip_cliente(request)
+    limitador.exigir_libre(ip, clave)
+    paso = mfa.verificar(fresco.mfa_secret, payload.codigo, fresco.mfa_last_step)
+    if paso is None:
+        limitador.registrar_fallo(ip, clave)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El código no es correcto. Revisa la hora del teléfono.")
+    limitador.registrar_exito(ip, clave)
+    codigos = mfa.nuevos_codigos_recuperacion()
+    fresco.mfa_enabled = True
+    fresco.mfa_last_step = paso
+    fresco.mfa_recovery = [mfa.hash_recuperacion(c) for c in codigos]
+    await revocar_sesiones(session, fresco)
+    await session.commit()
+    await session.refresh(fresco)
+    logger.warning("Verificación en dos pasos ACTIVADA para %s", fresco.username)
+    refresh = await _nuevo_refresh_token(session, fresco.id)
+    sesion = _sesion(fresco, await _modulos_de(session, fresco), refresh_token=refresh)
+    return {"codigos_recuperacion": codigos, "sesion": sesion}
+
+
+@router.post("/mfa/desactivar")
+async def desactivar_mfa(
+    payload: MfaDesactivarRequest,
+    request: Request,
+    usuario: User = Depends(usuario_actual),
+    session: AsyncSession = Depends(get_admin_session),
+):
+    """Solo para roles que no la exigen. Pide contraseña y código: quien
+    encuentre la sesión abierta no puede apagarla."""
+    if usuario.role in mfa.roles_obligatorios():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tu rol exige la verificación en dos pasos")
+    fresco = await session.get(User, usuario.id)
+    clave = f"mfa:{fresco.id}"
+    ip = limitador.ip_cliente(request)
+    limitador.exigir_libre(ip, clave)
+    if not fresco.mfa_enabled or not await asyncio.to_thread(verificar_password, payload.password, fresco.password_hash) or not _codigo_valido(fresco, payload.codigo):
+        limitador.registrar_fallo(ip, clave)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contraseña o código incorrectos")
+    limitador.registrar_exito(ip, clave)
+    fresco.mfa_enabled = False
+    fresco.mfa_secret = None
+    fresco.mfa_recovery = None
+    fresco.mfa_last_step = None
+    await session.commit()
+    logger.warning("Verificación en dos pasos desactivada por %s", fresco.username)
+    return {"activo": False}
+
+
+@router.post("/mfa/verificar", response_model=SesionOut)
+async def verificar_mfa(payload: MfaVerificarRequest, request: Request, session: AsyncSession = Depends(get_admin_session)):
+    """Segundo paso del login: el token del paso intermedio más el código
+    (o un código de recuperación) se canjean por la sesión."""
+    user_id = leer_token_mfa(payload.mfa_token)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="El paso de verificación venció. Vuelve a entrar.")
+    usuario = await session.get(User, user_id)
+    request.state.auditoria_usuario = usuario
+    if not usuario or not usuario.enabled or not usuario.mfa_enabled:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión no válida")
+    clave = f"mfa:{usuario.id}"
+    ip = limitador.ip_cliente(request)
+    limitador.exigir_libre(ip, clave)
+    if not _codigo_valido(usuario, payload.codigo):
+        limitador.registrar_fallo(ip, clave)
+        await session.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Código incorrecto")
+    limitador.registrar_exito(ip, clave)
+    usuario.last_login_at = datetime.utcnow()
+    await session.commit()
+    await session.refresh(usuario)
+    logger.info("Sesión iniciada con MFA: %s (%s)", usuario.username, usuario.role)
     refresh = await _nuevo_refresh_token(session, usuario.id)
     return _sesion(usuario, await _modulos_de(session, usuario), refresh_token=refresh)
 

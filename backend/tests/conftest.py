@@ -56,6 +56,10 @@ os.environ.update(
         "RECORDINGS_DIR": os.path.join(_TMP, "recordings"),
         "BACKUPS_DIR": os.path.join(_TMP, "backups"),
         "PROXIES_CONFIABLES": "0",
+        # Las pruebas generales crean administradores con crear_token, sin
+        # pasar por el login: si MFA fuera obligatorio, todos quedarían
+        # limitados a activarlo. test_mfa.py lo vuelve obligatorio.
+        "MFA_OBLIGATORIO": "",
     }
 )
 

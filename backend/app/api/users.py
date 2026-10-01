@@ -178,3 +178,29 @@ async def eliminar(
     await session.delete(usuario)
     await session.commit()
     logger.info("Usuario %s eliminado por %s", usuario.username, quien.username)
+
+
+@router.post("/{user_id}/mfa/reset", response_model=UserOut)
+async def restablecer_mfa(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+    quien: User = Depends(usuario_actual),
+):
+    """Para quien perdió el teléfono y los códigos de recuperación: borra
+    su verificación en dos pasos y cierra sus sesiones. Si su rol la exige,
+    la vuelve a configurar al entrar. No sirve sobre la propia cuenta: así
+    una sesión robada no puede quitarse el segundo paso."""
+    usuario = await traer_propio(session, User, user_id)
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    if usuario.id == quien.id:
+        raise HTTPException(status_code=400, detail="No puedes restablecer tu propia verificación en dos pasos")
+    usuario.mfa_enabled = False
+    usuario.mfa_secret = None
+    usuario.mfa_recovery = None
+    usuario.mfa_last_step = None
+    await revocar_sesiones(session, usuario)
+    await session.commit()
+    await session.refresh(usuario)
+    logger.warning("Verificación en dos pasos de %s restablecida por %s", usuario.username, quien.username)
+    return usuario_out(usuario)

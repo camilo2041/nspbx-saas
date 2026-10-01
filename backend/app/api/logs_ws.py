@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import alcance, permissions
+from app.core import alcance, mfa, permissions
 from app.core.config import settings
 from app.core.database import async_session, fijar_tenant, get_session
 from app.core.runtime_settings import runtime_settings
@@ -76,7 +76,7 @@ async def _usuario_del_token(token: str | None, session: AsyncSession) -> User |
     else:
         fijar_tenant(session, tid)
         usuario = (await session.execute(select(User).where(User.id == user_id))).unique().scalar_one_or_none()
-    if not usuario or not usuario.enabled or usuario.tenant_id != tid:
+    if not usuario or not usuario.enabled or usuario.tenant_id != tid or mfa.le_falta_mfa(usuario):
         return None
     return usuario
 

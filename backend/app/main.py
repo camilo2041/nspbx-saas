@@ -58,6 +58,10 @@ _COLUMN_PATCHES = [
     "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS outbound_blocked BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS max_outbound_minutes_day INTEGER",
     "ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS via_trunk BOOLEAN",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_last_step INTEGER",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_recovery JSON",
     # El cupo diario suma los minutos de hoy por empresa en cada llamada
     # saliente (el dialplan se pide en cada llamada).
     "CREATE INDEX IF NOT EXISTS ix_call_logs_tenant_started ON call_logs (tenant_id, started_at)",

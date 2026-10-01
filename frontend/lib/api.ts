@@ -72,7 +72,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // Token vencido o cuenta desactivada a media jornada: se avisa para que
   // la aplicación devuelva a la pantalla de entrada en vez de dejar
   // errores sueltos por toda la interfaz.
-  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/api/auth/login")) {
+  // El login y su segundo paso (código de MFA) responden 401 por una
+  // contraseña o un código mal escritos: eso no es una sesión vencida.
+  if (
+    res.status === 401 &&
+    typeof window !== "undefined" &&
+    !path.startsWith("/api/auth/login") &&
+    !path.startsWith("/api/auth/mfa/verificar")
+  ) {
     window.dispatchEvent(new Event("nspbx:sesion-expirada"));
   }
 

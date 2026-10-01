@@ -21,6 +21,8 @@ _ABIERTAS = {
     "/api/auth/login",
     "/api/auth/refresh",
     "/api/auth/logout",
+    # Segundo paso del login: se autentica con el token del paso intermedio.
+    "/api/auth/mfa/verificar",
 }
 _ABIERTAS_PREFIJO = (
     # Agente de IA: secreto compartido en cabecera (X-Agent-Secret).

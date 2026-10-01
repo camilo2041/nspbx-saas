@@ -6,18 +6,29 @@ import { Button, ErrorBanner, fieldClass } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 
 export default function LoginPage() {
-  const { entrar, cargando } = useAuth();
+  const { entrar, verificarMfa, cargando } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
+  // Token del segundo paso: la contraseña fue correcta y falta el código.
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [codigo, setCodigo] = useState("");
 
   const enviar = async (e: FormEvent) => {
     e.preventDefault();
     setEnviando(true);
     setError("");
     try {
-      await entrar(username, password);
+      if (mfaToken) {
+        await verificarMfa(mfaToken, codigo);
+        return;
+      }
+      const pendiente = await entrar(username, password);
+      if (pendiente) {
+        setMfaToken(pendiente);
+        setEnviando(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo iniciar sesión");
       setEnviando(false);
@@ -47,6 +58,27 @@ export default function LoginPage() {
         >
           {error && <ErrorBanner message={error} onClose={() => setError("")} />}
 
+          {mfaToken ? (
+            <div>
+              <label htmlFor="codigo" className="mb-1.5 block text-xs font-medium text-fg-soft">
+                Código de verificación
+              </label>
+              <input
+                id="codigo"
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+                autoComplete="one-time-code"
+                inputMode="text"
+                autoFocus
+                required
+                className={fieldClass}
+              />
+              <p className="mt-1.5 text-[11px] leading-snug text-faint">
+                Los 6 dígitos de tu app de autenticación, o uno de tus códigos de recuperación.
+              </p>
+            </div>
+          ) : (
+          <>
           <div>
             <label htmlFor="usuario" className="mb-1.5 block text-xs font-medium text-fg-soft">
               Usuario
@@ -76,9 +108,11 @@ export default function LoginPage() {
               className={fieldClass}
             />
           </div>
+          </>
+          )}
 
           <Button type="submit" loading={enviando} className="mt-1 w-full justify-center">
-            Entrar
+            {mfaToken ? "Verificar" : "Entrar"}
           </Button>
         </form>
 
