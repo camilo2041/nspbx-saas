@@ -398,7 +398,10 @@ async def _buscar_cita(
     dueño, sin RLS) la búsqueda se acota a la empresa de la llamada."""
     if appointment_id:
         appt = await session.get(Appointment, appointment_id)
-        if appt:
+        # La cita fijada viene del dialer, no del modelo; igual se exige que
+        # sea de la empresa de la llamada: con la sesión del dueño, un id
+        # ajeno (campaña mal armada, variable alterada) se resolvería igual.
+        if appt and appt.tenant_id == tenant_id:
             return appt
     return await find_next_appointment(session, caller_phone, tenant_id=tenant_id)
 
@@ -485,7 +488,13 @@ def _sin_verificar(appt, args: dict, appointment_id: int | None) -> bool:
     puede falsear. Antes de mover o cancelar la cita de un número hay que oír de
     quien llama el nombre del paciente. Las llamadas de campaña (cita fijada
     de antemano) ya salen hacia el número del paciente y no lo necesitan."""
-    if appointment_id or appt is None:
+    if appt is None:
+        return False
+    # Solo se exime la cita FIJADA por el dialer. Si la fijada no se usó (no
+    # existe o es de otra empresa) y se cayó a buscar por teléfono, se pide
+    # el nombre como en cualquier entrante: antes bastaba con que hubiera
+    # un appointment_id cualquiera para saltarse la verificación.
+    if appointment_id and appt.id == appointment_id:
         return False
     return not nombre_coincide(args.get("nombre_paciente"), appt.patient_name)
 
@@ -514,7 +523,16 @@ async def _run_tool(
 
     Esta sesión es la del DUEÑO (sin RLS), así que todo lo que se lea o
     escriba va filtrado o etiquetado con `tenant_id` explícito — el
-    voizbot atiende llamadas de varias empresas en el mismo proceso."""
+    voizbot atiende llamadas de varias empresas en el mismo proceso.
+
+    Lo que pide el modelo (`args`) es una PETICIÓN: el teléfono, la
+    empresa y la cita sobre la que se actúa salen de la llamada, nunca de
+    `args`. Así un llamante que manipule al modelo ("cancela la cita de
+    3001234567") no alcanza datos que no sean suyos."""
+    # Fallo seguro: sin empresa, la sesión del dueño buscaría en todas.
+    if tenant_id is None:
+        logger.error("Tool %s pedida sin empresa: se rechaza", name)
+        return False, "No puedo hacer esa gestión en esta llamada.", None
     try:
         if name == "consultar_disponibilidad":
             d = parse_date(args["date"])
@@ -992,8 +1010,14 @@ async def handle_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
             tenantes = (await db.execute(select(Tenant.id))).scalars().all()
         if len(tenantes) == 1:
             tenant_id = tenantes[0]
-        elif not tenantes:
-            logger.error("Voizbot IA: no hay ninguna empresa configurada")
+        else:
+            # Con varias empresas y sin la de la llamada no se sabe de quién
+            # son las citas y deudas: seguir era atender con la sesión del
+            # dueño SIN filtro, buscando en todas las empresas.
+            logger.error(
+                "Voizbot IA: llamada sin nspbx_tenant_id con %d empresas en la instalación; se corta",
+                len(tenantes),
+            )
             await session.execute("hangup", "NORMAL_CLEARING")
             return
 
