@@ -196,7 +196,7 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | Límite de intentos de login por IP y por usuario | 🟢 | `core/limitador.py` (en memoria) | prueba; pasa a Redis el día que haya más de un proceso |
 | IP real detrás del proxy, no falsificable | 🟢 | `ip_cliente()` | prueba con `X-Forwarded-For` inventado |
 | `AUTH_SECRET` obligatorio en producción | ✅ | `core/arranque.py` | en producción no arranca sin ella o con menos de 32 caracteres; `test_arranque.py` |
-| MFA (TOTP) | ❌ | — | obligatorio para `plataforma` y `admin`; opcional para el resto |
+| MFA (TOTP) | ✅ | `core/mfa.py`, `/api/auth/mfa/*` | obligatorio para `plataforma` y `admin` (`MFA_OBLIGATORIO`): hasta activarla la sesión solo sirve para activarla; códigos de un solo uso y de recuperación; `test_mfa.py` (incluye los vectores de la RFC 6238) |
 | Recuperación de contraseña segura | ❌/por verificar | — | token de un solo uso, 15 min, no revela si el correo existe |
 | Lista de sesiones/dispositivos visible al usuario | ❌ | — | — |
 
@@ -217,7 +217,7 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | Validación de entradas (teléfonos, nombres, XML, rutas de audio) | 🟢 | `core/validacion.py`, Pydantic | pruebas con inyección en dialplan/XML (`limpiar_xml`, `TELEFONO_RE`) |
 | CORS abierto **sin credenciales**, token en cabecera | 🟢 | `main.py:576` | prueba de que no hay cookies de sesión |
 | Sin stack traces en producción | por verificar | — | prueba: error 500 devuelve mensaje genérico + `request_id` |
-| `request_id` en cada petición y en cada log | ❌ | — | middleware que lo genere/propague y lo devuelva en cabecera |
+| `request_id` en cada petición y en cada log | ✅ | `core/auditoria.py` | cabecera `X-Request-ID` en cada respuesta y en cada línea de log; `LOG_FORMATO=json` para un recolector; `test_auditoria.py` |
 | Cabeceras de seguridad (CSP, HSTS, X-Frame-Options, Referrer-Policy) | ❌ | `next.config.ts` y Traefik sin ellas | middleware de Traefik + `headers()` en Next |
 | Límite de peticiones por usuario/empresa (no solo login) | 🟡 | `limitar_uso` en endpoints puntuales | límite general por token y por empresa |
 | Idempotencia en operaciones críticas (iniciar campaña, cobros) | ❌ | — | cabecera `Idempotency-Key` |
@@ -326,9 +326,16 @@ llamante ─► STT ─► LLM ─► pide herramienta(args)
 
 ### 5.10 Auditoría
 
-Hoy **no existe** una bitácora de auditoría. Es el control que permite
-responder "¿quién hizo esto?" después de un incidente, y sin él la
-mayoría de los demás no se pueden investigar.
+✅ Implementada (`core/auditoria.py`, `test_auditoria.py`). Es el control
+que permite responder "¿quién hizo esto?" después de un incidente.
+
+Un middleware registra **toda** petición que modifica algo bajo `/api/` y
+cada escucha de grabación, incluidos los logins fallidos: un endpoint
+nuevo queda auditado sin que nadie tenga que acordarse. La empresa la ve
+en Seguridad y la plataforma en Empresas. La retención
+(`AUDITORIA_RETENCION_DIAS`, 365) la aplica el worker de mantenimiento.
+Lo que todavía no guarda: el valor **anterior** de lo que cambió (solo lo
+enviado).
 
 Tabla `audit_log` (append-only: el rol `nspbx_app` solo puede `INSERT` y
 `SELECT`, nunca `UPDATE`/`DELETE`):
@@ -367,7 +374,7 @@ una empresa, kill switches.
 
 | Requisito | Estado | Evidencia | Verificación |
 |---|---|---|---|
-| Migraciones versionadas y reversibles | ❌ | `ALTER TABLE ... IF NOT EXISTS` en `main.py` | migrar a Alembic; la lista actual pasa a ser la migración base |
+| Migraciones versionadas y reversibles | ✅ | Alembic en `app/migraciones` (revisión base idempotente); permisos y RLS convergen en cada arranque | `test_migraciones.py`: el esquema base congelado llevado a la última revisión tiene que coincidir con los modelos (un modelo cambiado sin revisión rompe el CI) |
 | Respaldo antes de cada migración | por verificar | — | paso obligatorio del despliegue |
 | Índices en `tenant_id` + columnas de filtro habituales | por verificar | — | revisión con `pg_stat_statements` |
 | Pool de conexiones dimensionado | por verificar | — | — |
@@ -460,17 +467,22 @@ contenido de conversaciones completas. Retención 30 días.
 
 - Diario local + off-site cifrado: 🟢 (`backup-offsite.sh`, se niega a
   subir un volcado de más de 26 h).
-- **Restauración de prueba mensual** en un servidor limpio, cronometrada:
-  ❌. Un respaldo que nunca se restauró no es un respaldo. El simulacro
-  pasa si: la base restaura, el backend arranca, una extensión registra y
-  una llamada de prueba se completa, y se anota el tiempo total (RTO real).
-- Procedimiento escrito de recuperación total (servidor perdido): ❌ →
+- **Restauración de prueba mensual**: 🟡 `scripts/simulacro-restauracion.sh`
+  restaura el último respaldo (o el paquete off-site cifrado) en un
+  Postgres descartable, comprueba empresas, usuarios y RLS, y registra
+  tiempo y edad del respaldo en `backups/simulacros.log`. Falta correrlo en
+  el servidor y, una vez por trimestre, completarlo con backend, registro
+  de una extensión y una llamada (RTO real). Ensayarlo encontró que
+  `restore.sh` rechazaba todo respaldo real y que `setup.sh` no servía en
+  un servidor nuevo con el `.env` guardado: los dos están corregidos.
+- Procedimiento escrito de recuperación total: ✅
   `docs/runbooks/recuperacion-total.md`.
 
 ### 6.4 Runbooks
 
 Cada uno con: síntomas, cómo confirmar, cómo contener, cómo recuperar, a
-quién avisar. Mínimo:
+quién avisar. En `docs/runbooks/`: ✅ 1, 2, 3 y 8. Pendientes: 4, 5, 6, 7 y
+9 (la rotación de secretos está resumida en el 2). Mínimo:
 
 1. Fraude telefónico en curso.
 2. Credencial filtrada (usuario, extensión SIP, clave de proveedor, `AUTH_SECRET`).
@@ -582,17 +594,24 @@ Quedó para después: tope de **gasto** (necesita tarifas por prefijo),
 llamadas por segundo, horario permitido de salientes, colgar las llamadas
 en curso al cortar, y agregar prefijos bloqueados desde el panel.
 
-### Fase 2 — Poder investigar y recuperar
+### Fase 2 — Poder investigar y recuperar 🟡
 
-- `audit_log` append-only y sus acciones mínimas.
-- `request_id` y logs estructurados.
-- MFA para `plataforma` y `admin`.
-- Alembic.
-- WAL continuo (RPO 15 min) y primer simulacro de restauración medido.
-- Runbooks 1, 2, 3 y 8.
+- ✅ `audit_log` de solo agregar, con todas las escrituras de la API,
+  escuchas de grabaciones y logins.
+- ✅ `request_id` y logs estructurados (`LOG_FORMATO=json`).
+- ✅ MFA obligatorio para `plataforma` y `admin`.
+- ✅ Alembic, con prueba de desvío entre modelos y revisiones.
+- 🟡 Simulacro de restauración: script listo y probado; falta la primera
+  corrida en el servidor para tener el RTO real.
+- ❌ WAL continuo (RPO 15 min): necesita un almacenamiento externo
+  (S3/B2) y configurar `archive_command` (wal-g o pgBackRest) en el
+  contenedor de Postgres; no se puede probar sin ese destino. Mientras
+  tanto el RPO sigue en hasta 24 h.
+- ✅ Runbooks 1, 2, 3 y 8.
 
 **Terminado cuando:** se puede reconstruir quién cambió una ruta saliente
-hace 30 días, y hay un RTO medido.
+hace 30 días (✅ con la auditoría), y hay un RTO medido (pendiente: correr
+el simulacro en el servidor).
 
 ### Fase 3 — Endurecer y escalar
 
@@ -628,9 +647,9 @@ la siguiente sin cerrar la anterior.
 - [ ] Todo lo de A
 - [x] Tope de minutos con corte automático (I5); el de gasto, pendiente
 - [x] Alertas de fraude
-- [ ] Auditoría de cambios sensibles
-- [ ] MFA para administradores
-- [ ] Simulacro de restauración hecho y medido
+- [x] Auditoría de cambios sensibles
+- [x] MFA para administradores
+- [ ] Simulacro de restauración hecho y medido (script listo; falta correrlo en el servidor)
 
 **Compuerta C — Se puede vender voizbot y campañas a escala**
 - [ ] Todo lo de B
