@@ -456,6 +456,27 @@ def _bloque_deuda(deuda) -> str:
     return bloque
 
 
+async def _datos_de_la_llamada(session, intencion_key: str, caller_phone: str,
+                               appointment_id_fijo: int | None, tenant_id: int | None):
+    """(cita, deuda, cita_fijada) con los que arranca el contexto del modelo.
+
+    Lo que entra acá lo puede repetir el modelo, así que se busca con las
+    mismas reglas que las herramientas (`_buscar_cita`, `_buscar_deuda`):
+    solo en la empresa de la llamada. Antes la cita fijada se leía por id con
+    la sesión del dueño sin mirar la empresa, y su paciente y fecha entraban
+    al contexto.
+
+    `cita_fijada` es True solo si la cita usada ES la que fijó el dialer. Si
+    esa se rechazó y se cayó a la del caller-ID, la llamada es como una
+    entrante: no se nombra a nadie hasta que la persona se identifique."""
+    if tenant_id is None:
+        return None, None, False
+    if intencion_key == "cobranza":
+        return None, await _buscar_deuda(session, caller_phone, tenant_id), False
+    cita = await _buscar_cita(session, caller_phone, appointment_id_fijo, tenant_id)
+    return cita, None, bool(appointment_id_fijo and cita and cita.id == appointment_id_fijo)
+
+
 def _bloque_cita(cita, fijo: bool) -> str:
     """Contexto de la cita. `fijo` = llamada de campaña (se llamó al paciente); si no, es una
     llamada entrante identificada solo por el caller-ID y los datos son confidenciales."""
@@ -1107,19 +1128,15 @@ async def handle_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
             # saludar: el saludo puede nombrar la fecha real, y el modelo
             # arranca sabiéndola, sin gastar un turno consultándola.
             async with async_session() as db:
-                deuda = None
-                if intencion.key == "cobranza":
-                    deuda = await _buscar_deuda(db, caller_phone, tenant_id)
-                    if deuda:
-                        messages[0]["content"] += _bloque_deuda(deuda)
-                else:
-                    cita = await db.get(Appointment, appointment_id_fijo) if appointment_id_fijo else None
-                    if cita is None:
-                        cita = await find_next_appointment(db, caller_phone, tenant_id=tenant_id)
+                cita, deuda, cita_fijada = await _datos_de_la_llamada(
+                    db, intencion.key, caller_phone, appointment_id_fijo, tenant_id
+                )
+            if deuda:
+                messages[0]["content"] += _bloque_deuda(deuda)
 
             if intencion.key != "cobranza":
                 if cita:
-                    messages[0]["content"] += _bloque_cita(cita, bool(appointment_id_fijo))
+                    messages[0]["content"] += _bloque_cita(cita, cita_fijada)
                 elif intencion.requiere_cita:
                     # La gestión no tiene sentido sin cita (confirmar, mover o
                     # cancelar algo que no existe). Se avisa y se corta, en vez
@@ -1168,7 +1185,7 @@ async def handle_call(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
                         "¿Me confirmas si hablo con el titular de la cuenta?"
                     )
             else:
-                if saludo_campana or appointment_id_fijo or not cita:
+                if saludo_campana or cita_fijada or not cita:
                     greeting = saludo_campana or intencion.saludo(cita)
                 else:
                     # Llamada entrante: la cita se encontró solo por el caller-ID, que

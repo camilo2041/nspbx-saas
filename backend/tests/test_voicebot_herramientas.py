@@ -172,3 +172,49 @@ async def test_ninguna_herramienta_lee_telefono_ni_empresa_de_los_argumentos():
     codigo = inspect.getsource(ai_agent._run_tool)
     for campo in ("phone", "telefono", "tenant", "empresa", "appointment_id", "cita_id"):
         assert not re.search(rf"args(\.get)?\(?\[?[\"']{campo}", codigo), f"_run_tool lee {campo!r} de args"
+
+
+# --- Lo que entra al contexto del modelo ------------------------------------
+# El modelo puede repetir cualquier cosa que tenga en el contexto, así que lo
+# que se le da al empezar la llamada sigue las mismas reglas que las
+# herramientas.
+
+
+async def _datos(intencion, tenant_id, appointment_id=None, telefono="3001112222"):
+    from app.services.ai_agent import _datos_de_la_llamada
+
+    async with async_session() as s:
+        return await _datos_de_la_llamada(s, intencion, telefono, appointment_id, tenant_id)
+
+
+async def test_contexto_cita_fijada_de_otra_empresa_no_entra(mundo, citas):
+    """Antes la cita fijada se leía por id sin mirar la empresa: el nombre y
+    la fecha del paciente de beta entraban al contexto de una llamada de alfa,
+    y encima como "fijada" (sin pedir el nombre)."""
+    from app.services.ai_agent import _bloque_cita
+
+    cita, deuda, fijada = await _datos("confirmar", mundo.alfa.id, appointment_id=citas["beta"])
+    assert cita.id == citas["alfa"] and deuda is None
+    assert fijada is False  # cayó a la del caller-ID: se trata como entrante
+    bloque = _bloque_cita(cita, fijada)
+    assert "Beto Beta" not in bloque and "CONFIDENCIAL" in bloque
+
+
+async def test_contexto_cita_fijada_propia(mundo, citas):
+    cita, _, fijada = await _datos("confirmar", mundo.alfa.id, appointment_id=citas["alfa"])
+    assert cita.id == citas["alfa"] and fijada is True
+
+
+async def test_contexto_por_telefono_solo_la_empresa_de_la_llamada(mundo, citas):
+    cita, _, fijada = await _datos("confirmar", mundo.beta.id)
+    assert cita.id == citas["beta"] and fijada is False
+    assert await _datos("confirmar", None, appointment_id=citas["alfa"]) == (None, None, False)
+
+
+async def test_contexto_cobranza_no_falla_y_no_cruza_empresas(mundo):
+    """La deuda de beta con ese teléfono no aparece en una llamada de alfa."""
+    tel = mundo.beta.telefono + "04"
+    cita, deuda, fijada = await _datos("cobranza", mundo.alfa.id, telefono=tel)
+    assert (cita, deuda, fijada) == (None, None, False)
+    _, deuda, _ = await _datos("cobranza", mundo.beta.id, telefono=tel)
+    assert deuda is not None and deuda.tenant_id == mundo.beta.id
