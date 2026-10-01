@@ -33,6 +33,10 @@ services:
     build: ./freeswitch
     container_name: nspbx_freeswitch
     logging: *logging
+    # FreeSWITCH baja solo al usuario `freeswitch` (uid 10001) al arrancar;
+    # ver freeswitch/Dockerfile y freeswitch/entrypoint.sh.
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     environment:
       # Solo para el healthcheck de acá abajo (fs_cli necesita loguearse).
@@ -166,14 +170,14 @@ services:
     logging: *logging
     security_opt:
       - no-new-privileges:true
-    # Root, pero sin los poderes de root. Sigue siendo root porque borra
-    # grabaciones (retención, supresión de datos) que FreeSWITCH crea como
-    # root en carpetas 0755: un usuario sin privilegios no podría y el
-    # disco se llenaría. Solo conserva DAC_OVERRIDE y FOWNER (escribir y
-    # borrar en las carpetas montadas); pierde el resto: abrir sockets
-    # crudos, cambiar de usuario, montar, cargar módulos, etc.
+    # Corre SIN root, como el usuario 10001 — el mismo que FreeSWITCH: borra
+    # las grabaciones que FreeSWITCH crea (retención, supresión de datos) y
+    # escribe la configuración que FreeSWITCH lee. backend/entrypoint.sh
+    # arranca como root solo para adueñarse de sus carpetas y baja de
+    # usuario; las capacidades de abajo son para ese paso y se pierden al
+    # bajar.
     cap_drop: [ALL]
-    cap_add: [DAC_OVERRIDE, FOWNER]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
     # La imagen no se puede modificar: solo escribe en los volúmenes y en
     # /tmp (subidas de audio en curso).
     read_only: true
@@ -187,6 +191,12 @@ services:
     pids_limit: 512
     restart: unless-stopped
     environment:
+      NSPBX_CORRER_COMO: "10001:10001"
+      # Lo que escribe el backend. De los sonidos, solo bots/ y prompts/:
+      # ai_sessions/ y ambience/ son del voicebot.
+      NSPBX_CARPETAS_PROPIAS: >-
+        /freeswitch-conf /freeswitch-recordings /backups
+        /freeswitch-sounds/bots /freeswitch-sounds/prompts
       TZ: ${TZ:-America/Bogota}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}@postgres:5432/${POSTGRES_DB:-nspbx}
       # Rol restringido con el que se atiende la operación normal. Es lo
@@ -341,8 +351,10 @@ services:
       - no-new-privileges:true
     # Corre SIN root (ver backend/entrypoint.sh): arranca como root solo
     # para adueñarse de las dos carpetas en las que escribe y baja al
-    # usuario 10001. Es el contenedor que habla con proveedores externos y
-    # procesa audio de llamantes desconocidos: el más expuesto.
+    # usuario 10002 — distinto del backend y de FreeSWITCH, así no puede
+    # tocar la configuración SIP ni las grabaciones. Es el contenedor que
+    # habla con proveedores externos y procesa audio de llamantes
+    # desconocidos: el más expuesto.
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID]
     read_only: true
@@ -354,7 +366,7 @@ services:
     restart: unless-stopped
     command: ["uvicorn", "app.voicebot_server:app", "--host", "0.0.0.0", "--port", "8090"]
     environment:
-      NSPBX_CORRER_COMO: "10001:10001"
+      NSPBX_CORRER_COMO: "10002:10002"
       NSPBX_CARPETAS_PROPIAS: /freeswitch-sounds/ai_sessions /freeswitch-sounds/ambience
       TZ: ${TZ:-America/Bogota}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}@postgres:5432/${POSTGRES_DB:-nspbx}

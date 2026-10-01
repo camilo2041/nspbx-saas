@@ -31,6 +31,16 @@ nueva_clave_datos() { openssl rand 32 | base64 | tr '+/' '-_' | tr -d '\n'; }
 
 # Los tres archivos de FreeSWITCH que llevan secretos, generados desde
 # sus plantillas .example con los MISMOS valores del .env.
+# ./secrets se monta de solo lectura en el backend, que corre como el usuario
+# 10001 (no root): sus archivos tienen que ser de ese usuario. El resto de
+# las carpetas montadas las ajustan los propios contenedores al arrancar.
+dar_secretos_al_backend() {
+  if [ -d secrets ]; then
+    chown -R 10001:10001 secrets 2>/dev/null \
+      || echo "  AVISO: no pude cambiar el dueño de secrets/ (corré: sudo chown -R 10001:10001 secrets)"
+  fi
+}
+
 generar_xml_faltantes() {
   local esl="$1" xml="$2" f
   for f in event_socket.conf.xml xml_curl.conf.xml json_cdr.conf.xml; do
@@ -92,6 +102,7 @@ if [ -f .env ]; then
     echo "  DATA_ENCRYPTION_KEY agregada al .env. Guardala fuera del servidor."
   fi
   mkdir -p backups freeswitch/recordings freeswitch/certs
+  dar_secretos_al_backend
   # Pero sí se revisa que los XML coincidan con él. La versión anterior
   # salía acá directo, y eso permitía el peor de los casos: alguien
   # rehace el .env (con secretos nuevos), los XML se quedan con los
@@ -200,6 +211,7 @@ generar_vars_xml
 # Carpetas que el compose monta desde el host. Si no existen, Docker las
 # crea como root y después el backend no puede escribir dentro.
 mkdir -p backups freeswitch/recordings freeswitch/certs
+dar_secretos_al_backend
 
 echo
 echo "Listo. Secretos generados y sincronizados en .env y en $AUTOLOAD/."

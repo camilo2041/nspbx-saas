@@ -391,8 +391,8 @@ una empresa, kill switches.
 |---|---|---|---|
 | Postgres sin puerto publicado | 🟢 | solo red `nspbx_net` | escaneo externo |
 | Rotación de logs de Docker | 🟢 | `x-logging` | — |
-| `no-new-privileges` | 🟢 | backend, voicebot y frontend | FreeSWITCH y Postgres sin tocar a propósito |
-| Contenedores sin root | 🟡 | voicebot como usuario 10001 (`backend/entrypoint.sh`); frontend como `node`; backend root **sin capacidades** salvo `DAC_OVERRIDE` y `FOWNER` | probado con Docker. El backend no puede dejar root mientras FreeSWITCH corra como root y cree las grabaciones en carpetas 0755: la retención no podría borrarlas. El paso siguiente es correr FreeSWITCH con el mismo usuario |
+| `no-new-privileges` | 🟢 | backend, voicebot, frontend y FreeSWITCH | Postgres sin tocar a propósito |
+| Contenedores sin root | 🟢 | FreeSWITCH y backend como 10001 (comparten grabaciones y configuración); voicebot como 10002 (solo sus carpetas de audio); frontend como `node`. Cada uno arranca como root solo para adueñarse de sus carpetas montadas (`backend/entrypoint.sh`, `freeswitch/entrypoint.sh`) | probado con Docker y FreeSWITCH 1.10.12 real sobre una instalación existente (todo de root): perfiles SIP arriba, FreeSWITCH crea grabaciones que el backend borra, el backend escribe troncales que FreeSWITCH carga, el voicebot no alcanza ni configuración ni grabaciones, renovación del certificado wss. Sin prueba automática: la imagen de FreeSWITCH tarda ~40 min en compilarse |
 | Límites de CPU/memoria por contenedor | 🟢 | backend 1 GB, voicebot 2 GB, frontend 1 GB, 512 procesos; configurables en `.env` | en reposo usan ~100 MB; ajustar a 2× el pico de un día de campaña. Nunca en FreeSWITCH ni Postgres |
 | Filesystem de solo lectura donde se pueda | 🟢 | backend y voicebot `read_only` + `/tmp` en memoria | probado con Docker: escriben solo en sus volúmenes. El frontend no, porque Next escribe su caché |
 | Healthchecks | 🟢 | postgres, freeswitch, backend, voicebot | — |
@@ -629,11 +629,12 @@ el simulacro en el servidor).
   de flujos con restauración.
 - ✅ Grabaciones por carpeta de empresa y retención por empresa; las
   escuchas ya se auditaban.
-- 🟡 **Contenedores**: voicebot sin root; backend root pero sin
-  capacidades (ver §5.13 por qué); imagen de solo lectura en los dos;
-  topes de memoria, CPU y procesos. Probado con Docker. Falta: medir el
-  pico real en un día de campaña y ajustar los topes, y correr FreeSWITCH
-  sin root para que el backend también pueda dejarlo.
+- ✅ **Contenedores**: ninguno de los nuestros corre como root (FreeSWITCH
+  y backend 10001, voicebot 10002); imagen de solo lectura en backend y
+  voicebot; topes de memoria, CPU y procesos. Probado con Docker (§5.13).
+  Falta: medir el pico real en un día de campaña y ajustar los topes.
+  Al actualizar un servidor existente, ver «Actualizar a contenedores sin
+  root» más abajo.
 - ✅ El contexto inicial del voizbot sigue las mismas reglas que sus
   herramientas.
 - Redis para limitadores y estado compartido: no hace falta mientras el
@@ -641,12 +642,34 @@ el simulacro en el servidor).
   levantar más de un proceso o réplica.
 - SBC (Kamailio/OpenSIPS) delante de FreeSWITCH cuando el volumen lo justifique.
 
+#### Actualizar a contenedores sin root
+
+1. `git pull` y `docker compose build` (FreeSWITCH se recompila: ~40 min).
+2. `bash scripts/setup.sh` (no regenera nada: deja `secrets/` del usuario
+   10001).
+3. `docker compose up -d`. El primer arranque cambia el dueño de
+   grabaciones, configuración, sonidos y respaldos (recorre todo una vez;
+   con muchas grabaciones puede tardar algunos segundos más).
+4. Revisar `docker compose logs backend | grep AVISO`: si sale la base de
+   fail2ban, correr el `setfacl` que indica.
+5. Si hay un cron de `renovar-cert-wss.sh`, ya deja el certificado del
+   usuario de FreeSWITCH. Con la versión anterior del guion, la próxima
+   renovación tumbaba el perfil `internal` entero (teléfonos y softphone).
+
+Lo que se restaure a mano dentro de esas carpetas con un usuario del
+servidor (grabaciones de un respaldo, por ejemplo) queda de ese usuario
+hasta el próximo arranque de los contenedores, que lo corrige.
+
 Lo que dejó a la vista la fase 3, ya corregido: el voizbot buscaba en
 todas las empresas si una llamada llegaba sin empresa; la verificación del
 nombre del paciente se saltaba con cualquier cita fijada; el contexto
 público grababa las entrantes de empresas que no graban; un secreto
 cifrado corrupto hacía fallar el descifrado; una cita fijada de otra
-empresa entraba al contexto del voizbot (y se nombraba sin verificar).
+empresa entraba al contexto del voizbot (y se nombraba sin verificar). Al
+sacar root, las pruebas con Docker encontraron dos más antes de llegar a
+producción: el backend no arrancaba (HOME seguía en /root y asyncpg no
+podía mirar ahí) y la renovación del certificado wss tumbaba el perfil SIP
+`internal`.
 
 ### Fase 4 — Producto SaaS maduro 🟡
 
