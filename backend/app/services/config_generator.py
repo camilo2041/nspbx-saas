@@ -2,11 +2,12 @@ import json
 import logging
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 
 from app.core import validacion
 from app.core.config import settings
 from app.core.firmas import firma_push
-from app.services import voice_prompts
+from app.services import salientes, voice_prompts
 from app.services.flow_engine import build_voicebot_flow_routes
 
 logger = logging.getLogger(__name__)
@@ -431,24 +432,33 @@ def _append_outbound_route(
     context: ET.Element,
     trunks: list,
     slug_por_tenant: dict[int, str],
-    permitir_internacional: bool = False,
+    politica: salientes.Politica | None = None,
     tope_simultaneas: int = 0,
     slug: str = "",
     rutas: list | None = None,
 ) -> None:
-    """Ruta de salida: números externos (7-15 dígitos) vía la cadena de
-    troncales habilitadas, en serie (separadas por "|" en `bridge`, que es
-    la sintaxis de FreeSWITCH para "probá la primera; si no contesta o la
-    rechaza, probá la siguiente"). Con una sola troncal habilitada, esto
-    genera exactamente la misma llamada de antes.
+    """Ruta de salida: números externos vía la cadena de troncales
+    habilitadas, en serie (separadas por "|" en `bridge`, que es la sintaxis
+    de FreeSWITCH para "probá la primera; si no contesta o la rechaza,
+    probá la siguiente"). Con una sola troncal habilitada, esto genera
+    exactamente la misma llamada de antes.
 
     Con rutas configuradas (tabla outbound_routes) se emite UNA extensión
     por regla, en orden de prioridad: gana la primera que coincide, igual
-    que en Issabel/FreePBX. Sin ninguna regla se mantiene exactamente la
-    ruta única de siempre, así que una central existente no cambia de
-    comportamiento al actualizar.
+    que en Issabel/FreePBX. Sin ninguna regla se mantiene la ruta única de
+    siempre.
+
+    Qué números pueden salir lo decide services/salientes.py, sobre el
+    número que se le entrega al proveedor (después de quitar y anteponer
+    dígitos): su condición va al comienzo del grupo de captura. Una regla
+    que con esa política no podría sacar ninguna llamada se omite.
+    Internacional exige el permiso de la EMPRESA y el de la regla.
     """
+    politica = politica or salientes.Politica()
     cadena = orden_troncales(trunks)
+    if politica.bloqueo:
+        _append_outbound_blocked(context, politica.bloqueo)
+        return
     if not cadena:
         return
 
@@ -457,12 +467,15 @@ def _append_outbound_route(
         key=lambda r: (r.priority, r.id),
     )
     if not activas:
-        # Sin permiso internacional: nada de prefijos 00/011 ni de más de 10
-        # dígitos (el fraude cae en destinos de ese tipo).
-        expresion = r"^(\d{7,15})$" if permitir_internacional else r"^(?!00|011)(\d{7,10})$"
+        restriccion = salientes.restriccion_regex(politica)
+        if restriccion is None:
+            return
+        # Mínimo 7 símbolos: los códigos cortos (ecos, colas, *78) los
+        # atienden las extensiones de más arriba y no tienen que caer acá.
+        expresion = r"^(" + restriccion + r"\+?[0-9]{7,18})$"
         _append_outbound_extension(
             context, "Outbound_External", expresion, cadena,
-            "${destination_number}", slug_por_tenant, tope_simultaneas, slug,
+            "$1", slug_por_tenant, tope_simultaneas, slug,
         )
         return
 
@@ -476,8 +489,6 @@ def _append_outbound_route(
             # mande llamadas a donde no corresponde.
             logger.error("Ruta saliente %s omitida: %s", ruta.id, e)
             continue
-        if not ruta.allow_international:
-            expresion = "^(?!00|011)" + expresion[1:]
 
         # Troncales de la regla, en su orden; vacío = todas las de la empresa.
         elegidas = [por_id[i] for i in ruta.trunk_id_list if i in por_id] or cadena
@@ -490,10 +501,35 @@ def _append_outbound_route(
             logger.error("Ruta saliente %s omitida: prefijo %r no válido", ruta.id, prefijo)
             continue
 
+        politica_ruta = replace(
+            politica, permitir_internacional=politica.permitir_internacional and bool(ruta.allow_international)
+        )
+        restriccion = salientes.restriccion_regex(politica_ruta, prefijo)
+        if restriccion is None:
+            logger.warning(
+                "Ruta saliente %s omitida: con el prefijo %r no puede sacar ninguna llamada permitida", ruta.id, prefijo
+            )
+            continue
+        # patron_marcado_a_regex no genera otros paréntesis: el primero es
+        # el grupo de lo que sale.
+        expresion = expresion.replace("(", "(" + restriccion, 1)
+
         _append_outbound_extension(
             context, f"Outbound_{ruta.id}", expresion, elegidas,
             f"{prefijo}$1", slug_por_tenant, tope_simultaneas, slug, ruta.name,
         )
+
+
+def _append_outbound_blocked(context: ET.Element, motivo: str) -> None:
+    """Salientes cortadas: cualquier número externo se rechaza con un motivo
+    en el log, en vez de caer en "sin ruta" sin explicación."""
+    extension = ET.SubElement(context, "extension", attrib={"name": "Outbound_Bloqueadas", "continue": "false"})
+    condition = ET.SubElement(
+        extension, "condition", attrib={"field": "destination_number", "expression": r"^\+?[0-9]{5,}$"}
+    )
+    texto = re.sub(r"[^\w .,:áéíóúñÁÉÍÓÚÑ-]", "", motivo)[:150]
+    ET.SubElement(condition, "action", attrib={"application": "log", "data": f"WARNING Saliente rechazada: {texto}"})
+    ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "CALL_REJECTED"})
 
 
 def _append_outbound_extension(
@@ -792,7 +828,7 @@ def build_dialplan_xml(
             context,
             trunks,
             slugs,
-            t.get("allow_international", False),
+            t.get("politica"),
             t.get("max_concurrent", 0),
             slugs.get(t["tenant_id"], t.get("slug", "")),
             t.get("outbound_routes") or [],

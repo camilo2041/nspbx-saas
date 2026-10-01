@@ -9,7 +9,7 @@ from app.core.clock import fecha_en_palabras
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import Campaign, CampaignNumber, SystemSettings, Tenant, Trunk, VoiceBot
-from app.services import esl, licensing, templating
+from app.services import esl, licensing, salientes, templating
 from app.services.fechas import formatear_natural, parse_fecha_hora
 from app.services.config_generator import orden_troncales
 from app.services.numeros import numero_a_palabras
@@ -194,6 +194,14 @@ class CampaignDialer:
                 slug = tenant.slug if tenant else "x"
             if not trunk or not trunk.enabled:
                 raise RuntimeError("Campaña sin troncal habilitado")
+            # El originate va directo a la troncal, sin pasar por el
+            # dialplan: la política de salientes (internacional, países,
+            # destinos premium, interruptores) se aplica acá o no se aplica.
+            async with async_session() as s:
+                politica = await salientes.politica_de(s, fresh.tenant_id)
+            motivo = salientes.motivo_bloqueo(number.phone, politica)
+            if motivo:
+                raise salientes.SalienteBloqueada(motivo, definitiva=politica.bloqueo is None)
             exten = f"bot_{bot.id}" if bot and bot.enabled else None
 
             # La empresa y la gestión de esta llamada viajan SIEMPRE en el
@@ -324,7 +332,16 @@ class CampaignDialer:
                 fresh = await s.get(Campaign, campaign.id)
                 if target:
                     target.last_error = str(exc)[:500]
-                    if target.attempts > (fresh.retries if fresh else 0):
+                    if isinstance(exc, salientes.SalienteBloqueada):
+                        # Destino prohibido: reintentar no cambia nada. Salientes
+                        # cortadas (interruptor, cupo): el número espera, sin
+                        # gastar un intento.
+                        if exc.definitiva:
+                            target.status = "failed"
+                        else:
+                            target.status = "pending"
+                            target.attempts = max(0, target.attempts - 1)
+                    elif target.attempts > (fresh.retries if fresh else 0):
                         target.status = final_status
                     else:
                         target.status = "pending"

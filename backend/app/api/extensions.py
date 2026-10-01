@@ -7,6 +7,7 @@ from app.models import Extension, Tenant, Trunk
 from app.schemas import CallRequest, ExtensionCreate, ExtensionOut, ExtensionUpdate
 from app.services import licensing
 from app.services.config_generator import orden_troncales
+from app.services import salientes
 from app.services.esl import originate_bridge, reloadxml
 
 router = APIRouter(prefix="/api/extensions", tags=["extensions"])
@@ -91,6 +92,11 @@ async def call_extension(
             raise HTTPException(status_code=404, detail="Troncal no encontrada")
         if not trunk.enabled:
             raise HTTPException(status_code=400, detail="La troncal está deshabilitada")
+        # Esto sale directo a la troncal (originate), sin pasar por el
+        # dialplan: la política de salientes se aplica acá o no se aplica.
+        motivo = salientes.motivo_bloqueo(destination, await salientes.politica_de(session, ext.tenant_id))
+        if motivo:
+            raise HTTPException(status_code=403, detail=motivo)
         # La troncal elegida va primero; si hay otras habilitadas de la
         # misma empresa, quedan de respaldo — si esta no contesta o la
         # rechaza, FreeSWITCH prueba la siguiente sola, sin que el clic a

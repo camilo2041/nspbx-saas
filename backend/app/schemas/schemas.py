@@ -290,6 +290,7 @@ class SystemSettingsOut(BaseModel):
     deepgram_api_key: Optional[str] = None
     record_all_calls: bool = False
     allow_international: bool = False
+    international_countries: str = ""
     ai_stt_provider: str = "elevenlabs"
     ai_voice_provider: str = "elevenlabs"
     ai_voice_id: str = "Xb7hH8MSUJpSbSDYk0k2"
@@ -362,6 +363,10 @@ class SystemSettingsUpdate(BaseModel):
 
     record_all_calls: Optional[bool] = None
     allow_international: Optional[bool] = None
+    # Códigos de país separados por coma ("57, 1, 34"); se guardan normalizados.
+    international_countries: Optional[str] = Field(
+        default=None, max_length=200, pattern=r"^[0-9+,;\s]*$"
+    )
     ai_stt_provider: Optional[str] = Field(default=None, pattern="^(elevenlabs|deepgram)$")
     ai_voice_provider: Optional[str] = Field(default=None, pattern="^(edge|elevenlabs|deepgram)$")
     ai_voice_id: Optional[str] = None

@@ -112,6 +112,8 @@ export interface CampaignNumbersUploadResult {
   total: number;
   agenda_creadas: number;
   agenda_omitidas: { phone: string; motivo: string }[];
+  /** Números que la política de salientes no deja marcar; no se cargan. */
+  bloqueados?: { phone: string; motivo: string }[];
 }
 
 export interface CampaignStats {
@@ -234,6 +236,7 @@ export interface SystemSettings {
   deepgram_api_key: string | null;
   record_all_calls: boolean;
   allow_international: boolean;
+  international_countries: string;
   ai_stt_provider: "elevenlabs" | "deepgram";
   ai_voice_provider: "edge" | "elevenlabs" | "deepgram";
   ai_voice_id: string;

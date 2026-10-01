@@ -65,6 +65,7 @@ const empty: SystemSettings = {
   deepgram_api_key: "",
   record_all_calls: false,
   allow_international: false,
+  international_countries: "",
   ai_stt_provider: "elevenlabs",
   ai_voice_provider: "elevenlabs",
   ai_voice_id: "",
@@ -393,11 +394,21 @@ export default function SettingsPage() {
               <div>
                 <div className="text-sm text-fg-soft">Permitir llamadas internacionales</div>
                 <div className="mt-0.5 text-[11px] leading-snug text-faint">
-                  Apagado, solo se marcan números nacionales (hasta 10 dígitos, sin prefijos 00/011). Actívalo solo si lo necesitas: es el destino habitual del fraude telefónico.
+                  Apagado, solo se marcan números nacionales (hasta 10 dígitos, sin prefijos 00/011/+). Actívalo solo si lo necesitas: es el destino habitual del fraude telefónico.
                 </div>
               </div>
               <Toggle checked={form.allow_international} onChange={(v) => set("allow_international", v)} />
             </div>
+            {form.allow_international && (
+              <Input
+                label="Países permitidos"
+                value={form.international_countries}
+                onChange={(v) => set("international_countries", v)}
+                placeholder="57, 1, 34"
+                hint="Códigos de país separados por coma. Vacío = ningún internacional. Satelitales y tarifas premium (+870, +881, +882, +883, +979, +808, +1 900) quedan bloqueados siempre."
+                mono
+              />
+            )}
           </CardBody>
         </Card>
 

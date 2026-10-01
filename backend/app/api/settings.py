@@ -7,7 +7,7 @@ from app.core.database import get_session
 from app.core.runtime_settings import runtime_settings
 from app.models import Queue, SystemSettings, User
 from app.schemas import SystemSettingsOut, SystemSettingsUpdate
-from app.services import esl
+from app.services import esl, salientes
 from app.services.ajustes import get_or_create_settings
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -106,6 +106,11 @@ async def update_settings(
     cola = cambios.get("webcall_queue_id")
     if cola and not await session.get(Queue, cola):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="La cola indicada no existe")
+
+    # Se guarda normalizado ("57,1,34") para que el dialplan y el panel lean
+    # lo mismo que va a aplicar la política de salientes.
+    if "international_countries" in cambios:
+        cambios["international_countries"] = ",".join(salientes.paises_desde_texto(cambios["international_countries"]))
 
     cambio_esl = any(k in cambios for k in ("fs_esl_host", "fs_esl_port", "fs_esl_password", "fs_http_base"))
     for field, value in cambios.items():

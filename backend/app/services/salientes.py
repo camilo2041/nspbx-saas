@@ -1,0 +1,243 @@
+"""Política de llamadas salientes: UN solo lugar decide qué número puede salir.
+
+Las llamadas salen por tres caminos, y antes cada uno tenía su propia
+regla (o ninguna):
+
+- el dialplan, cuando un teléfono marca un número externo;
+- el clic-para-llamar del panel (`POST /api/extensions/{id}/call`);
+- el marcador de campañas (`workers/dialer.py`).
+
+Los dos últimos hacen `originate` directo a `sofia/gateway/...`: no pasan
+por el dialplan, así que el filtro internacional del dialplan no los
+alcanzaba. Y el del dialplan miraba el número MARCADO, no el que sale:
+una ruta "9." que quita el 9 dejaba salir `9 0044…` como `0044…`.
+
+Acá se define la política una vez, sobre el número que de verdad se le
+entrega al proveedor, y se aplica de dos formas que tienen que coincidir:
+
+- `motivo_bloqueo()` en Python, para el clic-para-llamar y las campañas;
+- `restriccion_regex()`, que la traduce a una condición del dialplan.
+
+backend/tests/test_salientes.py comprueba que las dos decidan igual para
+miles de combinaciones de prefijo y número marcado.
+"""
+
+import re
+from dataclasses import dataclass
+
+# Cómo se marca un destino internacional. "011" es el de Norteamérica;
+# en Colombia, los prefijos de operador de larga distancia (005, 007,
+# 009…) empiezan con "00" y quedan cubiertos por ese.
+PREFIJOS_INTERNACIONALES = ("011", "00", "+")
+
+# Sin prefijo internacional, un número de más de esto no es nacional: o es
+# un internacional marcado sin prefijo (que algunos proveedores aceptan) o
+# un error. En Colombia fijos y celulares tienen 10 dígitos.
+LARGO_MAXIMO_NACIONAL = 10
+
+# Códigos que se bloquean SIEMPRE, aunque la empresa tenga internacional:
+# redes satelitales e internacionales (870 Inmarsat, 881 GMSS, 882/883
+# redes internacionales), tarifa premium internacional (979), costo
+# compartido (808) y premium de Norteamérica (1 900). Son el destino
+# clásico del fraude por tráfico internacional (IRSF): cobran por minuto
+# al que llama y el estafador se lleva una parte.
+CODIGOS_BLOQUEADOS = ("870", "881", "882", "883", "979", "808", "1900")
+
+_NUMERO_RE = re.compile(r"^\+?[0-9*#]+$")
+_SEPARADORES_RE = re.compile(r"[\s\-().]")
+_PAIS_RE = re.compile(r"^[1-9][0-9]{0,3}$")
+
+
+class SalienteBloqueada(RuntimeError):
+    """Una llamada que la política no deja salir.
+
+    `definitiva`: el destino está prohibido (reintentar no sirve). Si es
+    False, las salientes están cortadas por un tiempo (interruptor, cupo)."""
+
+    def __init__(self, motivo: str, definitiva: bool = True):
+        super().__init__(f"Saliente bloqueada: {motivo}")
+        self.motivo = motivo
+        self.definitiva = definitiva
+
+
+@dataclass(frozen=True)
+class Politica:
+    """Lo que una empresa puede marcar en este momento."""
+
+    permitir_internacional: bool = False
+    # Códigos de país permitidos ("57", "1", "34"…). Con internacional
+    # activado y la lista vacía, no sale ningún internacional: hay que
+    # elegir a qué países, no habilitar el mundo entero.
+    paises: tuple[str, ...] = ()
+    # Si no es None, las salientes están cortadas y este es el motivo
+    # (interruptor de la empresa o de la plataforma, cupo diario agotado).
+    bloqueo: str | None = None
+
+
+def paises_desde_texto(texto: str | None) -> tuple[str, ...]:
+    """"57, 1,34" -> ("57", "1", "34"). Ignora lo que no sea un código válido."""
+    salida = []
+    for parte in (texto or "").replace(";", ",").split(","):
+        parte = parte.strip().lstrip("+")
+        if _PAIS_RE.fullmatch(parte) and parte not in salida:
+            salida.append(parte)
+    return tuple(salida)
+
+
+def normalizar(numero: str | None) -> str:
+    return _SEPARADORES_RE.sub("", numero or "")
+
+
+def _prefijo_internacional(numero: str) -> str | None:
+    for prefijo in PREFIJOS_INTERNACIONALES:
+        if numero.startswith(prefijo):
+            return prefijo
+    return None
+
+
+def motivo_bloqueo(numero: str | None, politica: Politica) -> str | None:
+    """None si `numero` puede salir; si no, el motivo para mostrar o registrar.
+
+    `numero` es lo que se le entrega al proveedor (después de quitar y
+    anteponer dígitos), no lo que se marcó."""
+    if politica.bloqueo:
+        return politica.bloqueo
+    n = normalizar(numero)
+    if not n or not _NUMERO_RE.fullmatch(n):
+        return "Número no válido"
+    prefijo = _prefijo_internacional(n)
+    if prefijo is None:
+        if len(n) > LARGO_MAXIMO_NACIONAL:
+            return (
+                f"Número de más de {LARGO_MAXIMO_NACIONAL} dígitos sin prefijo internacional: "
+                "los internacionales se marcan con 00, 011 o +"
+            )
+        return None
+    resto = n[len(prefijo):]
+    if not resto.isdigit():
+        return "Número no válido"
+    for codigo in CODIGOS_BLOQUEADOS:
+        if resto.startswith(codigo):
+            return f"Destino bloqueado siempre (+{codigo}: red satelital o tarifa premium)"
+    if not politica.permitir_internacional:
+        return "Las llamadas internacionales no están habilitadas para esta empresa"
+    if not any(resto.startswith(p) for p in politica.paises):
+        return "El país de destino no está entre los permitidos para esta empresa"
+    return None
+
+
+# --- Traducción al dialplan --------------------------------------------
+#
+# Una ruta del dialplan tiene la forma  ^<dígitos que se quitan>(<resto>)$
+# y marca  <antepuesto>$1 . La condición tiene que valer sobre lo que sale
+# (antepuesto + $1), pero la expresión solo ve lo marcado. La solución es
+# "consumir" el antepuesto, que es un texto fijo: para cada prefijo
+# prohibido o requerido se calcula qué le falta a $1 para completarlo
+# (la derivada del prefijo respecto del antepuesto), y eso va como una
+# condición al comienzo del grupo.
+
+
+def _derivar(prefijos: list[str], antepuesto: str) -> list[str] | None:
+    """Qué tiene que traer el grupo para que `antepuesto + grupo` empiece
+    con alguno de `prefijos`.
+
+    Devuelve None si el antepuesto solo ya empieza con uno (se cumple
+    siempre, traiga lo que traiga el grupo); una lista vacía si no hay
+    forma de cumplirlo."""
+    restos: list[str] = []
+    for p in prefijos:
+        if antepuesto.startswith(p):
+            return None
+        if p.startswith(antepuesto):
+            resto = p[len(antepuesto):]
+            if resto not in restos:
+                restos.append(resto)
+    return restos
+
+
+def _alternativas(restos: list[str]) -> str:
+    return "|".join(re.escape(r) for r in sorted(restos, key=len, reverse=True))
+
+
+def restriccion_regex(politica: Politica, antepuesto: str = "") -> str | None:
+    """Condición (lookahead) que va al comienzo del grupo de captura.
+
+    Devuelve None si con esta política y este antepuesto la ruta no puede
+    sacar ninguna llamada: quien genera el dialplan la omite."""
+    if politica.bloqueo:
+        return None
+    antepuesto = normalizar(antepuesto)
+    ramas: list[str] = []
+
+    # Nacional: lo que sale no empieza con prefijo internacional y tiene
+    # como mucho LARGO_MAXIMO_NACIONAL símbolos.
+    internacionales = _derivar(list(PREFIJOS_INTERNACIONALES), antepuesto)
+    disponible = LARGO_MAXIMO_NACIONAL - len(antepuesto)
+    if internacionales is not None and disponible >= 0 and re.fullmatch(r"[0-9*#]*", antepuesto):
+        rama = ""
+        if internacionales:
+            rama += f"(?!{_alternativas(internacionales)})"
+        minimo = 0 if antepuesto else 1
+        rama += f"[0-9*#]{{{minimo},{disponible}}}$"
+        ramas.append(rama)
+
+    # Internacional: empieza con prefijo + país permitido, y no con un
+    # código bloqueado.
+    if politica.permitir_internacional and politica.paises:
+        buenos = [i + p for i in PREFIJOS_INTERNACIONALES for p in politica.paises]
+        malos = [i + c for i in PREFIJOS_INTERNACIONALES for c in CODIGOS_BLOQUEADOS]
+        requeridos = _derivar(buenos, antepuesto)
+        prohibidos = _derivar(malos, antepuesto)
+        if prohibidos is not None and requeridos != []:
+            rama = ""
+            if requeridos:
+                rama += f"(?={_alternativas(requeridos)})"
+            if prohibidos:
+                rama += f"(?!{_alternativas(prohibidos)})"
+            # Lo que sale tiene que ser prefijo + dígitos: después de un "+"
+            # o del antepuesto, el grupo trae solo dígitos.
+            rama += "[0-9]*$" if antepuesto else r"\+?[0-9]+$"
+            ramas.append(rama)
+
+    if not ramas:
+        return None
+    return "(?=" + "|".join(f"(?:{r})" for r in ramas) + ")"
+
+
+# --- De dónde sale la política de cada empresa ---------------------------
+
+
+def politica_desde_ajustes(ajustes, bloqueo: str | None = None) -> Politica:
+    """`ajustes` es la fila de SystemSettings de la empresa (o None)."""
+    if ajustes is None:
+        return Politica(bloqueo=bloqueo)
+    return Politica(
+        permitir_internacional=bool(ajustes.allow_international),
+        paises=paises_desde_texto(getattr(ajustes, "international_countries", "")),
+        bloqueo=bloqueo,
+    )
+
+
+async def politicas(session, tenant_ids) -> dict[int, Politica]:
+    """La política vigente de cada empresa pedida.
+
+    Sirve con la sesión del dueño (dialplan, marcador) o con la de la
+    aplicación (clic-para-llamar): en ese caso RLS solo deja leer la propia
+    empresa, y las demás quedan sin ajustes, es decir, con la política más
+    restrictiva."""
+    from sqlalchemy import select
+
+    from app.models import SystemSettings
+
+    ids = list(tenant_ids)
+    if not ids:
+        return {}
+    filas = (
+        await session.execute(select(SystemSettings).where(SystemSettings.tenant_id.in_(ids)))
+    ).scalars().all()
+    por_tenant = {f.tenant_id: f for f in filas}
+    return {tid: politica_desde_ajustes(por_tenant.get(tid)) for tid in ids}
+
+
+async def politica_de(session, tenant_id: int) -> Politica:
+    return (await politicas(session, [tenant_id]))[tenant_id]

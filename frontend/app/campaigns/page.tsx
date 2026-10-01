@@ -711,6 +711,20 @@ export default function CampaignsPage() {
                     {uploadResult.updated > 0 && ` · ${uploadResult.updated} actualizado(s) (ya estaban cargados)`}
                     {uploadResult.agenda_creadas > 0 && ` · ${uploadResult.agenda_creadas} cita(s) cargada(s) en la Agenda`}
                   </p>
+                  {(uploadResult.bloqueados?.length ?? 0) > 0 && (
+                    <>
+                      <p className="mt-1.5 text-danger-text">
+                        {uploadResult.bloqueados!.length} número(s) no cargado(s): la política de salientes no los deja marcar.
+                      </p>
+                      <ul className="mt-1 space-y-0.5 text-danger-text">
+                        {uploadResult.bloqueados!.map((o) => (
+                          <li key={`b-${o.phone}`}>
+                            {o.phone}: {o.motivo}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                   {uploadResult.agenda_omitidas.length > 0 && (
                     <ul className="mt-1.5 space-y-0.5 text-danger-text">
                       {uploadResult.agenda_omitidas.map((o) => (

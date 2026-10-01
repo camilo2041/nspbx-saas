@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, func, select, update
@@ -16,7 +17,7 @@ from app.schemas import (
     CampaignStats,
     CampaignUpdate,
 )
-from app.services import licensing
+from app.services import licensing, salientes
 from app.services.appointments import is_slot_free
 from app.services.fechas import parse_fecha_hora as _parse_fecha_hora
 from app.workers.dialer import dialer
@@ -289,7 +290,17 @@ async def add_numbers(
     updated = 0
     agenda_creadas = 0
     agenda_omitidas: list[dict] = []
+    # Destinos que la política de salientes nunca dejaría marcar
+    # (internacional sin permiso, país no habilitado, premium): se avisan al
+    # cargar, en vez de que la campaña los descubra fallando uno por uno.
+    # El marcador igual los vuelve a revisar antes de cada llamada.
+    politica = replace(await salientes.politica_de(session, campaign.tenant_id), bloqueo=None)
+    bloqueados: list[dict] = []
     for fila in payload.numbers:
+        motivo = salientes.motivo_bloqueo(fila.phone, politica)
+        if motivo:
+            bloqueados.append({"phone": fila.phone, "motivo": motivo})
+            continue
         numero = existentes.get(fila.phone)
         if numero:
             # Ya estaba cargado en esta campaña. Antes esto se ignoraba
@@ -328,6 +339,7 @@ async def add_numbers(
         "total": len(existentes),
         "agenda_creadas": agenda_creadas,
         "agenda_omitidas": agenda_omitidas,
+        "bloqueados": bloqueados,
     }
 
 

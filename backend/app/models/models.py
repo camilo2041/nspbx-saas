@@ -346,9 +346,13 @@ class SystemSettings(Base):
     # tráfico entrante) superaran lo que la troncal real soporta, y el
     # proveedor empieza a rechazar TODO, entrantes incluidas.
     max_concurrent_calls: Mapped[int] = mapped_column(Integer, default=20)
-    # Llamadas internacionales (prefijos 00/011 o más de 10 dígitos). Apagado
-    # por defecto: es el destino habitual del fraude telefónico.
+    # Llamadas internacionales (prefijos 00/011/+). Apagado por defecto: es
+    # el destino habitual del fraude telefónico. Activarlo no alcanza: hay
+    # que elegir además los países (ver services/salientes.py).
     allow_international: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Códigos de país permitidos con internacional activado, separados por
+    # coma ("57,1,34"). Vacío = ninguno.
+    international_countries: Mapped[str] = mapped_column(String(200), default="")
 
     # Widget de "llamar a un agente" embebible en sitios web públicos (ver
     # app/api/webcall.py y app/services/webcall.py). Un visitante anónimo
