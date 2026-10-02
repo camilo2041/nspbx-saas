@@ -326,7 +326,7 @@ export function FilaMenu({
         ) : null}
       </View>
       {valor ? (
-        <Text style={e.filaValor} numberOfLines={1}>
+        <Text style={e.filaValor} numberOfLines={1} selectable>
           {valor}
         </Text>
       ) : null}

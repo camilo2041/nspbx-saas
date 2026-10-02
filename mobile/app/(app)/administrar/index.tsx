@@ -39,9 +39,9 @@ const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
     entradas: [
       { titulo: "Extensiones", detalle: "Teléfonos, contraseñas SIP y desvíos", icono: "extension", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/extensiones" },
       { titulo: "Troncales", detalle: "Conexión con tu proveedor: estado y prueba", icono: "troncal", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/troncales" },
-      { titulo: "Rutas entrantes", detalle: "A dónde va cada número que te llaman", icono: "entrante", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx" },
-      { titulo: "Rutas salientes", detalle: "Por qué troncal sale cada llamada", icono: "saliente", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx" },
-      { titulo: "Colas", detalle: "Grupos de atención y sus agentes", icono: "usuarios", tono: "marca", permiso: "colas:gestionar", modulo: "pbx" },
+      { titulo: "Rutas entrantes", detalle: "A dónde va cada número que te llaman", icono: "entrante", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/rutas-entrantes" },
+      { titulo: "Rutas salientes", detalle: "Por qué troncal sale cada llamada", icono: "saliente", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/rutas-salientes" },
+      { titulo: "Colas", detalle: "Grupos de atención y sus agentes", icono: "cola", tono: "marca", permiso: "colas:gestionar", modulo: "pbx", ruta: "/administrar/colas" },
     ],
   },
   {
@@ -56,9 +56,9 @@ const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
     titulo: "Sistema",
     entradas: [
       { titulo: "Usuarios", detalle: "Crear, editar roles y desactivar cuentas", icono: "usuario", tono: "neutro", permiso: "usuarios:gestionar", ruta: "/administrar/usuarios" },
-      { titulo: "Roles y permisos", detalle: "Qué puede hacer cada rol", icono: "llave", tono: "neutro", permiso: "usuarios:gestionar" },
+      { titulo: "Roles y permisos", detalle: "Qué puede hacer cada rol", icono: "llave", tono: "neutro", permiso: "usuarios:gestionar", ruta: "/administrar/roles" },
       { titulo: "Seguridad", detalle: "Bloqueos, alertas y auditoría", icono: "seguridad", tono: "neutro", permiso: "ajustes:gestionar" },
-      { titulo: "Ajustes", detalle: "Horarios, emergencias y datos de la empresa", icono: "ajustes", tono: "neutro", permiso: "ajustes:gestionar" },
+      { titulo: "Ajustes", detalle: "Horarios, emergencias y datos de la empresa", icono: "ajustes", tono: "neutro", permiso: "ajustes:gestionar", ruta: "/administrar/ajustes" },
       { titulo: "Empresas", detalle: "Clientes de la plataforma y sus licencias", icono: "servidor", tono: "neutro", permiso: "empresas:gestionar" },
     ],
   },

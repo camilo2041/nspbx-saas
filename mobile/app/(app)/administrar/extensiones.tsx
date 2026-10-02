@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Text, View } from "react-native";
+import { Alert, ScrollView, Text, View } from "react-native";
 
 import { peticion } from "@/src/api/client";
 import { invalidar, useDatos } from "@/src/datos";
@@ -10,13 +10,14 @@ import {
   CampoDef,
   EstadoVacio,
   Fila,
+  Hoja,
   HojaFormulario,
   ListaEsqueleto,
   Pantalla,
 } from "@/src/gestion";
 import { exito } from "@/src/haptico";
 import { useColores } from "@/src/tema";
-import { Boton, Pildora } from "@/src/ui";
+import { Boton, FilaMenu, Pildora, Seccion } from "@/src/ui";
 
 interface Extension {
   id: number;
@@ -25,6 +26,7 @@ interface Extension {
   caller_id_name: string | null;
   voicemail: boolean;
   enabled: boolean;
+  outbound_after_hours: boolean;
 }
 
 const CAMPOS: CampoDef[] = [
@@ -32,14 +34,25 @@ const CAMPOS: CampoDef[] = [
   { clave: "caller_id_name", etiqueta: "Nombre a mostrar", placeholder: "Ana Pérez", ayuda: "Lo que ve quien recibe la llamada." },
   { clave: "password", etiqueta: "Contraseña SIP", tipo: "secreto", generar: true, ayuda: "La usa el teléfono para registrarse. Usa una larga: es lo que protege la línea del fraude." },
   { clave: "voicemail", etiqueta: "Buzón de voz", tipo: "conmutador" },
+  {
+    clave: "outbound_after_hours",
+    etiqueta: "Llama afuera fuera de horario",
+    tipo: "conmutador",
+    ayuda: "Solo cuenta si la empresa limita las salientes al horario laboral (Ajustes). Para guardias.",
+  },
   { clave: "enabled", etiqueta: "Activa", tipo: "conmutador" },
 ];
 
 export default function Extensiones() {
   const c = useColores();
   const { datos, cargando, refrescando, error, sinConexion, recargar } = useDatos<Extension[]>("/api/extensions");
+  const ajustes = useDatos<{ fs_domain: string; sip_server_ip: string; sip_server_port: number }>("/api/system/settings", { ttl: 60_000 });
+  const troncales = useDatos<{ id: number; name: string; enabled: boolean }[]>("/api/trunks", { ttl: 60_000 });
   const [q, setQ] = useState("");
+  const [detalle, setDetalle] = useState<Extension | null>(null);
   const [editando, setEditando] = useState<Extension | "nueva" | null>(null);
+  const [llamando, setLlamando] = useState<Extension | null>(null);
+  const [verClave, setVerClave] = useState(false);
 
   const lista = (datos ?? []).filter((e) => {
     const t = q.trim().toLowerCase();
@@ -52,12 +65,14 @@ export default function Extensiones() {
       password: String(v.password ?? ""),
       caller_id_name: String(v.caller_id_name ?? "").trim() || null,
       voicemail: !!v.voicemail,
+      outbound_after_hours: !!v.outbound_after_hours,
       enabled: !!v.enabled,
     };
     if (editando === "nueva") await peticion("/api/extensions", { method: "POST", body: cuerpo });
     else if (editando) await peticion(`/api/extensions/${editando.id}`, { method: "PUT", body: cuerpo });
     invalidar("/api/extensions");
     setEditando(null);
+    setDetalle(null);
     recargar();
   };
 
@@ -75,6 +90,7 @@ export default function Extensiones() {
             exito();
             invalidar("/api/extensions");
             setEditando(null);
+            setDetalle(null);
             recargar();
           } catch (err) {
             Alert.alert("No se pudo eliminar", err instanceof Error ? err.message : "Error");
@@ -83,6 +99,31 @@ export default function Extensiones() {
       },
     ]);
   };
+
+  const llamar = async (v: Record<string, unknown>) => {
+    if (!llamando) return;
+    await peticion(`/api/extensions/${llamando.id}/call`, {
+      method: "POST",
+      body: { destination: String(v.destination ?? "").trim(), trunk_id: v.trunk_id ? Number(v.trunk_id) : null },
+    });
+    setLlamando(null);
+    Alert.alert("Llamada en marcha", `Suena primero la extensión ${llamando.number}; al contestar se conecta con el destino.`);
+  };
+
+  const camposLlamada: CampoDef[] = [
+    { clave: "destination", etiqueta: "Número o extensión a llamar", tipo: "telefono", placeholder: "1002 o 3001234567" },
+    {
+      clave: "trunk_id",
+      etiqueta: "Por dónde sale",
+      tipo: "opciones",
+      opciones: [
+        { valor: "", etiqueta: "Extensión interna" },
+        ...(troncales.datos ?? []).filter((t) => t.enabled).map((t) => ({ valor: String(t.id), etiqueta: `Troncal ${t.name}` })),
+      ],
+    },
+  ];
+
+  const servidor = ajustes.datos?.sip_server_ip || ajustes.datos?.fs_domain || "—";
 
   return (
     <>
@@ -99,17 +140,44 @@ export default function Extensiones() {
           <Fila
             key={e.id}
             titulo={`${e.number}${e.caller_id_name ? " · " + e.caller_id_name : ""}`}
-            subtitulo={e.voicemail ? "Con buzón de voz" : "Sin buzón de voz"}
+            subtitulo={[e.voicemail ? "Con buzón" : "Sin buzón", e.outbound_after_hours ? "llama fuera de horario" : ""].filter(Boolean).join(" · ")}
             izquierda={
               <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: c.infoSuave, alignItems: "center", justifyContent: "center" }}>
                 <Text style={{ fontWeight: "800", color: c.infoTexto, fontSize: 12 }}>{e.number.slice(-4)}</Text>
               </View>
             }
             derecha={<Pildora texto={e.enabled ? "Activa" : "Apagada"} tono={e.enabled ? "ok" : "neutro"} />}
-            onPress={() => setEditando(e)}
+            onPress={() => {
+              setVerClave(false);
+              setDetalle(e);
+            }}
           />
         ))}
       </Pantalla>
+
+      <Hoja visible={!!detalle && !editando && !llamando} titulo={detalle ? `Extensión ${detalle.number}` : ""} onCerrar={() => setDetalle(null)}>
+        {detalle ? (
+          <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 4, gap: 14 }}>
+            <Seccion titulo="Para configurar un softphone">
+              <FilaMenu titulo="Usuario" icono="usuario" valor={detalle.number} />
+              <FilaMenu
+                titulo="Contraseña"
+                icono="llave"
+                valor={verClave ? detalle.password : "••••••••"}
+                onPress={() => setVerClave((x) => !x)}
+                derecha={<Text style={{ color: c.marcaTexto, fontWeight: "700", fontSize: 13 }}>{verClave ? "Ocultar" : "Ver"}</Text>}
+              />
+              <FilaMenu titulo="Servidor / dominio" icono="servidor" valor={servidor} />
+              <FilaMenu titulo="Puerto" icono="troncal" valor={String(ajustes.datos?.sip_server_port ?? 5060)} ultima />
+            </Seccion>
+            <Text style={{ fontSize: 12, color: c.textoSecundario, lineHeight: 17 }}>
+              Sirven para Zoiper, X-Lite, 3CX o un teléfono IP. Mantén presionado un dato para copiarlo.
+            </Text>
+            <Boton titulo="Llamar desde esta extensión" icono="telefono" variante="ok" onPress={() => setLlamando(detalle)} deshabilitado={!detalle.enabled} />
+            <Boton titulo="Editar" icono="editar" variante="suave" onPress={() => setEditando(detalle)} />
+          </ScrollView>
+        ) : null}
+      </Hoja>
 
       <HojaFormulario
         visible={editando !== null}
@@ -118,11 +186,22 @@ export default function Extensiones() {
         inicial={
           editando && editando !== "nueva"
             ? { ...editando }
-            : { number: "", caller_id_name: "", password: "", voicemail: true, enabled: true }
+            : { number: "", caller_id_name: "", password: "", voicemail: true, outbound_after_hours: false, enabled: true }
         }
         onGuardar={guardar}
         onCerrar={() => setEditando(null)}
         onEliminar={editando && editando !== "nueva" ? eliminar : undefined}
+      />
+
+      <HojaFormulario
+        visible={!!llamando}
+        titulo={llamando ? `Llamar desde la ${llamando.number}` : ""}
+        campos={camposLlamada}
+        inicial={{ destination: "", trunk_id: "" }}
+        textoGuardar="Llamar"
+        extra={() => <Aviso tono="info" texto={`Suena primero la extensión ${llamando?.number}; al contestar se conecta con el destino.`} />}
+        onGuardar={llamar}
+        onCerrar={() => setLlamando(null)}
       />
     </>
   );

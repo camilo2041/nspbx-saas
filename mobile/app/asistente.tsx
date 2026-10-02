@@ -23,7 +23,11 @@ const DESTINOS: Record<string, { ruta: string; etiqueta: string; permiso: string
   "/appointments": { ruta: "/administrar/citas", etiqueta: "Citas", permiso: "citas:gestionar" },
   "/cobranza": { ruta: "/administrar/cobranza", etiqueta: "Cobranza", permiso: "campanas:gestionar" },
   "/campaigns": { ruta: "/administrar/campanas", etiqueta: "Campañas", permiso: "campanas:gestionar" },
-  "/settings": { ruta: "/administrar/cuenta", etiqueta: "Cuenta", permiso: null },
+  "/settings": { ruta: "/administrar/ajustes", etiqueta: "Ajustes", permiso: "ajustes:gestionar" },
+  "/inbound-routes": { ruta: "/administrar/rutas-entrantes", etiqueta: "Rutas entrantes", permiso: "telefonia:gestionar" },
+  "/outbound-routes": { ruta: "/administrar/rutas-salientes", etiqueta: "Rutas salientes", permiso: "telefonia:gestionar" },
+  "/queues": { ruta: "/administrar/colas", etiqueta: "Colas", permiso: "colas:gestionar" },
+  "/roles": { ruta: "/administrar/roles", etiqueta: "Roles y permisos", permiso: "usuarios:gestionar" },
 };
 
 const SUGERENCIAS = ["¿Cómo van las llamadas?", "¿Cómo creo una extensión?", "¿Cómo activo las llamadas internacionales?", "¿Qué es una troncal?"];

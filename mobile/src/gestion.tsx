@@ -99,12 +99,13 @@ export function AvisoSinConexion() {
   return <Aviso tono="aviso" texto="Sin conexión: se muestran los últimos datos guardados." />;
 }
 
-export function Aviso({ texto, tono = "peligro" }: { texto: string; tono?: "peligro" | "ok" | "aviso" }) {
+export function Aviso({ texto, tono = "peligro" }: { texto: string; tono?: "peligro" | "ok" | "aviso" | "info" }) {
   const c = useColores();
   const paleta = {
     peligro: [c.peligroSuave, c.peligroTexto],
     ok: [c.okSuave, c.okTexto],
     aviso: [c.avisoSuave, c.avisoTexto],
+    info: [c.infoSuave, c.infoTexto],
   }[tono];
   return (
     <View style={{ backgroundColor: paleta[0], borderRadius: radios.medio, padding: 12 }}>
@@ -358,7 +359,9 @@ export function Hoja({
 export interface CampoDef {
   clave: string;
   etiqueta: string;
-  tipo?: "texto" | "numero" | "secreto" | "conmutador" | "opciones" | "email" | "fecha" | "fechaHora" | "multilinea" | "telefono";
+  tipo?: "texto" | "numero" | "secreto" | "conmutador" | "opciones" | "email" | "fecha" | "fechaHora" | "multilinea" | "telefono" | "multiples" | "decimal";
+  /** "multiples": muestra el número de orden de cada elegida (el orden importa). */
+  conOrden?: boolean;
   /** Fecha que se puede dejar vacía. */
   opcional?: boolean;
   ayuda?: string;
@@ -390,10 +393,13 @@ export function HojaFormulario({
   onGuardar,
   onCerrar,
   onEliminar,
+  extra,
 }: {
   visible: boolean;
   titulo: string;
   campos: CampoDef[];
+  /** Algo que se calcula en vivo con lo escrito (una vista previa, un aviso). */
+  extra?: (valores: Record<string, unknown>) => ReactNode;
   inicial: Record<string, unknown>;
   textoGuardar?: string;
   onGuardar: (valores: Record<string, unknown>) => Promise<void>;
@@ -474,6 +480,53 @@ export function HojaFormulario({
                 </View>
               );
             }
+            if (campo.tipo === "multiples") {
+              // Valor: lista separada por comas, en el orden en que se marcaron.
+              const elegidas = String(v ?? "").split(",").filter(Boolean);
+              return (
+                <View key={campo.clave} style={{ gap: 8 }}>
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: c.textoSuave }}>{campo.etiqueta}</Text>
+                  {campo.opciones?.length ? null : (
+                    <Text style={{ fontSize: 13, color: c.textoSecundario }}>No hay opciones para elegir todavía.</Text>
+                  )}
+                  {campo.opciones?.map((o) => {
+                    const pos = elegidas.indexOf(o.valor);
+                    const activo = pos >= 0;
+                    return (
+                      <Pressable
+                        key={o.valor}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: activo }}
+                        onPress={() => {
+                          toque();
+                          poner(campo.clave, (activo ? elegidas.filter((x) => x !== o.valor) : [...elegidas, o.valor]).join(","));
+                        }}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 10,
+                          borderWidth: 1.5,
+                          borderColor: activo ? c.marca : c.borde,
+                          backgroundColor: activo ? c.marcaSuave : c.superficie,
+                          borderRadius: radios.medio,
+                          padding: 12,
+                        }}
+                      >
+                        <Icono nombre={activo ? "ok" : "noMarcado"} tam={20} color={activo ? c.marca : c.placeholder} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontWeight: "600", color: activo ? c.marcaTexto : c.texto }}>{o.etiqueta}</Text>
+                          {o.detalle ? <Text style={{ fontSize: 12, color: c.textoSecundario, marginTop: 2 }}>{o.detalle}</Text> : null}
+                        </View>
+                        {activo && campo.conOrden ? (
+                          <Text style={{ fontSize: 12, fontWeight: "800", color: c.marcaTexto }}>#{pos + 1}</Text>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                  {campo.ayuda ? <Text style={{ fontSize: 12, color: c.textoSecundario, lineHeight: 16 }}>{campo.ayuda}</Text> : null}
+                </View>
+              );
+            }
             if (campo.tipo === "fecha" || campo.tipo === "fechaHora") {
               return (
                 <SelectorFecha
@@ -501,7 +554,7 @@ export function HojaFormulario({
                     selectionColor={c.marca}
                     secureTextEntry={secreto && !mostrar[campo.clave]}
                     keyboardType={
-                      campo.tipo === "numero" ? "number-pad" : campo.tipo === "email" ? "email-address" : campo.tipo === "telefono" ? "phone-pad" : "default"
+                      campo.tipo === "numero" ? "number-pad" : campo.tipo === "decimal" ? "decimal-pad" : campo.tipo === "email" ? "email-address" : campo.tipo === "telefono" ? "phone-pad" : "default"
                     }
                     multiline={multilinea}
                     textAlignVertical={multilinea ? "top" : undefined}
@@ -545,6 +598,7 @@ export function HojaFormulario({
               </View>
             );
           })}
+        {extra ? extra(valores) : null}
         {error ? <Aviso texto={error} /> : null}
         <Boton titulo={textoGuardar} onPress={guardar} cargando={guardando} />
         {onEliminar ? <Boton titulo="Eliminar" variante="suave" onPress={onEliminar} /> : null}

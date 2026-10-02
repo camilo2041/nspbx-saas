@@ -20,6 +20,11 @@ export default function MenuLayout() {
       <Stack.Screen name="cobranza" options={{ title: "Cobranza" }} />
       <Stack.Screen name="campanas" options={{ title: "Campañas" }} />
       <Stack.Screen name="campana/[id]" options={{ title: "Campaña" }} />
+      <Stack.Screen name="rutas-entrantes" options={{ title: "Rutas entrantes" }} />
+      <Stack.Screen name="rutas-salientes" options={{ title: "Rutas salientes" }} />
+      <Stack.Screen name="colas" options={{ title: "Colas" }} />
+      <Stack.Screen name="roles" options={{ title: "Roles y permisos" }} />
+      <Stack.Screen name="ajustes" options={{ title: "Ajustes" }} />
       <Stack.Screen name="troncales" options={{ title: "Troncales" }} />
       <Stack.Screen name="extensiones" options={{ title: "Extensiones" }} />
       <Stack.Screen name="usuarios" options={{ title: "Usuarios" }} />
