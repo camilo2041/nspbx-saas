@@ -36,6 +36,10 @@ _RECURSO_POR_PARAMETRO = {
     "user_id": "user",
     "version_id": "voicebot_version",
     "key_id": "api_key",
+    "contacto_id": "contacto",
+    "lista_id": "lista",
+    "campo_id": "campo_contacto",
+    "no_llamar_id": "no_llamar",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por
@@ -70,6 +74,10 @@ _CUERPOS = {
     ("PUT", "/api/cobranza/debts/{debt_id}"): {"notes": "Pisado"},
     ("PUT", "/api/cobranza/promises/{promise_id}"): {"notes": "Pisado"},
     ("PUT", "/api/users/{user_id}"): {"full_name": "Pisado"},
+    ("PUT", "/api/campaigns/{campaign_id}/listas/{lista_id}"): {"prioridad": 5},
+    ("PUT", "/api/crm/contactos/{contacto_id}"): {"email": "pisado@x.test"},
+    ("PUT", "/api/crm/campos/{campo_id}"): {"nombre": "Pisado"},
+    ("POST", "/api/crm/contactos/{contacto_id}/notas"): {"texto": "Pisado"},
     ("POST", "/api/extensions/{extension_id}/call"): {"destination": "1001"},
     ("POST", "/api/voicebots/{bot_id}/tts"): {"text": "Hola", "voice": "es-CO-SalomeNeural"},
     ("POST", "/api/voicebots/{bot_id}/flow/nodes/{node_id}/tts"): {"text": "Hola", "voice": "es-CO-SalomeNeural"},

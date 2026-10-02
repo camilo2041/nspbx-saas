@@ -9,7 +9,7 @@ from app.core.clock import fecha_en_palabras, now_local
 from app.core.config import settings
 from app.core.database import async_session, sesion_de_empresa
 from app.models import Campaign, CampaignNumber, SystemSettings, Tenant, Trunk, VoiceBot
-from app.services import esl, horario_marcacion, licensing, salientes, templating, tope_campanas
+from app.services import esl, hopper, horario_marcacion, licensing, salientes, templating, tope_campanas
 from app.services.fechas import formatear_natural, parse_fecha_hora
 from app.services.config_generator import orden_troncales
 from app.services.numeros import numero_a_palabras
@@ -168,18 +168,8 @@ class CampaignDialer:
                     propia = await s_emp.get(Campaign, campaign.id)
                     if propia is None:
                         continue
-                    numbers = await s_emp.execute(
-                        select(CampaignNumber)
-                        .where(
-                            CampaignNumber.campaign_id == campaign.id,
-                            CampaignNumber.status == "pending",
-                        )
-                        .limit(slots)
-                    )
-                    numbers_list = list(numbers.scalars().all())
-                    for number in numbers_list:
-                        number.status = "dialing"
-                        number.attempts += 1
+                    # Reciclaje, listas pausadas y no llamar: services/hopper.py.
+                    numbers_list = await hopper.tomar(s_emp, propia, slots)
                     tope_campanas.contar_lanzadas(propia, hoy, len(numbers_list))
                     await s_emp.commit()
                 margen_global -= len(numbers_list)
@@ -373,7 +363,9 @@ class CampaignDialer:
                     elif target.attempts > (fresh.retries if fresh else 0):
                         target.status = final_status
                     else:
-                        target.status = "pending"
+                        # Vuelve a pendiente, con la espera que la campaña
+                        # defina para este resultado.
+                        hopper.reprogramar(target, fresh, final_status)
                     await s.commit()
         finally:
             self._active[campaign.id] = max(0, self._active.get(campaign.id, 0) - 1)

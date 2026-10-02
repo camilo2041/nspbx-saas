@@ -218,3 +218,25 @@ async def test_acciones_de_fraude_quedan_registradas(cliente, mundo, monkeypatch
     for esperada in ("PUT /api/outbound-routes/{route_id}", "POST /api/campaigns/{campaign_id}/stop",
                      "POST /api/system/salientes/colgar"):
         assert esperada in acciones, (esperada, sorted(acciones)[:20])
+
+
+async def test_un_duplicado_con_rollback_responde_400_y_queda_auditado(cliente, mundo):
+    """Tras un rollback el usuario del ORM queda vencido; la auditoría usa
+    la copia que se guarda al autenticar (antes daba 500)."""
+    import uuid as _uuid
+
+    from sqlalchemy import select as _select
+
+    from app.core.database import async_session as _sesion
+    from app.models import AuditLog
+
+    nombre = f"dup-{_uuid.uuid4().hex[:6]}"
+    cab = mundo.alfa.cabeceras()
+    assert (await cliente.post("/api/campaigns", headers=cab, json={"name": nombre})).status_code == 201
+    r = await cliente.post("/api/campaigns", headers=cab, json={"name": nombre})
+    assert r.status_code == 400
+    async with _sesion() as s:
+        fila = (await s.execute(
+            _select(AuditLog).where(AuditLog.request_id == r.headers["x-request-id"])
+        )).scalar_one()
+    assert fila.user_id == mundo.alfa.usuarios["admin"] and fila.tenant_id == mundo.alfa.id

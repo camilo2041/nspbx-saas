@@ -197,6 +197,10 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
         )
 
     request.state.usuario = usuario
+    # Copia para la auditoría, que corre DESPUÉS de la petición: si el
+    # endpoint hizo rollback (un nombre duplicado), el objeto del ORM queda
+    # vencido y sin sesión, y leerlo ahí convertía un 400 en un 500.
+    request.state.auditoria_actor = (usuario.tenant_id, usuario.id, f"{usuario.username} ({usuario.role})")
 
 
 async def usuario_actual(request: Request) -> User:

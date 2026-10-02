@@ -83,6 +83,8 @@ from app.models import (  # noqa: E402
     CallLog,
     Campaign,
     CampaignNumber,
+    CampoContacto,
+    Contacto,
     Debt,
     Extension,
     InboundRoute,
@@ -95,6 +97,9 @@ from app.models import (  # noqa: E402
     User,
     VoiceBot,
     VoiceBotVersion,
+    Lista,
+    NoLlamar,
+    Nota,
 )
 from app.services.ajustes import get_or_create_settings  # noqa: E402
 
@@ -205,6 +210,22 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
     session.add_all([promesa, uso, version, clave_api])
     await session.flush()
 
+    # CRM: un contacto con su campo propio y una nota, la lista de la
+    # campaña (el número queda ligado a ambos) y un número en no llamar.
+    campo = CampoContacto(tenant_id=tid, clave="plan", nombre=f"Plan {marca}", tipo="texto")
+    contacto = Contacto(
+        tenant_id=tid, nombre=f"Cliente {marca}", telefono=f"{telefono}01", telefono_clave=f"{telefono}01"[-10:],
+        email=f"cliente@{marca}.test", campos={"plan": f"oro-{marca}"},
+    )
+    lista = Lista(tenant_id=tid, campaign_id=camp.id, nombre=f"lista-{marca}")
+    dnc = NoLlamar(tenant_id=tid, telefono=f"{telefono}09", telefono_clave=f"{telefono}09"[-10:], motivo=f"Pidió {marca}")
+    session.add_all([campo, contacto, lista, dnc])
+    await session.flush()
+    numero.contacto_id, numero.lista_id = contacto.id, lista.id
+    nota = Nota(tenant_id=tid, contacto_id=contacto.id, texto=f"Nota privada de {marca}")
+    session.add(nota)
+    await session.flush()
+
     for rol in (permissions.ADMIN, permissions.SUPERVISOR, permissions.ASESOR):
         u = User(
             tenant_id=tid,
@@ -236,6 +257,10 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         "promise": promesa.id,
         "user": e.usuarios[permissions.SUPERVISOR],
         "voicebot_version": version.id,
+        "contacto": contacto.id,
+        "lista": lista.id,
+        "campo_contacto": campo.id,
+        "no_llamar": dnc.id,
     }
     return e
 

@@ -68,6 +68,12 @@ LLAMADAS_VER_PROPIAS = "llamadas:ver_propias"
 CITAS_GESTIONAR = "citas:gestionar"
 CONSUMO_IA_VER = "consumo_ia:ver"
 SOFTPHONE_USAR = "softphone:usar"
+# CRM (docs/plan-contact-center.md, fase 2). Ver: contactos, su ficha y
+# escribir notas. Gestionar: crear, editar, importar, campos propios y la
+# lista de no llamar. El asesor lo recibe con la consola de agente (fase 3),
+# acotado a los leads que atiende.
+CRM_VER = "crm:ver"
+CRM_GESTIONAR = "crm:gestionar"
 
 PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
     ADMIN: frozenset(
@@ -84,6 +90,8 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CITAS_GESTIONAR,
             CONSUMO_IA_VER,
             SOFTPHONE_USAR,
+            CRM_VER,
+            CRM_GESTIONAR,
         }
     ),
     SUPERVISOR: frozenset(
@@ -97,6 +105,8 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CITAS_GESTIONAR,
             CONSUMO_IA_VER,
             SOFTPHONE_USAR,
+            CRM_VER,
+            CRM_GESTIONAR,
         }
     ),
     COORDINADOR: frozenset(
@@ -107,6 +117,8 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             LLAMADAS_VER_PROPIAS,
             CITAS_GESTIONAR,
             CONSUMO_IA_VER,
+            CRM_VER,
+            CRM_GESTIONAR,
         }
     ),
     ASESOR: frozenset(
@@ -219,6 +231,8 @@ ETIQUETAS_PERMISOS = {
     CITAS_GESTIONAR: "Gestionar citas",
     CONSUMO_IA_VER: "Ver consumo de IA",
     SOFTPHONE_USAR: "Usar el softphone",
+    CRM_VER: "Ver contactos (CRM) y escribir notas",
+    CRM_GESTIONAR: "Gestionar contactos: importar, campos y no llamar",
 }
 
 TODOS_LOS_PERMISOS = tuple(ETIQUETAS_PERMISOS)

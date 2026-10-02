@@ -204,6 +204,11 @@ class Campaign(Base):
     # conversación (confirmar/reagendar/cancelar con disponibilidad real)
     # sigue funcionando igual: esto solo reemplaza la primera frase.
     message_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Cuánto esperar antes de volver a marcar un número según cómo salió
+    # el intento anterior (services/hopper.py): {"busy": 30, "noanswer": 120,
+    # "failed": 15}, en minutos. Sin regla, se reintenta en la vuelta
+    # siguiente (lo de antes). Cuántas veces sigue siendo `retries`.
+    reglas_reciclaje: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -238,6 +243,20 @@ class CampaignNumber(Base):
     appointment_id: Mapped[int | None] = mapped_column(
         ForeignKey("appointments.id", ondelete="SET NULL"), nullable=True
     )
+    # Este número ES el lead del contact center (docs/plan-contact-center.md):
+    # un contacto dentro de una lista de una campaña. Se enriqueció esta
+    # tabla en vez de reemplazarla para que el voizbot, la agenda y la
+    # cobranza sigan funcionando sin cambios.
+    contacto_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contactos.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    lista_id: Mapped[int | None] = mapped_column(
+        ForeignKey("listas.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    prioridad: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # No se marca antes de esta hora (reciclaje; ver services/hopper.py).
+    proximo_intento_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ultimo_intento_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     campaign: Mapped["Campaign"] = relationship(back_populates="numbers")
@@ -1033,3 +1052,99 @@ class ApiKey(Base):
     @property
     def scope_list(self) -> list[str]:
         return [s for s in (self.scopes or "").split(",") if s]
+
+
+# --- CRM (docs/plan-contact-center.md, fase 2) ---------------------------
+
+
+class Contacto(Base):
+    """Cliente de una empresa: uno solo aunque esté en varias campañas.
+
+    `telefono_clave` es el teléfono principal reducido a sus últimos 10
+    dígitos (services/crm.py:clave_telefono): "+57 300-123 4567",
+    "573001234567" y "3001234567" son el mismo cliente. Por esa clave se
+    deduplica al importar y se cruza el historial de llamadas."""
+
+    __tablename__ = "contactos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    nombre: Mapped[str] = mapped_column(String(150), default="")
+    documento: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    telefono: Mapped[str] = mapped_column(String(40))
+    telefono_clave: Mapped[str] = mapped_column(String(20), index=True)
+    # Teléfonos adicionales, en orden: [{"numero": "...", "tipo": "movil"}].
+    telefonos: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    email: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    direccion: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ciudad: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Campos propios de la empresa, validados contra CampoContacto.
+    campos: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    fuente: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CampoContacto(Base):
+    """Definición de un campo propio de la empresa (plan, saldo, sede…)."""
+
+    __tablename__ = "campos_contacto"
+    __table_args__ = (UniqueConstraint("tenant_id", "clave", name="ux_campos_contacto_tenant_clave"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    clave: Mapped[str] = mapped_column(String(40))
+    nombre: Mapped[str] = mapped_column(String(80))
+    tipo: Mapped[str] = mapped_column(String(15), default="texto")  # texto|numero|fecha|opciones|si_no
+    opciones: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    obligatorio: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    visible_agente: Mapped[bool] = mapped_column(Boolean, default=True)
+    orden: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class Lista(Base):
+    """Una carga de números en una campaña. Se puede pausar o priorizar
+    sin tocar los números (services/hopper.py)."""
+
+    __tablename__ = "listas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    nombre: Mapped[str] = mapped_column(String(120))
+    activa: Mapped[bool] = mapped_column(Boolean, default=True)
+    prioridad: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    origen: Mapped[str] = mapped_column(String(20), default="manual")  # manual|csv|api
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Nota(Base):
+    """Nota sobre un contacto. No se editan: son el registro de lo que se
+    habló, como una bitácora."""
+
+    __tablename__ = "notas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    contacto_id: Mapped[int] = mapped_column(ForeignKey("contactos.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    autor: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    texto: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class NoLlamar(Base):
+    """Lista de no llamar de la empresa. El marcador nunca marca un número
+    que esté acá (vigente), en ninguna campaña."""
+
+    __tablename__ = "no_llamar"
+    __table_args__ = (UniqueConstraint("tenant_id", "telefono_clave", name="ux_no_llamar_tenant_clave"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    telefono: Mapped[str] = mapped_column(String(40))
+    telefono_clave: Mapped[str] = mapped_column(String(20))
+    motivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    hasta: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # NULL = para siempre
+    creado_por: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

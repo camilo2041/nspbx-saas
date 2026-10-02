@@ -342,7 +342,10 @@ class MiddlewareAuditoria:
         tenant_id = usuario_id = None
         actor = None
         clave = estado_req.get("api_key")
-        if usuario is not None:
+        copia = estado_req.get("auditoria_actor")
+        if copia is not None:
+            tenant_id, usuario_id, actor = copia
+        elif usuario is not None:
             tenant_id, usuario_id, actor = usuario.tenant_id, usuario.id, f"{usuario.username} ({usuario.role})"
         elif clave is not None:
             tenant_id, actor = clave.tenant_id, f"api:{clave.name} ({clave.prefix})"

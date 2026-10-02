@@ -259,6 +259,16 @@ class CampaignBase(BaseModel):
     # app/services/ai_intents.py). Vacío/None = "confirmar" (compatibilidad
     # con las campañas viejas, que eran todas de confirmación).
     ai_intent: Optional[str] = None
+    # Minutos de espera antes de volver a marcar según el resultado anterior
+    # (busy, noanswer, failed). Ver services/hopper.py.
+    reglas_reciclaje: Optional[dict[str, int]] = None
+
+    @field_validator("reglas_reciclaje")
+    @classmethod
+    def _reglas(cls, v):
+        from app.services.hopper import validar_reglas
+
+        return validar_reglas(v)
 
 
 class CampaignCreate(CampaignBase):
@@ -275,6 +285,14 @@ class CampaignUpdate(BaseModel):
     max_minutes_per_day: Optional[int] = Field(default=None, ge=1, le=1_000_000)
     message_template: Optional[str] = None
     ai_intent: Optional[str] = None
+    reglas_reciclaje: Optional[dict[str, int]] = None
+
+    @field_validator("reglas_reciclaje")
+    @classmethod
+    def _reglas(cls, v):
+        from app.services.hopper import validar_reglas
+
+        return validar_reglas(v)
 
 
 class CampaignOut(CampaignBase):
@@ -744,6 +762,12 @@ class QueueOut(BaseModel):
     created_at: datetime
 
 
+class ListaUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    activa: Optional[bool] = None
+    prioridad: Optional[int] = Field(default=None, ge=-100, le=100)
+
+
 class CampaignStats(BaseModel):
     total: int = 0
     pending: int = 0
@@ -753,6 +777,11 @@ class CampaignStats(BaseModel):
     noanswer: int = 0
     failed: int = 0
     done: int = 0
+    # En la lista de no llamar: no se marcan.
+    no_llamar: int = 0
+    # Pendientes que esperan su próximo intento (reciclaje) o cuya lista
+    # está pausada: todavía no se pueden marcar.
+    en_espera: int = 0
     active_calls: int = 0
     # Consumo de hoy contra los topes diarios de la campaña.
     llamadas_hoy: int = 0
@@ -1091,3 +1120,68 @@ class DeviceTokenIn(BaseModel):
 class CambiarPasswordRequest(ClienteSesion):
     password_actual: str
     password_nueva: str = Field(min_length=8, max_length=128)
+
+
+# ---------- CRM (contactos, campos propios, no llamar) ----------
+
+
+class TelefonoExtra(BaseModel):
+    numero: Telefono
+    tipo: str = Field(default="movil", max_length=20)
+
+
+class ContactoIn(BaseModel):
+    nombre: str = Field(default="", max_length=150)
+    documento: Optional[str] = Field(default=None, max_length=30)
+    telefono: Telefono
+    telefonos: list[TelefonoExtra] = Field(default_factory=list, max_length=5)
+    email: Optional[str] = Field(default=None, max_length=150)
+    direccion: Optional[str] = Field(default=None, max_length=255)
+    ciudad: Optional[str] = Field(default=None, max_length=100)
+    campos: dict = Field(default_factory=dict)
+
+
+class ContactoUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, max_length=150)
+    documento: Optional[str] = Field(default=None, max_length=30)
+    telefono: Optional[Telefono] = None
+    telefonos: Optional[list[TelefonoExtra]] = Field(default=None, max_length=5)
+    email: Optional[str] = Field(default=None, max_length=150)
+    direccion: Optional[str] = Field(default=None, max_length=255)
+    ciudad: Optional[str] = Field(default=None, max_length=100)
+    campos: Optional[dict] = None
+
+
+class NotaIn(BaseModel):
+    texto: str = Field(..., min_length=1, max_length=4000)
+
+
+class CampoContactoIn(BaseModel):
+    clave: str = Field(..., pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    nombre: str = Field(..., min_length=1, max_length=80)
+    tipo: str = Field(default="texto", pattern="^(texto|numero|fecha|opciones|si_no)$")
+    opciones: Optional[list[Annotated[str, Field(min_length=1, max_length=60)]]] = Field(default=None, max_length=50)
+    obligatorio: bool = False
+    visible_agente: bool = True
+    orden: int = Field(default=0, ge=0, le=1000)
+
+    @model_validator(mode="after")
+    def _opciones(self):
+        if self.tipo == "opciones" and not self.opciones:
+            raise ValueError("Un campo de opciones necesita al menos una opción")
+        return self
+
+
+class CampoContactoUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    tipo: Optional[str] = Field(default=None, pattern="^(texto|numero|fecha|opciones|si_no)$")
+    opciones: Optional[list[Annotated[str, Field(min_length=1, max_length=60)]]] = Field(default=None, max_length=50)
+    obligatorio: Optional[bool] = None
+    visible_agente: Optional[bool] = None
+    orden: Optional[int] = Field(default=None, ge=0, le=1000)
+
+
+class NoLlamarIn(BaseModel):
+    telefono: Telefono
+    motivo: Optional[str] = Field(default=None, max_length=255)
+    hasta: Optional[datetime] = None

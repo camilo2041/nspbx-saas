@@ -157,3 +157,54 @@ async def test_las_revisiones_posteriores_se_deshacen_y_rehacen(base_vacia):
     async with base_vacia.begin() as conn:
         await conn.run_sync(bajar_y_subir)
     assert await _version(base_vacia) == _cabeza()
+
+
+async def test_la_revision_del_crm_liga_cada_numero_a_un_contacto(base_vacia):
+    """0012: los números ya cargados quedan con su contacto (uno por
+    teléfono y empresa, con el nombre de sus variables). Una variable que no
+    es JSON no frena la migración."""
+    from alembic import command
+
+    def a(revision):
+        def ir(conexion):
+            cfg = migraciones.configuracion()
+            cfg.attributes["connection"] = conexion
+            if revision == "head":
+                command.upgrade(cfg, "head")
+            else:
+                command.downgrade(cfg, revision)
+
+        return ir
+
+    async with base_vacia.begin() as conn:
+        await conn.run_sync(migraciones.actualizar)
+        await conn.run_sync(a("0011_tiempos_llamada"))
+        await conn.execute(text(
+            "INSERT INTO tenants (id, name, slug, sip_domain, business_type, modules, enabled, created_at) "
+            "VALUES (5, 'Uno', 'uno', 'uno.test', 'general', 'pbx', true, now())"
+        ))
+        await conn.execute(text(
+            "INSERT INTO campaigns (id, tenant_id, name, max_concurrency, retries, status, created_at) "
+            "VALUES (9, 5, 'c', 1, 0, 'idle', now())"
+        ))
+        for i, (telefono, extra) in enumerate([
+            ("+57 300 111 2233", '{"cliente": "Ana Gómez"}'),
+            ("3001112233", None),
+            ("3009998877", "esto no es json"),
+        ]):
+            await conn.execute(
+                text(
+                    "INSERT INTO campaign_numbers (id, tenant_id, campaign_id, phone, status, attempts, extra_data, created_at) "
+                    "VALUES (:id, 5, 9, :t, 'pending', 0, :e, now())"
+                ),
+                {"id": 100 + i, "t": telefono, "e": extra},
+            )
+    async with base_vacia.begin() as conn:
+        await conn.run_sync(a("head"))
+    async with base_vacia.connect() as conn:
+        contactos = (await conn.execute(text(
+            "SELECT telefono_clave, nombre FROM contactos WHERE tenant_id = 5 ORDER BY telefono_clave"
+        ))).all()
+        ligados = dict((await conn.execute(text("SELECT id, contacto_id FROM campaign_numbers"))).all())
+    assert [tuple(c) for c in contactos] == [("3001112233", "Ana Gómez"), ("3009998877", "")]
+    assert ligados[100] == ligados[101] != ligados[102]

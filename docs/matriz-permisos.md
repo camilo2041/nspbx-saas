@@ -55,6 +55,8 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/campaigns/{campaign_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/campaigns/{campaign_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | PUT | `/api/campaigns/{campaign_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/campaigns/{campaign_id}/listas` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/campaigns/{campaign_id}/listas/{lista_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | DELETE | `/api/campaigns/{campaign_id}/numbers` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/campaigns/{campaign_id}/numbers` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | POST | `/api/campaigns/{campaign_id}/numbers` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
@@ -77,6 +79,21 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/cobranza/summary` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/consumo` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/consumo/csv` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/crm/campos` | `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/crm/campos` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| DELETE | `/api/crm/campos/{campo_id}` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/crm/campos/{campo_id}` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/crm/contactos` | `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/crm/contactos` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| DELETE | `/api/crm/contactos/{contacto_id}` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/crm/contactos/{contacto_id}` | `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/crm/contactos/{contacto_id}` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/crm/contactos/{contacto_id}/notas` | `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/crm/importar` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/crm/importar/vista-previa` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/crm/no-llamar` | `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/crm/no-llamar` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
+| DELETE | `/api/crm/no-llamar/{no_llamar_id}` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
 | POST | `/api/csp-report` | sesión (avisos de CSP del navegador, sin sesión) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/extensions` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/extensions` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |

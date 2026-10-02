@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_session, tenant_de_sesion, traer_propio
-from app.models import Appointment, Campaign, CampaignNumber, Debt, Trunk, VoiceBot
+from app.models import Appointment, Campaign, CampaignNumber, Debt, Lista, Trunk, VoiceBot
 from app.schemas import (
     CampaignCreate,
     CampaignNumberIn,
@@ -16,8 +16,9 @@ from app.schemas import (
     CampaignOut,
     CampaignStats,
     CampaignUpdate,
+    ListaUpdate,
 )
-from app.services import licensing, salientes
+from app.services import crm, hopper, licensing, salientes
 from app.services.appointments import is_slot_free
 from app.services.fechas import parse_fecha_hora as _parse_fecha_hora
 from app.workers.dialer import dialer
@@ -297,7 +298,62 @@ def _number_out(n: CampaignNumber) -> dict:
         "last_error": n.last_error,
         "vars": json.loads(n.extra_data) if n.extra_data else {},
         "created_at": n.created_at,
+        "contacto_id": n.contacto_id,
+        "lista_id": n.lista_id,
+        "prioridad": n.prioridad,
+        "proximo_intento_at": n.proximo_intento_at,
     }
+
+
+@router.get("/{campaign_id}/listas")
+async def listas_de_campana(campaign_id: int, session: AsyncSession = Depends(get_session)):
+    """Las cargas de la campaña, con cuántos números tiene cada una por estado."""
+    campaign = await traer_propio(session, Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    listas = (
+        await session.execute(select(Lista).where(Lista.campaign_id == campaign_id).order_by(Lista.id))
+    ).scalars().all()
+    conteos: dict[int, dict[str, int]] = {}
+    filas = await session.execute(
+        select(CampaignNumber.lista_id, CampaignNumber.status, func.count())
+        .where(CampaignNumber.campaign_id == campaign_id, CampaignNumber.lista_id.is_not(None))
+        .group_by(CampaignNumber.lista_id, CampaignNumber.status)
+    )
+    for lista_id, estado, n in filas.all():
+        conteos.setdefault(lista_id, {})[estado] = n
+    return [_lista_out(l, conteos.get(l.id, {})) for l in listas]
+
+
+def _lista_out(lista: Lista, conteo: dict[str, int] | None = None) -> dict:
+    conteo = conteo or {}
+    return {
+        "id": lista.id,
+        "campaign_id": lista.campaign_id,
+        "nombre": lista.nombre,
+        "activa": lista.activa,
+        "prioridad": lista.prioridad,
+        "origen": lista.origen,
+        "created_at": lista.created_at,
+        "total": sum(conteo.values()),
+        "pendientes": conteo.get("pending", 0),
+        "por_estado": conteo,
+    }
+
+
+@router.put("/{campaign_id}/listas/{lista_id}")
+async def actualizar_lista(
+    campaign_id: int, lista_id: int, payload: ListaUpdate, session: AsyncSession = Depends(get_session)
+):
+    """Pausar o reanudar una carga (sus números esperan sin marcarse) o
+    cambiar su prioridad (las de prioridad más alta se marcan primero)."""
+    lista = await traer_propio(session, Lista, lista_id)
+    if not lista or lista.campaign_id != campaign_id:
+        raise HTTPException(status_code=404, detail="Lista no encontrada")
+    for campo, valor in payload.model_dump(exclude_unset=True).items():
+        setattr(lista, campo, valor)
+    await session.commit()
+    return _lista_out(lista)
 
 
 @router.post("/{campaign_id}/numbers", status_code=status.HTTP_201_CREATED)
@@ -307,11 +363,32 @@ async def add_numbers(
     campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    resultado = await cargar_numeros(
+        session, campaign, [(f.phone, f.vars, None) for f in payload.numbers], origen="manual"
+    )
+    await session.commit()
+    return resultado
+
+
+async def cargar_numeros(
+    session: AsyncSession,
+    campaign: Campaign,
+    filas: list[tuple[str, dict[str, str], "crm.Contacto | None"]],
+    origen: str,
+    nombre_lista: str | None = None,
+) -> dict:
+    """Carga (teléfono, variables, contacto) en la campaña, sin commit.
+
+    Cada número queda ligado a su contacto del CRM (se crea si no existe) y
+    los nuevos entran en una lista de esta carga, que después se puede
+    pausar o priorizar. Lo usan la carga manual y la importación de CSV
+    (api/crm.py)."""
+    campaign_id = campaign.id
     # Solo los números que vienen en esta carga, no la campaña entera: con
     # una campaña de 200.000 números, sumar 10.000 traía las 200.000 filas
     # (casi 300 MB por petición). En tandas, para no pasar el límite de
     # parámetros de una consulta.
-    entrantes = list(dict.fromkeys(f.phone for f in payload.numbers))
+    entrantes = list(dict.fromkeys(f[0] for f in filas))
     existentes = {}
     for i in range(0, len(entrantes), 1000):
         res = await session.execute(
@@ -331,43 +408,72 @@ async def add_numbers(
     # El marcador igual los vuelve a revisar antes de cada llamada.
     politica = replace(await salientes.politica_de(session, campaign.tenant_id), bloqueo=None)
     bloqueados: list[dict] = []
-    for fila in payload.numbers:
-        motivo = salientes.motivo_bloqueo(fila.phone, politica)
+    validas = []
+    for phone, variables, contacto in filas:
+        motivo = salientes.motivo_bloqueo(phone, politica)
         if motivo:
-            bloqueados.append({"phone": fila.phone, "motivo": motivo})
-            continue
-        numero = existentes.get(fila.phone)
+            bloqueados.append({"phone": phone, "motivo": motivo})
+        else:
+            validas.append((phone, variables, contacto))
+
+    # Un contacto por teléfono (los que ya existen se reutilizan).
+    cache = await crm.por_claves(session, [crm.clave_telefono(p) for p, _, _ in validas])
+    contactos = {}
+    for phone, variables, contacto in validas:
+        contactos[phone] = contacto or await crm.asegurar(
+            session, campaign.tenant_id, phone, crm.nombre_de_variables(variables), "campaña", cache
+        )
+    await session.flush()
+
+    lista = None
+    for phone, variables, _ in validas:
+        contacto = contactos.get(phone)
+        numero = existentes.get(phone)
         if numero:
             # Ya estaba cargado en esta campaña. Antes esto se ignoraba
             # en silencio — si alguien volvía a pegar el mismo número
             # para corregir un dato mal cargado, la corrección nunca
             # llegaba a guardarse y no había ningún aviso de que pasó
             # eso. Ahora, si esta vez trae variables, se actualizan.
-            if fila.vars:
-                numero.extra_data = json.dumps(fila.vars, ensure_ascii=False)
+            if variables:
+                numero.extra_data = json.dumps(variables, ensure_ascii=False)
                 updated += 1
+            if numero.contacto_id is None and contacto is not None:
+                numero.contacto_id = contacto.id
         else:
+            if lista is None:
+                lista = Lista(
+                    tenant_id=campaign.tenant_id,
+                    campaign_id=campaign_id,
+                    nombre=(nombre_lista or f"Carga {datetime.now():%Y-%m-%d %H:%M}")[:120],
+                    origen=origen,
+                )
+                session.add(lista)
+                await session.flush()
             numero = CampaignNumber(
                 campaign_id=campaign_id,
-                phone=fila.phone,
-                extra_data=json.dumps(fila.vars, ensure_ascii=False) if fila.vars else None,
+                tenant_id=campaign.tenant_id,
+                phone=phone,
+                extra_data=json.dumps(variables, ensure_ascii=False) if variables else None,
+                contacto_id=contacto.id if contacto else None,
+                lista_id=lista.id,
             )
             session.add(numero)
-            existentes[fila.phone] = numero
+            existentes[phone] = numero
             added += 1
-        if fila.vars:
+        if variables:
             if es_cobranza:
-                deuda_id, motivo = await _sincronizar_deuda(session, fila.phone, fila.vars)
+                deuda_id, motivo = await _sincronizar_deuda(session, phone, variables)
                 if motivo:
-                    agenda_omitidas.append({"phone": fila.phone, "motivo": motivo})
+                    agenda_omitidas.append({"phone": phone, "motivo": motivo})
             else:
-                appointment_id, motivo = await _sincronizar_agenda(session, fila.phone, fila.vars)
+                appointment_id, motivo = await _sincronizar_agenda(session, phone, variables)
                 if motivo:
-                    agenda_omitidas.append({"phone": fila.phone, "motivo": motivo})
+                    agenda_omitidas.append({"phone": phone, "motivo": motivo})
                 elif appointment_id:
                     numero.appointment_id = appointment_id
                     agenda_creadas += 1
-    await session.commit()
+    await session.flush()
     total = (await session.execute(
         select(func.count(CampaignNumber.id)).where(CampaignNumber.campaign_id == campaign_id)
     )).scalar_one()
@@ -378,6 +484,7 @@ async def add_numbers(
         "agenda_creadas": agenda_creadas,
         "agenda_omitidas": agenda_omitidas,
         "bloqueados": bloqueados,
+        "lista_id": lista.id if lista else None,
     }
 
 
@@ -471,8 +578,17 @@ async def campaign_stats(campaign_id: int, session: AsyncSession = Depends(get_s
         noanswer=counts.get("noanswer", 0),
         failed=counts.get("failed", 0),
         done=counts.get("done", 0),
+        no_llamar=counts.get("no_llamar", 0),
         active_calls=counts.get("dialing", 0),
     )
+    disponibles = (
+        await session.execute(
+            select(func.count(CampaignNumber.id))
+            .outerjoin(Lista, Lista.id == CampaignNumber.lista_id)
+            .where(*hopper.condiciones_disponibles(campaign_id, datetime.utcnow()))
+        )
+    ).scalar_one()
+    stats.en_espera = max(0, stats.pending - disponibles)
     from app.core.clock import now_local
     from app.services import tope_campanas
 
@@ -511,20 +627,13 @@ async def retry_campaign(campaign_id: int, session: AsyncSession = Depends(get_s
     campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
-    result = await session.execute(
-        update(CampaignNumber)
-        .where(
-            CampaignNumber.campaign_id == campaign_id,
-            CampaignNumber.status.in_(["failed", "done", "busy", "noanswer"]),
-        )
-        .values(status="pending", attempts=0, last_error=None)
-    )
-    if result.rowcount == 0:
+    reiniciados = await hopper.reiniciar_campana(session, campaign_id)
+    if reiniciados == 0:
         raise HTTPException(status_code=400, detail="No hay números para reintentar")
     campaign.status = "idle"
     campaign.finished_at = None
     await session.commit()
-    return {"ok": True, "reset": result.rowcount}
+    return {"ok": True, "reset": reiniciados}
 
 
 @router.post("/{campaign_id}/stop")

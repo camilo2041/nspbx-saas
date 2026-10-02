@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -346,7 +346,11 @@ _COLUMN_PATCHES += _parches_multiempresa()
 # una consulta sin filtrar ahí es peor que una de negocio.
 # Las tablas nuevas con tenant_id que llegan por revisiones de Alembic se
 # agregan acá (no a _TABLAS_CON_TENANT, que es parte del esquema base).
-_TABLAS_CON_RLS = _TABLAS_CON_TENANT + ["users", "audit_log", "voicebot_versions", "api_keys"]
+_TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
+    "users", "audit_log", "voicebot_versions", "api_keys",
+    # CRM (revisión 0012)
+    "contactos", "campos_contacto", "listas", "notas", "no_llamar",
+]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
 # en cada transacción (ver core/database.py).
@@ -745,6 +749,12 @@ app.include_router(
 app.include_router(
     cobranza.router,
     dependencies=[Depends(requiere(permissions.CAMPANAS_GESTIONAR)), *_VOICEBOT],
+)
+# CRM: ver con crm:ver; crear, importar y lo demás exige además
+# crm:gestionar en cada endpoint (ver app/api/crm.py).
+app.include_router(
+    crm_api.router,
+    dependencies=[Depends(requiere(permissions.CRM_VER)), Depends(licencia_operativa())],
 )
 app.include_router(
     ai_usage.router,
