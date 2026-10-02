@@ -21,6 +21,7 @@ export default function MenuLayout() {
       <Stack.Screen name="cobranza" options={{ title: "Cobranza" }} />
       <Stack.Screen name="campanas" options={{ title: "Campañas" }} />
       <Stack.Screen name="campana/[id]" options={{ title: "Campaña" }} />
+      <Stack.Screen name="pausas-disposiciones" options={{ title: "Pausas y disposiciones" }} />
       <Stack.Screen name="rutas-entrantes" options={{ title: "Rutas entrantes" }} />
       <Stack.Screen name="rutas-salientes" options={{ title: "Rutas salientes" }} />
       <Stack.Screen name="colas" options={{ title: "Colas" }} />

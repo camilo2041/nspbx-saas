@@ -33,8 +33,10 @@ import {
   CampaignStats,
   CampaignWithStats,
   Trunk,
+  MetodoCampana,
   VoiceBot,
 } from "@/lib/types";
+import { AgentesCampana } from "@/components/agentes-campana";
 import { ListasCampana } from "@/components/listas-campana";
 import { statusBadge } from "@/lib/utils";
 
@@ -52,7 +54,17 @@ const empty = {
   espera_busy: "",
   espera_noanswer: "",
   espera_failed: "",
+  metodo: "voizbot" as MetodoCampana,
+  grabacion: "todas" as "todas" | "ninguna",
+  guion: "",
 };
+
+const METODOS: { value: MetodoCampana; label: string }[] = [
+  { value: "voizbot", label: "Voizbot (sin agentes)" },
+  { value: "manual", label: "Agentes: marcación manual" },
+  { value: "vista_previa", label: "Agentes: vista previa" },
+  { value: "progresivo", label: "Agentes: progresivo" },
+];
 
 const INTENCIONES = [
   { value: "confirmar", label: "Confirmar cita" },
@@ -157,6 +169,9 @@ export default function CampaignsPage() {
       espera_busy: c.reglas_reciclaje?.busy != null ? String(c.reglas_reciclaje.busy) : "",
       espera_noanswer: c.reglas_reciclaje?.noanswer != null ? String(c.reglas_reciclaje.noanswer) : "",
       espera_failed: c.reglas_reciclaje?.failed != null ? String(c.reglas_reciclaje.failed) : "",
+      metodo: c.metodo ?? "voizbot",
+      grabacion: c.grabacion ?? "todas",
+      guion: c.guion ?? "",
     });
     setModal(true);
   };
@@ -179,6 +194,9 @@ export default function CampaignsPage() {
         ai_intent: form.ai_intent || null,
         message_template: form.message_template.trim() || null,
         reglas_reciclaje: reglasDe(form),
+        metodo: form.metodo,
+        grabacion: form.grabacion,
+        guion: form.guion.trim() || null,
       };
       if (editing) {
         await api.put(`/api/campaigns/${editing.id}`, payload);
@@ -607,6 +625,34 @@ export default function CampaignsPage() {
             options={INTENCIONES}
             hint="Qué gestión resuelve el voizbot en estas llamadas. Cobranza le informa la deuda y registra promesas de pago; el resto trabaja sobre la agenda de citas."
           />
+          <Select
+            label="Cómo se marca"
+            value={form.metodo}
+            onChange={(v) => setForm({ ...form, metodo: v as MetodoCampana })}
+            options={METODOS}
+            hint="Con agentes: manual (el agente escribe o elige el número), vista previa (ve el cliente y decide marcar) o progresivo (al estar listo le llega la siguiente llamada). Asígnalos en el detalle de la campaña."
+          />
+          {form.metodo !== "voizbot" && (
+            <>
+              <Select
+                label="Grabación"
+                value={form.grabacion}
+                onChange={(v) => setForm({ ...form, grabacion: v as "todas" | "ninguna" })}
+                options={[
+                  { value: "todas", label: "Grabar todas las llamadas" },
+                  { value: "ninguna", label: "No grabar" },
+                ]}
+              />
+              <Textarea
+                label="Guion para el agente (opcional)"
+                value={form.guion}
+                onChange={(v) => setForm({ ...form, guion: v })}
+                rows={4}
+                placeholder="Buenos días, {nombre}. Le habla {agente} de…"
+                hint="Con {variables}: {nombre}, {telefono}, {agente}, los campos propios del contacto y las columnas cargadas con el número."
+              />
+            </>
+          )}
           <Input
             label="Concurrencia máxima"
             type="number"
@@ -720,6 +766,8 @@ export default function CampaignsPage() {
                 ))}
               </div>
             )}
+
+            {selected.metodo && selected.metodo !== "voizbot" && <AgentesCampana campaignId={selected.id} />}
 
             <ListasCampana
               campaignId={selected.id}

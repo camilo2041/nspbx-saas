@@ -22,6 +22,7 @@ import {
 import { invalidar, useDatos } from "@/src/datos";
 import { Aviso, Buscador, CampoDef, EstadoVacio, Esqueleto, Fila, FiltroChips, Hoja, HojaFormulario, Pantalla } from "@/src/gestion";
 import { exito, fallo } from "@/src/haptico";
+import { AgentesCampana } from "@/src/AgentesCampana";
 import { ListasCampana } from "@/src/ListasCampana";
 import { radios, useColores } from "@/src/tema";
 import { BarraProgreso, Boton, FilaMenu, Metrica, Pildora, Seccion, Tarjeta } from "@/src/ui";
@@ -281,6 +282,8 @@ export default function DetalleCampana() {
             tono="peligro"
           />
         </View>
+
+        {campana.metodo && campana.metodo !== "voizbot" ? <AgentesCampana campaignId={String(id)} /> : null}
 
         <ListasCampana campaignId={String(id)} version={stats?.total ?? 0} onCambio={() => est.recargar()} />
 

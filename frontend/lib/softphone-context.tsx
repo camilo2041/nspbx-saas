@@ -84,6 +84,16 @@ export function resolverServidorSip(configurado: string | null | undefined): str
   return v;
 }
 
+// Token de la sesión de agente en curso (la consola lo fija al entrar; ver
+// backend/app/services/agentes.py). La llamada de la sesión trae la
+// cabecera X-NSPBX-Agente con este valor y se contesta sola. Con cualquier
+// otro valor se rechaza: es alguien intentando abrir el micrófono del agente.
+let tokenSesionAgente: string | null = null;
+
+export function esperarSesionAgente(token: string | null) {
+  tokenSesionAgente = token;
+}
+
 export function useSoftphone() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useSoftphone debe usarse dentro de <SoftphoneProvider>");
@@ -381,6 +391,18 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         }),
         delegate: {
           onInvite(invitation: Invitation) {
+            const token = invitation.request.getHeader("X-NSPBX-Agente");
+            if (token) {
+              if (!tokenSesionAgente || token !== tokenSesionAgente) {
+                invitation.reject().catch(() => {});
+                return;
+              }
+              bindSession(invitation, "Sesión de agente", false);
+              invitation
+                .accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } })
+                .catch(() => {});
+              return;
+            }
             bindSession(invitation, invitation.remoteIdentity.uri.user ?? "desconocido", true);
           },
           onDisconnect() {

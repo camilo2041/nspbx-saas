@@ -49,6 +49,7 @@ const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
     entradas: [
       { titulo: "Voizbots", detalle: "Prueba tus bots como lo haría un cliente", icono: "bot", tono: "info", permiso: "voizbots:ver", modulo: "voicebot", ruta: "/administrar/bots" },
       { titulo: "Campañas", detalle: "Llamadas masivas, avance y topes del día", icono: "campana", tono: "info", permiso: "campanas:gestionar", modulo: "voicebot", ruta: "/administrar/campanas" },
+      { titulo: "Pausas y disposiciones", detalle: "Lo que eligen los agentes al pausar y al colgar", icono: "pausa", tono: "info", permiso: "campanas:gestionar", ruta: "/administrar/pausas-disposiciones" },
       { titulo: "Consumo IA", detalle: "Minutos y costo de los voizbots", icono: "tendencia", tono: "info", permiso: "consumo_ia:ver", modulo: "voicebot", ruta: "/administrar/consumo" },
     ],
   },

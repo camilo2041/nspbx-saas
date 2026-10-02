@@ -97,6 +97,10 @@ export interface Campaign {
   ai_intent: string | null;
   /** Minutos de espera antes de volver a marcar, por resultado. */
   reglas_reciclaje: Partial<Record<"busy" | "noanswer" | "failed", number>> | null;
+  /** voizbot = lo de antes; el resto, con agentes humanos. */
+  metodo: MetodoCampana;
+  guion: string | null;
+  grabacion: "todas" | "ninguna";
   status: string;
   started_at: string | null;
   finished_at: string | null;
@@ -445,6 +449,7 @@ export const PERMISOS = {
   softphone: "softphone:usar",
   crmVer: "crm:ver",
   crmGestionar: "crm:gestionar",
+  agente: "agente:operar",
 } as const;
 
 export type Rol = "admin" | "supervisor" | "coordinador" | "asesor" | "plataforma";
@@ -697,4 +702,94 @@ export interface ReporteImportacion {
   con_error: number;
   errores: { fila: number; motivo: string }[];
   campana: CampaignNumbersUploadResult | null;
+}
+
+// ---------- Agentes (contact center, fase 3) ----------
+
+export type MetodoCampana = "voizbot" | "manual" | "vista_previa" | "progresivo";
+export type EstadoAgente = "LISTO" | "PAUSA" | "PREVIA" | "TIMBRANDO" | "EN_LLAMADA" | "DISPO";
+export type CategoriaDisposicion = "venta" | "contacto" | "no_contacto" | "callback" | "promesa" | "no_llamar";
+
+export interface CodigoPausa {
+  id: number;
+  codigo: string;
+  nombre: string;
+  pagada?: boolean;
+  max_minutos: number | null;
+  activo?: boolean;
+  orden?: number;
+}
+
+export interface Disposicion {
+  id: number;
+  codigo: string;
+  nombre: string;
+  categoria: CategoriaDisposicion;
+  color: string | null;
+  contacto_humano?: boolean;
+  activa?: boolean;
+  orden?: number;
+}
+
+export interface LeadAgente {
+  id: number;
+  telefono: string;
+  intentos: number;
+  variables: Record<string, string>;
+  campana: { id: number; nombre: string; metodo: MetodoCampana } | null;
+  guion: string | null;
+  contacto: {
+    id: number;
+    nombre: string;
+    documento: string | null;
+    telefono: string;
+    telefonos: TelefonoExtra[];
+    email: string | null;
+    ciudad: string | null;
+    direccion: string | null;
+    campos: Record<string, string | number | boolean>;
+  } | null;
+  notas: NotaContacto[];
+  llamadas_anteriores: { started_at: string | null; status: string; billsec: number; disposicion: string | null }[];
+}
+
+export interface EstadoConsola {
+  agente: {
+    user_id: number;
+    estado: EstadoAgente;
+    desde: string;
+    codigo_pausa_id: number | null;
+    campanas: number[];
+    audio: boolean;
+    campaign_id: number | null;
+    lead_id: number | null;
+    telefono: string | null;
+    contestada_at: string | null;
+    pausa_pendiente_id: number | null;
+    token_audio: string | null;
+    extension: string | null;
+  } | null;
+  campanas: { id: number; nombre: string; metodo: MetodoCampana; status: string }[];
+  pausas: CodigoPausa[];
+  disposiciones: Disposicion[];
+  lead: LeadAgente | null;
+  callbacks: {
+    id: number;
+    lead_id: number;
+    campaign_id: number;
+    telefono: string;
+    nombre: string | null;
+    cuando: string;
+    nota: string | null;
+    propio: boolean;
+    vencido: boolean;
+  }[];
+}
+
+export interface AgenteCampana {
+  id: number;
+  nombre: string;
+  username: string;
+  extension: string | null;
+  asignado: boolean;
 }

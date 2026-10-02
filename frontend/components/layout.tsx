@@ -89,6 +89,19 @@ const GROUPS: NavGroup[] = [
         ),
       },
       {
+        href: "/agente",
+        label: "Consola de agente",
+        permiso: PERMISOS.agente,
+        icon: icon(
+          <>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 14v-2a8 8 0 0116 0v2" />
+            <rect x="2.5" y="13" width="4" height="7" rx="1.5" />
+            <rect x="17.5" y="13" width="4" height="7" rx="1.5" />
+            <path strokeLinecap="round" d="M19.5 20a4 4 0 01-4 2H13" />
+          </>
+        ),
+      },
+      {
         href: "/crm",
         label: "Contactos",
         permiso: PERMISOS.crmVer,
@@ -211,6 +224,17 @@ const GROUPS: NavGroup[] = [
             <circle cx="12" cy="12" r="9" />
             <circle cx="12" cy="12" r="5" />
             <circle cx="12" cy="12" r="1" />
+          </>
+        ),
+      },
+      {
+        href: "/contact-center",
+        label: "Pausas y disposiciones",
+        permiso: PERMISOS.campanas,
+        icon: icon(
+          <>
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+            <path strokeLinecap="round" d="M9 9v6M15 9v6" />
           </>
         ),
       },

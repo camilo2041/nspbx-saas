@@ -40,6 +40,10 @@ export interface Campana {
   ai_intent: string | null;
   /** Minutos de espera antes de volver a marcar, por resultado. */
   reglas_reciclaje?: Partial<Record<"busy" | "noanswer" | "failed", number>> | null;
+  /** voizbot = lo de antes; el resto, con agentes humanos (consola web). */
+  metodo?: "voizbot" | "manual" | "vista_previa" | "progresivo";
+  guion?: string | null;
+  grabacion?: "todas" | "ninguna";
   status: string;
   trunk_name?: string | null;
   voicebot_name?: string | null;
@@ -117,6 +121,35 @@ export function camposCampana(troncales: { id: number; name: string }[], bots: {
       tipo: "opciones",
       opciones: [{ valor: "", etiqueta: "Sin voizbot" }, ...bots.map((b) => ({ valor: String(b.id), etiqueta: b.name }))],
     },
+    {
+      clave: "metodo",
+      etiqueta: "Cómo se marca",
+      tipo: "opciones",
+      opciones: [
+        { valor: "voizbot", etiqueta: "Voizbot (sin agentes)" },
+        { valor: "manual", etiqueta: "Agentes: marcación manual" },
+        { valor: "vista_previa", etiqueta: "Agentes: vista previa" },
+        { valor: "progresivo", etiqueta: "Agentes: progresivo" },
+      ],
+      ayuda: "Con agentes, ellos trabajan desde la consola de agente del panel web.",
+    },
+    {
+      clave: "grabacion",
+      etiqueta: "Grabación de los agentes",
+      tipo: "opciones",
+      opciones: [
+        { valor: "todas", etiqueta: "Grabar todas las llamadas" },
+        { valor: "ninguna", etiqueta: "No grabar" },
+      ],
+      visibleSi: (v) => v.metodo !== "voizbot",
+    },
+    {
+      clave: "guion",
+      etiqueta: "Guion para el agente (opcional)",
+      tipo: "multilinea",
+      placeholder: "Buenos días, {nombre}. Le habla {agente} de…",
+      visibleSi: (v) => v.metodo !== "voizbot",
+    },
     { clave: "max_concurrency", etiqueta: "Llamadas a la vez", tipo: "numero", ayuda: "De 1 a 100." },
     { clave: "retries", etiqueta: "Reintentos por número", tipo: "numero", ayuda: "De 0 a 10." },
     {
@@ -172,6 +205,9 @@ export function inicialCampana(c?: Campana | null): Record<string, unknown> {
     espera_busy: c?.reglas_reciclaje?.busy ?? "",
     espera_noanswer: c?.reglas_reciclaje?.noanswer ?? "",
     espera_failed: c?.reglas_reciclaje?.failed ?? "",
+    metodo: c?.metodo ?? "voizbot",
+    grabacion: c?.grabacion ?? "todas",
+    guion: c?.guion ?? "",
   };
 }
 
@@ -191,6 +227,9 @@ export function cuerpoCampana(v: Record<string, unknown>) {
     max_minutes_per_day: numeroOVacio(v.max_minutes_per_day),
     message_template: String(v.message_template ?? "").trim() || null,
     reglas_reciclaje: reglasDe(v),
+    metodo: String(v.metodo || "voizbot"),
+    grabacion: String(v.grabacion || "todas"),
+    guion: String(v.guion ?? "").trim() || null,
   };
 }
 
