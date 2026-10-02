@@ -66,13 +66,79 @@ class FiltroRequestId(logging.Filter):
         return True
 
 
+# Secretos que viajan en la URL y que el log de acceso de uvicorn escribía
+# tal cual: FreeSWITCH pide /fs/dialplan?secret=FS_XML_SECRET en CADA
+# llamada (con ese secreto /fs/directory entrega las claves SIP de todas las
+# empresas), manda el CDR a /fs/cdr/<secreto>, el log en vivo abre
+# /ws/logs?token=<JWT> y el push usa /fs/push/<firma>/.
+_PARAMETRO_SECRETO = re.compile(r"([?&](?:secret|token|password|clave|key|api_key|apikey|firma|signature)=)[^&\s\"']+", re.I)
+_RUTA_SECRETA = re.compile(r"(/fs/cdr/|/fs/push/)[^/\s\"'?]+")
+
+
+def ocultar_secretos_en_texto(texto: str) -> str:
+    """Tapa los secretos de una línea de log: los que van en la URL y los
+    valores de las claves de infraestructura, aparezcan donde aparezcan."""
+    from app.core.config import settings
+
+    texto = _PARAMETRO_SECRETO.sub(r"\1***", texto)
+    texto = _RUTA_SECRETA.sub(r"\1***", texto)
+    for secreto in _secretos_conocidos(settings):
+        texto = texto.replace(secreto, "***")
+    return texto
+
+
+def _secretos_conocidos(settings) -> list[str]:
+    import os
+
+    valores = [
+        settings.fs_xml_secret,
+        settings.fs_esl_password,
+        settings.turn_secret,
+        os.getenv("AUTH_SECRET", ""),
+        os.getenv("DATA_ENCRYPTION_KEY", ""),
+        os.getenv("DATA_ENCRYPTION_KEY_ANTERIOR", ""),
+    ]
+    # Los cortos no: reemplazar "admin" o "1234" taparía medio log.
+    return [v.strip() for v in valores if v and len(v.strip()) >= 8]
+
+
+class FiltroSecretos(logging.Filter):
+    """Pasa cada registro por `ocultar_secretos_en_texto` antes de escribirlo.
+
+    Va en los loggers de uvicorn además del manejador raíz: los de uvicorn
+    tienen sus propios manejadores y no propagan a la raíz."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            mensaje = record.getMessage()
+        except Exception:
+            return True
+        limpio = ocultar_secretos_en_texto(mensaje)
+        if limpio != mensaje:
+            record.msg, record.args = limpio, None
+        return True
+
+
+def instalar_filtro_de_secretos() -> None:
+    filtro = FiltroSecretos()
+    for nombre in ("uvicorn.access", "uvicorn.error", "uvicorn"):
+        lg = logging.getLogger(nombre)
+        if not any(isinstance(f, FiltroSecretos) for f in lg.filters):
+            lg.addFilter(filtro)
+    for manejador in logging.getLogger().handlers:
+        if not any(isinstance(f, FiltroSecretos) for f in manejador.filters):
+            manejador.addFilter(filtro)
+
+
 def configurar_logging(nivel: int = logging.INFO) -> None:
     """Formato con request_id. `LOG_FORMATO=json` lo emite como JSON, una
-    línea por evento, para un recolector de logs."""
+    línea por evento, para un recolector de logs. Ningún secreto llega al log
+    (ver FiltroSecretos)."""
     import os
 
     manejador = logging.StreamHandler()
     manejador.addFilter(FiltroRequestId())
+    manejador.addFilter(FiltroSecretos())
     if os.getenv("LOG_FORMATO", "").lower() == "json":
         manejador.setFormatter(_FormatoJson())
     else:
@@ -82,6 +148,7 @@ def configurar_logging(nivel: int = logging.INFO) -> None:
     raiz = logging.getLogger()
     raiz.handlers[:] = [manejador]
     raiz.setLevel(nivel)
+    instalar_filtro_de_secretos()
 
 
 class _FormatoJson(logging.Formatter):

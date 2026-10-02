@@ -525,7 +525,7 @@ Esta sección es la que convierte el documento en confianza.
 | ✅ **Fraude** (`test_salientes*.py`, `test_interruptores.py`, `test_alertas.py`) | destinos internacionales, premium, largos, con prefijos raros → rechazados en los tres caminos de salida; Python y dialplan deciden igual; interruptores y cupo diario cortan; alertas. | I5 |
 | **Voizbot** | cada herramienta con args de otra empresa o de otro llamante → rechazo; batería de prompt injection contra `bot_sim`. | I4 |
 | ✅ **Alcance** (`test_alcance.py`) | admin de empresa en instalación con 2+ empresas → 403 en todas las operaciones globales. | I6 |
-| 🟡 **Secretos** (`ci.yml`) | gitleaks sobre el historial completo ✅; falta comprobar que los logs no contengan contraseñas ni claves. | I7 |
+| ✅ **Secretos** (`ci.yml`, `test_secretos_en_logs.py`) | gitleaks sobre el historial completo; ningún secreto en los logs: el log de acceso de uvicorn escribía `FS_XML_SECRET` en cada llamada (`/fs/dialplan?secret=`), el del CDR, el JWT del log en vivo y las firmas de push. `FiltroSecretos` (`core/auditoria.py`) los tapa en todo log, también en el voicebot; la prueba recorre login, claves SIP, de troncal y del modelo y exige que ninguna aparezca. | I7 |
 | ✅ **Fallo seguro** (`test_fallo_seguro.py`, `test_arranque.py`) | token corrupto, sin firma, vencido, de otra clave, con la empresa de otro usuario o una inexistente; usuario o empresa desactivados; licencia suspendida; secretos faltantes al arrancar → todos niegan. | I8 |
 
 ### 7.2 Pipeline
