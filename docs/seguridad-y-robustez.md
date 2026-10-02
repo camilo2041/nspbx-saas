@@ -433,7 +433,7 @@ tocar código. Cada uno queda auditado.
 | Desactivar un voizbot | 🟢 | `VoiceBot.enabled` |
 | Bloquear extensión (y tirar su registro) | ✅ | desactivarla, cambiarle la clave o borrarla cuelga sus salientes en curso (`nspbx_saliente_ext`, el usuario SIP autenticado) y tira su registro. Probado con FreeSWITCH real: la llamada se cortó, el registro desapareció y el teléfono no pudo volver a registrarse |
 | Cerrar sesiones de un usuario / de una empresa | 🟡 | `revocar_sesiones` por usuario |
-| Bloquear un país o prefijo para todos | 🟡 | lista fija en `salientes.CODIGOS_BLOQUEADOS`; falta poder agregar desde el panel |
+| Bloquear un país o prefijo para todos | ✅ | Empresas → Destinos bloqueados (panel y app; `PUT /api/plataforma/destinos-bloqueados`, revisión 0010). Se suman a los fijos de `salientes.CODIGOS_BLOQUEADOS` en el dialplan, el clic para llamar y las campañas, y ganan aunque la empresa tenga el país permitido. `test_destinos_bloqueados.py` (Python y dialplan deciden igual) |
 | Bloquear IP | 🟢 | fail2ban / panel de seguridad |
 
 ---

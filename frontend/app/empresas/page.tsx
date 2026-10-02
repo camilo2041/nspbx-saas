@@ -97,6 +97,10 @@ export default function EmpresasPage() {
   const [globalCortado, setGlobalCortado] = useState<boolean | null>(null);
   const [cambiandoGlobal, setCambiandoGlobal] = useState(false);
   const [alertas, setAlertas] = useState<AlertaTrafico[]>([]);
+  // Destinos internacionales bloqueados para todas las empresas.
+  const [bloqueados, setBloqueados] = useState<{ prefijos: string; fijos: string[] } | null>(null);
+  const [textoBloqueados, setTextoBloqueados] = useState("");
+  const [guardandoBloqueados, setGuardandoBloqueados] = useState(false);
 
   const abrirLicencia = (e: Empresa) => {
     const lic = e.licencia;
@@ -149,6 +153,13 @@ export default function EmpresasPage() {
       setGlobalCortado(global.outbound_blocked);
       // Informativo: si falla, la lista de empresas igual se muestra.
       api.get<AlertaTrafico[]>("/api/plataforma/alertas").then(setAlertas).catch(() => setAlertas([]));
+      api
+        .get<{ prefijos: string; fijos: string[] }>("/api/plataforma/destinos-bloqueados")
+        .then((d) => {
+          setBloqueados(d);
+          setTextoBloqueados(d.prefijos.split(",").filter(Boolean).join(", "));
+        })
+        .catch(() => setBloqueados(null));
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
@@ -259,6 +270,20 @@ export default function EmpresasPage() {
     }
   };
 
+  const guardarBloqueados = async () => {
+    setGuardandoBloqueados(true);
+    setError("");
+    try {
+      const d = await api.put<{ prefijos: string; fijos: string[] }>("/api/plataforma/destinos-bloqueados", { prefijos: textoBloqueados });
+      setBloqueados(d);
+      setTextoBloqueados(d.prefijos.split(",").filter(Boolean).join(", "));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron guardar los destinos bloqueados");
+    } finally {
+      setGuardandoBloqueados(false);
+    }
+  };
+
   const cambiarSalientesGlobal = async () => {
     const cortar = !globalCortado;
     if (cortar && !confirm("¿Cortar las llamadas salientes de TODAS las empresas?")) return;
@@ -334,6 +359,34 @@ export default function EmpresasPage() {
             {globalCortado ? "Reactivar salientes" : "Cortar todas las salientes"}
           </Button>
         </div>
+      )}
+
+      {bloqueados && (
+        <Card className="mb-4">
+          <CardHeader
+            title="Destinos bloqueados para todas las empresas"
+            subtitle="Códigos de país o prefijos internacionales (sin el +). Ninguna empresa los puede marcar, aunque los tenga entre sus países permitidos. Aplica desde la próxima llamada."
+          />
+          <div className="flex flex-wrap items-end gap-2 p-4">
+            <div className="min-w-60 flex-1">
+              <Input
+                label="Bloqueados por la plataforma"
+                value={textoBloqueados}
+                onChange={setTextoBloqueados}
+                placeholder="53, 7, 2346"
+                hint={`Siempre bloqueados, además: +${bloqueados.fijos.join(", +")} (satelitales y tarifas premium).`}
+                mono
+              />
+            </div>
+            <Button
+              onClick={guardarBloqueados}
+              loading={guardandoBloqueados}
+              disabled={textoBloqueados.replace(/[\s+]/g, "") === bloqueados.prefijos.replace(/[\s+]/g, "")}
+            >
+              Guardar
+            </Button>
+          </div>
+        </Card>
       )}
 
       {alertas.length > 0 && (

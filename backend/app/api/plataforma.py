@@ -85,6 +85,46 @@ async def colgar_salientes_de_todas(
     return {"empresas": len(hechas)}
 
 
+class DestinosBloqueados(BaseModel):
+    # "53, 7, +2346": códigos de país o prefijos internacionales (sin el +).
+    prefijos: str
+    # Solo en la respuesta: los fijos, que no se pueden quitar.
+    fijos: list[str] = []
+
+
+@router.get("/destinos-bloqueados", response_model=DestinosBloqueados)
+async def ver_destinos_bloqueados(session: AsyncSession = Depends(get_admin_session)):
+    from app.services import salientes
+
+    return DestinosBloqueados(prefijos=(await _estado(session)).blocked_prefixes or "", fijos=list(salientes.CODIGOS_BLOQUEADOS))
+
+
+@router.put("/destinos-bloqueados", response_model=DestinosBloqueados)
+async def cambiar_destinos_bloqueados(
+    payload: DestinosBloqueados,
+    session: AsyncSession = Depends(get_admin_session),
+    usuario: User = Depends(usuario_actual),
+):
+    """Bloquea un país o prefijo internacional para TODAS las empresas, aunque
+    una lo tenga entre sus países permitidos. Aplica en el dialplan, el clic
+    para llamar y las campañas desde la próxima llamada."""
+    from app.services import salientes
+
+    try:
+        prefijos = salientes.prefijos_desde_texto(payload.prefijos)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    estado = await _estado(session)
+    estado.blocked_prefixes = ",".join(prefijos)
+    await session.commit()
+    logger.warning("Destinos bloqueados para toda la plataforma: %s (por %s)", estado.blocked_prefixes or "ninguno", usuario.username)
+    try:
+        await esl.reloadxml()
+    except Exception:
+        pass
+    return DestinosBloqueados(prefijos=estado.blocked_prefixes, fijos=list(salientes.CODIGOS_BLOQUEADOS))
+
+
 @router.get("/alertas")
 async def alertas_de_todas(session: AsyncSession = Depends(get_admin_session)):
     """Alertas de tráfico saliente de todas las empresas, las más recientes primero."""

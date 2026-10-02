@@ -909,6 +909,10 @@ class PlatformState(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     # Interruptor global: corta TODAS las salientes de TODAS las empresas.
     outbound_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Códigos internacionales (país o prefijo, sin el +) bloqueados para
+    # todas las empresas, además de los fijos de salientes.CODIGOS_BLOQUEADOS.
+    # "53,7,2346": se guarda normalizado.
+    blocked_prefixes: Mapped[str] = mapped_column(Text, default="", server_default="")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )

@@ -84,6 +84,28 @@ class Politica:
     # teléfono detrás (un desvío del IVR al celular de guardia).
     fuera_de_horario: bool = False
     permitidas_fuera_de_horario: tuple[str, ...] = ()
+    # Códigos que la plataforma bloquea para todas las empresas (Empresas →
+    # Destinos bloqueados), además de los fijos de CODIGOS_BLOQUEADOS.
+    bloqueados_plataforma: tuple[str, ...] = ()
+
+
+_PREFIJO_RE = re.compile(r"^[1-9][0-9]{0,5}$")
+
+
+def prefijos_desde_texto(texto: str | None) -> tuple[str, ...]:
+    """"+53, 7 ;2346" -> ("53", "7", "2346"). Un código de país o un prefijo
+    más largo (hasta 6 dígitos). Lanza ValueError con lo que no lo sea:
+    un bloqueo mal escrito que se descarta en silencio es peor que un error."""
+    salida = []
+    for parte in (texto or "").replace(";", ",").split(","):
+        parte = parte.strip().lstrip("+").replace(" ", "")
+        if not parte:
+            continue
+        if not _PREFIJO_RE.fullmatch(parte):
+            raise ValueError(f"«{parte}» no es un código internacional (de 1 a 6 dígitos, sin empezar en 0)")
+        if parte not in salida:
+            salida.append(parte)
+    return tuple(salida)
 
 
 def paises_desde_texto(texto: str | None) -> tuple[str, ...]:
@@ -131,6 +153,9 @@ def motivo_bloqueo(numero: str | None, politica: Politica) -> str | None:
     for codigo in CODIGOS_BLOQUEADOS:
         if resto.startswith(codigo):
             return f"Destino bloqueado siempre (+{codigo}: red satelital o tarifa premium)"
+    for codigo in politica.bloqueados_plataforma:
+        if resto.startswith(codigo):
+            return f"Destino bloqueado por la plataforma (+{codigo})"
     if not politica.permitir_internacional:
         return "Las llamadas internacionales no están habilitadas para esta empresa"
     if not any(resto.startswith(p) for p in politica.paises):
@@ -197,7 +222,7 @@ def restriccion_regex(politica: Politica, antepuesto: str = "") -> str | None:
     # código bloqueado.
     if politica.permitir_internacional and politica.paises:
         buenos = [i + p for i in PREFIJOS_INTERNACIONALES for p in politica.paises]
-        malos = [i + c for i in PREFIJOS_INTERNACIONALES for c in CODIGOS_BLOQUEADOS]
+        malos = [i + c for i in PREFIJOS_INTERNACIONALES for c in CODIGOS_BLOQUEADOS + politica.bloqueados_plataforma]
         requeridos = _derivar(buenos, antepuesto)
         prohibidos = _derivar(malos, antepuesto)
         if prohibidos is not None and requeridos != []:
@@ -294,6 +319,10 @@ async def politicas(session, tenant_ids) -> dict[int, Politica]:
         return {}
     estado = await session.get(PlatformState, 1)
     global_cortado = bool(estado and estado.outbound_blocked)
+    try:
+        bloqueados = prefijos_desde_texto(estado.blocked_prefixes if estado else "")
+    except ValueError:
+        bloqueados = ()  # se guarda validado; esto solo cubre una edición a mano
     empresas = {
         t.id: t for t in (await session.execute(select(Tenant).where(Tenant.id.in_(ids)))).scalars().all()
     }
@@ -325,7 +354,7 @@ async def politicas(session, tenant_ids) -> dict[int, Politica]:
             bloqueo = f"Cupo diario de {cupo} minutos salientes agotado; se renueva a medianoche"
         # Sin licencia todavía: el tope de la prueba, no "sin tope".
         cps = licensing.limite(lic, "max_outbound_cps") if lic else licensing.PLANES["trial"]["max_outbound_cps"]
-        politica = replace(politica_desde_ajustes(fila, bloqueo), cps=cps)
+        politica = replace(politica_desde_ajustes(fila, bloqueo), cps=cps, bloqueados_plataforma=bloqueados)
         horario = horario_marcacion.horario_salientes_de(fila)
         if horario is not None and not horario_marcacion.en_horario(horario, ahora):
             permitidas = (await session.execute(

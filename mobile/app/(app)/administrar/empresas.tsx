@@ -132,6 +132,8 @@ export default function Empresas() {
   const [creada, setCreada] = useState<Creada | null>(null);
   const [cambiando, setCambiando] = useState(false);
   const [aviso, setAviso] = useState("");
+  const bloqueados = useDatos<{ prefijos: string; fijos: string[] }>("/api/plataforma/destinos-bloqueados", { ttl: 30_000 });
+  const [editandoBloqueados, setEditandoBloqueados] = useState(false);
 
   const todo = () => {
     invalidar("/api/tenants");
@@ -303,6 +305,23 @@ export default function Empresas() {
           />
         </View>
 
+        {bloqueados.datos ? (
+          <Seccion titulo="Destinos bloqueados">
+            <FilaMenu
+              titulo="Bloqueados para todas las empresas"
+              detalle={
+                bloqueados.datos.prefijos
+                  ? bloqueados.datos.prefijos.split(",").map((p) => `+${p}`).join(", ")
+                  : "Ninguno además de los fijos (satelitales y tarifas premium)"
+              }
+              icono="mundo"
+              tono="peligro"
+              onPress={() => setEditandoBloqueados(true)}
+              ultima
+            />
+          </Seccion>
+        ) : null}
+
         {alertas.datos?.length ? (
           <Seccion titulo="Alertas de tráfico saliente">
             {alertas.datos.slice(0, 20).map((a, i, arr) => (
@@ -401,6 +420,31 @@ export default function Empresas() {
           </ScrollView>
         ) : null}
       </Hoja>
+
+      <HojaFormulario
+        visible={editandoBloqueados}
+        titulo="Destinos bloqueados"
+        campos={[
+          {
+            clave: "prefijos",
+            etiqueta: "Códigos de país o prefijos (sin el +)",
+            tipo: "telefono",
+            placeholder: "53, 7, 2346",
+            ayuda: `Ninguna empresa los puede marcar, aunque los tenga entre sus países permitidos. Siempre bloqueados, además: +${(
+              bloqueados.datos?.fijos ?? []
+            ).join(", +")}.`,
+          },
+        ]}
+        inicial={{ prefijos: (bloqueados.datos?.prefijos ?? "").split(",").filter(Boolean).join(", ") }}
+        onGuardar={async (v) => {
+          await peticion("/api/plataforma/destinos-bloqueados", { method: "PUT", body: { prefijos: String(v.prefijos ?? "") } });
+          setEditandoBloqueados(false);
+          invalidar("/api/plataforma");
+          bloqueados.recargar();
+          setAviso("Destinos bloqueados guardados: aplican desde la próxima llamada.");
+        }}
+        onCerrar={() => setEditandoBloqueados(false)}
+      />
 
       <HojaFormulario
         visible={editando !== null}
