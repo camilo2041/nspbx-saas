@@ -488,8 +488,7 @@ contenido de conversaciones completas. Retención 30 días.
 ### 6.4 Runbooks
 
 Cada uno con: síntomas, cómo confirmar, cómo contener, cómo recuperar, a
-quién avisar. En `docs/runbooks/`: ✅ 1, 2, 3 y 8. Pendientes: 4, 5, 6, 7 y
-9 (la rotación de secretos está resumida en el 2). Mínimo:
+quién avisar. En `docs/runbooks/`: ✅ los nueve. Mínimo:
 
 1. Fraude telefónico en curso.
 2. Credencial filtrada (usuario, extensión SIP, clave de proveedor, `AUTH_SECRET`).

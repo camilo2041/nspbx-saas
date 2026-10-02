@@ -9,11 +9,12 @@ Contener va antes que entender: primero se corta la pérdida.
 | 1 | [Fraude telefónico en curso](fraude-en-curso.md) | S1 |
 | 2 | [Credencial filtrada](credencial-filtrada.md) | S1–S2 |
 | 3 | [Sospecha de fuga entre empresas](fuga-entre-empresas.md) | S1 |
+| 4 | [Empresa saturando la plataforma](empresa-saturando.md) | S2 |
+| 5 | [Base de datos caída o disco lleno](base-caida-disco-lleno.md) | S1 |
+| 6 | [Proveedor de IA caído](proveedor-ia-caido.md) | S2–S3 |
+| 7 | [Troncal caída](troncal-caida.md) | S2–S3 |
 | 8 | [Recuperación total desde respaldo](recuperacion-total.md) | S1 |
-
-Pendientes (ver `docs/seguridad-y-robustez.md` §6.4): empresa saturando la
-plataforma, base caída o disco lleno, proveedor de IA caído, troncal caída,
-rotación de cada secreto en detalle.
+| 9 | [Rotación de cada secreto](rotacion-de-secretos.md) | — |
 
 Severidades: **S1** viola una invariante o hay pérdida económica en curso;
 **S2** degradación para varias empresas; **S3** una empresa o una función.
