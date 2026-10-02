@@ -6,8 +6,9 @@ import { Aviso, Pantalla } from "@/src/gestion";
 import { exito } from "@/src/haptico";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
 import { probarTimbre } from "@/src/timbre";
-import { colores, radios } from "@/src/tema";
-import { Boton, Tarjeta } from "@/src/ui";
+import { radios, useColores } from "@/src/tema";
+import { Boton, CajaIcono, Tarjeta } from "@/src/ui";
+import type { NombreIcono } from "@/src/Icono";
 
 type Estado = "ok" | "aviso" | "mal";
 
@@ -18,7 +19,11 @@ interface Chequeo {
   detalle: string;
 }
 
-const ICONO: Record<Estado, string> = { ok: "✅", aviso: "⚠️", mal: "❌" };
+const ICONO: Record<Estado, [NombreIcono, "ok" | "aviso" | "peligro"]> = {
+  ok: ["ok", "ok"],
+  aviso: ["alerta", "aviso"],
+  mal: ["error", "peligro"],
+};
 
 async function permisoAndroid(permiso: string): Promise<boolean> {
   if (Platform.OS !== "android") return true;
@@ -35,6 +40,7 @@ async function permisoAndroid(permiso: string): Promise<boolean> {
  * explica con el paso exacto para revisarlo.
  */
 export default function Diagnostico() {
+  const col = useColores();
   const { connState, connError, entorno, pushListo, connect } = useSoftphone();
   const [notif, setNotif] = useState<boolean | null>(null);
   const [mic, setMic] = useState<boolean | null>(null);
@@ -135,35 +141,35 @@ export default function Diagnostico() {
       />
       {chequeos.map((c) => (
         <Tarjeta key={c.clave} style={{ flexDirection: "row", gap: 12, padding: 14 }}>
-          <Text style={{ fontSize: 22 }}>{ICONO[c.estado]}</Text>
+          <CajaIcono icono={ICONO[c.estado][0]} tono={ICONO[c.estado][1]} tam={36} />
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={{ fontSize: 15, fontWeight: "700", color: colores.texto }}>{c.titulo}</Text>
-            <Text style={{ fontSize: 13, color: colores.textoSecundario, lineHeight: 19 }}>{c.detalle}</Text>
+            <Text style={{ fontSize: 15, fontWeight: "700", color: col.texto }}>{c.titulo}</Text>
+            <Text style={{ fontSize: 13, color: col.textoSecundario, lineHeight: 19 }}>{c.detalle}</Text>
           </View>
         </Tarjeta>
       ))}
 
       <Tarjeta style={{ gap: 10 }}>
-        <Text style={{ fontSize: 15, fontWeight: "700", color: colores.texto }}>Sonido y ahorro de batería</Text>
-        <Text style={{ fontSize: 13, color: colores.textoSecundario, lineHeight: 19 }}>
+        <Text style={{ fontSize: 15, fontWeight: "700", color: col.texto }}>Sonido y ahorro de batería</Text>
+        <Text style={{ fontSize: 13, color: col.textoSecundario, lineHeight: 19 }}>
           Si en la barra de estado ves una campana tachada, el teléfono está en silencio o «No molestar»: el timbre del sistema no suena (el de la app sí,
           con la app abierta). Además, el ahorro de batería puede cerrar la app en segundo plano: ponla como «Sin restricciones».
         </Text>
-        <Boton titulo={probando ? "Sonando…" : "Probar timbre (4 s)"} variante="suave" onPress={probar} deshabilitado={probando} />
-        <Boton titulo="Ajustes de batería de la app" variante="suave" onPress={abrirBateria} />
+        <Boton titulo={probando ? "Sonando…" : "Probar timbre (4 s)"} icono="altavoz" variante="suave" onPress={probar} deshabilitado={probando} />
+        <Boton titulo="Ajustes de batería de la app" icono="ajustes" variante="suave" onPress={abrirBateria} />
       </Tarjeta>
 
       <Tarjeta style={{ gap: 10 }}>
-        <Text style={{ fontSize: 15, fontWeight: "700", color: colores.texto }}>Probar una llamada con la app cerrada</Text>
-        <Text style={{ fontSize: 13, color: colores.textoSecundario, lineHeight: 19 }}>
+        <Text style={{ fontSize: 15, fontWeight: "700", color: col.texto }}>Probar una llamada con la app cerrada</Text>
+        <Text style={{ fontSize: 13, color: col.textoSecundario, lineHeight: 19 }}>
           Es la prueba que de verdad importa: el servidor te manda una llamada de prueba por push. No necesitas que nadie te llame.
         </Text>
         {pruebaPush ? <Aviso texto={pruebaPush.texto} tono={pruebaPush.ok ? "ok" : "peligro"} /> : null}
-        <Boton titulo="Enviarme una llamada de prueba en 15 s" onPress={probarPush} cargando={enviandoPush} />
+        <Boton titulo="Enviarme una llamada de prueba en 15 s" icono="notificaciones" onPress={probarPush} cargando={enviandoPush} />
       </Tarjeta>
 
       {!registrado ? <Boton titulo="Reconectar con la central" onPress={() => connect()} /> : null}
-      <Boton titulo="Volver a revisar" variante="suave" onPress={revisar} style={{ borderRadius: radios.medio }} />
+      <Boton titulo="Volver a revisar" icono="refrescar" variante="suave" onPress={revisar} style={{ borderRadius: radios.medio }} />
     </Pantalla>
   );
 }

@@ -20,8 +20,9 @@ import {
 } from "react-native";
 
 import { exito, fallo, toque } from "@/src/haptico";
-import { colores, radios } from "@/src/tema";
-import { Boton, Tarjeta } from "@/src/ui";
+import { Icono, NombreIcono } from "@/src/Icono";
+import { radios, useColores } from "@/src/tema";
+import { Boton, CajaIcono, Tarjeta } from "@/src/ui";
 
 /** Bloque gris que pulsa mientras carga: se ve la forma de la pantalla y no un círculo girando. */
 export function Esqueleto({
@@ -33,6 +34,7 @@ export function Esqueleto({
   ancho?: number | `${number}%`;
   style?: StyleProp<ViewStyle>;
 }) {
+  const c = useColores();
   const op = useRef(new Animated.Value(0.45)).current;
   useEffect(() => {
     const anim = Animated.loop(
@@ -46,7 +48,7 @@ export function Esqueleto({
   }, [op]);
   return (
     <Animated.View
-      style={[{ height: alto, width: ancho ?? "100%", borderRadius: 8, backgroundColor: colores.superficie3, opacity: op }, style]}
+      style={[{ height: alto, width: ancho ?? "100%", borderRadius: 8, backgroundColor: c.superficie3, opacity: op }, style]}
     />
   );
 }
@@ -73,17 +75,18 @@ export function EstadoVacio({
   texto,
   accion,
 }: {
-  icono: string;
+  icono: NombreIcono;
   titulo: string;
   texto?: string;
   accion?: ReactNode;
 }) {
+  const c = useColores();
   return (
     <View style={{ alignItems: "center", paddingVertical: 48, paddingHorizontal: 24, gap: 8 }}>
-      <Text style={{ fontSize: 40 }}>{icono}</Text>
-      <Text style={{ fontSize: 17, fontWeight: "700", color: colores.texto, textAlign: "center" }}>{titulo}</Text>
+      <CajaIcono icono={icono} tono="neutro" tam={64} />
+      <Text style={{ fontSize: 17, fontWeight: "700", color: c.texto, textAlign: "center" }}>{titulo}</Text>
       {texto ? (
-        <Text style={{ fontSize: 14, color: colores.textoSecundario, textAlign: "center", lineHeight: 20 }}>{texto}</Text>
+        <Text style={{ fontSize: 14, color: c.textoSecundario, textAlign: "center", lineHeight: 20 }}>{texto}</Text>
       ) : null}
       {accion ? <View style={{ marginTop: 8 }}>{accion}</View> : null}
     </View>
@@ -96,10 +99,11 @@ export function AvisoSinConexion() {
 }
 
 export function Aviso({ texto, tono = "peligro" }: { texto: string; tono?: "peligro" | "ok" | "aviso" }) {
+  const c = useColores();
   const paleta = {
-    peligro: [colores.peligroSuave, colores.peligroTexto],
-    ok: [colores.okSuave, colores.okTexto],
-    aviso: [colores.avisoSuave, colores.avisoTexto],
+    peligro: [c.peligroSuave, c.peligroTexto],
+    ok: [c.okSuave, c.okTexto],
+    aviso: [c.avisoSuave, c.avisoTexto],
   }[tono];
   return (
     <View style={{ backgroundColor: paleta[0], borderRadius: radios.medio, padding: 12 }}>
@@ -135,6 +139,7 @@ export function FiltroChips<T extends string>({
   valor: T;
   onChange: (v: T) => void;
 }) {
+  const c = useColores();
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
       {opciones.map((o) => {
@@ -150,12 +155,12 @@ export function FiltroChips<T extends string>({
               paddingHorizontal: 14,
               paddingVertical: 8,
               borderRadius: 999,
-              backgroundColor: activo ? colores.marca : colores.superficie,
+              backgroundColor: activo ? c.marca : c.superficie,
               borderWidth: 1,
-              borderColor: activo ? colores.marca : colores.borde,
+              borderColor: activo ? c.marca : c.borde,
             }}
           >
-            <Text style={{ fontSize: 13, fontWeight: "600", color: activo ? "#fff" : colores.textoSuave }}>{o.etiqueta}</Text>
+            <Text style={{ fontSize: 13, fontWeight: "600", color: activo ? c.sobreMarca : c.textoSuave }}>{o.etiqueta}</Text>
           </Pressable>
         );
       })}
@@ -172,32 +177,33 @@ export function Buscador({
   onChange: (v: string) => void;
   placeholder?: string;
 }) {
+  const c = useColores();
   return (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
-        backgroundColor: colores.superficie,
+        backgroundColor: c.superficie,
         borderRadius: radios.medio,
         borderWidth: 1,
-        borderColor: colores.borde,
+        borderColor: c.borde,
         paddingHorizontal: 12,
       }}
     >
-      <Text style={{ fontSize: 16, marginRight: 8 }}>🔍</Text>
+      <Icono nombre="buscar" tam={18} color={c.textoSecundario} style={{ marginRight: 8 }} />
       <TextInput
         value={valor}
         onChangeText={onChange}
         placeholder={placeholder}
-        placeholderTextColor={colores.placeholder}
-        selectionColor={colores.marca}
+        placeholderTextColor={c.placeholder}
+        selectionColor={c.marca}
         autoCorrect={false}
         autoCapitalize="none"
-        style={{ flex: 1, paddingVertical: 11, fontSize: 15, color: colores.texto }}
+        style={{ flex: 1, paddingVertical: 11, fontSize: 15, color: c.texto }}
       />
       {valor ? (
-        <Pressable onPress={() => onChange("")} hitSlop={10}>
-          <Text style={{ fontSize: 16, color: colores.textoSecundario }}>✕</Text>
+        <Pressable onPress={() => onChange("")} hitSlop={10} accessibilityLabel="Borrar la búsqueda">
+          <Icono nombre="cerrar" tam={18} color={c.textoSecundario} />
         </Pressable>
       ) : null}
     </View>
@@ -220,6 +226,7 @@ export function Fila({
   onPress?: () => void;
   onLongPress?: () => void;
 }) {
+  const c = useColores();
   return (
     <Pressable
       onPress={onPress}
@@ -229,23 +236,23 @@ export function Fila({
           flexDirection: "row",
           alignItems: "center",
           gap: 12,
-          backgroundColor: colores.superficie,
+          backgroundColor: c.superficie,
           borderRadius: radios.medio,
           borderWidth: 1,
-          borderColor: colores.borde,
+          borderColor: c.borde,
           paddingVertical: 12,
           paddingHorizontal: 14,
         },
-        pressed && { backgroundColor: colores.superficie2 },
+        pressed && { backgroundColor: c.superficie2 },
       ]}
     >
       {izquierda}
       <View style={{ flex: 1 }}>
-        <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: "600", color: colores.texto }}>
+        <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: "600", color: c.texto }}>
           {titulo}
         </Text>
         {subtitulo ? (
-          <Text numberOfLines={1} style={{ fontSize: 12.5, color: colores.textoSecundario, marginTop: 2 }}>
+          <Text numberOfLines={1} style={{ fontSize: 12.5, color: c.textoSecundario, marginTop: 2 }}>
             {subtitulo}
           </Text>
         ) : null}
@@ -266,12 +273,13 @@ export function FilaSwitch({
   valor: boolean;
   onChange: (v: boolean) => void;
 }) {
+  const c = useColores();
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14.5, fontWeight: "600", color: colores.texto }}>{titulo}</Text>
+        <Text style={{ fontSize: 14.5, fontWeight: "600", color: c.texto }}>{titulo}</Text>
         {ayuda ? (
-          <Text style={{ fontSize: 12, color: colores.textoSecundario, marginTop: 2, lineHeight: 16 }}>{ayuda}</Text>
+          <Text style={{ fontSize: 12, color: c.textoSecundario, marginTop: 2, lineHeight: 16 }}>{ayuda}</Text>
         ) : null}
       </View>
       <Switch
@@ -280,7 +288,7 @@ export function FilaSwitch({
           toque();
           onChange(v);
         }}
-        trackColor={{ true: colores.marca, false: colores.bordeFuerte }}
+        trackColor={{ true: c.marca, false: c.bordeFuerte }}
         thumbColor="#fff"
       />
     </View>
@@ -297,14 +305,15 @@ export function Pantalla({
   refrescando?: boolean;
   onRefrescar?: () => void;
 }) {
+  const c = useColores();
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: colores.fondo }}
+      style={{ flex: 1, backgroundColor: c.fondo }}
       contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120 }}
       keyboardShouldPersistTaps="handled"
       refreshControl={
         onRefrescar ? (
-          <RefreshControl refreshing={!!refrescando} onRefresh={onRefrescar} tintColor={colores.marca} colors={[colores.marca]} />
+          <RefreshControl refreshing={!!refrescando} onRefresh={onRefrescar} tintColor={c.marca} colors={[c.marca]} />
         ) : undefined
       }
     >
@@ -325,16 +334,17 @@ export function Hoja({
   onCerrar: () => void;
   children: ReactNode;
 }) {
+  const c = useColores();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCerrar} statusBarTranslucent>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, justifyContent: "flex-end" }}>
-        <Pressable onPress={onCerrar} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(15,23,42,0.5)" }} />
-        <View style={{ backgroundColor: colores.superficie, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: "90%", paddingTop: 8 }}>
-          <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colores.bordeFuerte, marginBottom: 8 }} />
+        <Pressable onPress={onCerrar} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: c.velo }} />
+        <View style={{ backgroundColor: c.superficie, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: "90%", paddingTop: 8 }}>
+          <View style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: c.bordeFuerte, marginBottom: 8 }} />
           <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingBottom: 8 }}>
-            <Text style={{ flex: 1, fontSize: 18, fontWeight: "700", color: colores.texto }}>{titulo}</Text>
-            <Pressable onPress={onCerrar} hitSlop={12}>
-              <Text style={{ fontSize: 20, color: colores.textoSecundario }}>✕</Text>
+            <Text style={{ flex: 1, fontSize: 18, fontWeight: "700", color: c.texto }}>{titulo}</Text>
+            <Pressable onPress={onCerrar} hitSlop={12} accessibilityLabel="Cerrar">
+              <Icono nombre="cerrar" tam={22} color={c.textoSecundario} />
             </Pressable>
           </View>
           {children}
@@ -387,6 +397,7 @@ export function HojaFormulario({
   onCerrar: () => void;
   onEliminar?: () => void;
 }) {
+  const c = useColores();
   const [valores, setValores] = useState<Record<string, unknown>>(inicial);
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
@@ -422,93 +433,93 @@ export function HojaFormulario({
     <Hoja visible={visible} titulo={titulo} onCerrar={onCerrar}>
       <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 8, gap: 16 }} keyboardShouldPersistTaps="handled">
         {campos
-          .filter((c) => !c.visibleSi || c.visibleSi(valores))
-          .map((c) => {
-            const v = valores[c.clave];
-            if (c.tipo === "conmutador") {
-              return <FilaSwitch key={c.clave} titulo={c.etiqueta} ayuda={c.ayuda} valor={!!v} onChange={(x) => poner(c.clave, x)} />;
+          .filter((campo) => !campo.visibleSi || campo.visibleSi(valores))
+          .map((campo) => {
+            const v = valores[campo.clave];
+            if (campo.tipo === "conmutador") {
+              return <FilaSwitch key={campo.clave} titulo={campo.etiqueta} ayuda={campo.ayuda} valor={!!v} onChange={(x) => poner(campo.clave, x)} />;
             }
-            if (c.tipo === "opciones") {
+            if (campo.tipo === "opciones") {
               return (
-                <View key={c.clave} style={{ gap: 8 }}>
-                  <Text style={{ fontSize: 12, fontWeight: "600", color: colores.textoSuave }}>{c.etiqueta}</Text>
-                  {c.opciones?.map((o) => {
+                <View key={campo.clave} style={{ gap: 8 }}>
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: c.textoSuave }}>{campo.etiqueta}</Text>
+                  {campo.opciones?.map((o) => {
                     const activo = v === o.valor;
                     return (
                       <Pressable
                         key={o.valor}
                         onPress={() => {
                           toque();
-                          poner(c.clave, o.valor);
+                          poner(campo.clave, o.valor);
                         }}
                         style={{
                           borderWidth: 1.5,
-                          borderColor: activo ? colores.marca : colores.borde,
-                          backgroundColor: activo ? colores.marcaSuave : colores.superficie,
+                          borderColor: activo ? c.marca : c.borde,
+                          backgroundColor: activo ? c.marcaSuave : c.superficie,
                           borderRadius: radios.medio,
                           padding: 12,
                         }}
                       >
-                        <Text style={{ fontWeight: "600", color: activo ? colores.marcaTexto : colores.texto }}>{o.etiqueta}</Text>
+                        <Text style={{ fontWeight: "600", color: activo ? c.marcaTexto : c.texto }}>{o.etiqueta}</Text>
                         {o.detalle ? (
-                          <Text style={{ fontSize: 12, color: colores.textoSecundario, marginTop: 2, lineHeight: 16 }}>{o.detalle}</Text>
+                          <Text style={{ fontSize: 12, color: c.textoSecundario, marginTop: 2, lineHeight: 16 }}>{o.detalle}</Text>
                         ) : null}
                       </Pressable>
                     );
                   })}
-                  {c.ayuda ? <Text style={{ fontSize: 12, color: colores.textoSecundario }}>{c.ayuda}</Text> : null}
+                  {campo.ayuda ? <Text style={{ fontSize: 12, color: c.textoSecundario }}>{campo.ayuda}</Text> : null}
                 </View>
               );
             }
-            const secreto = c.tipo === "secreto";
+            const secreto = campo.tipo === "secreto";
             return (
-              <View key={c.clave} style={{ gap: 6 }}>
-                <Text style={{ fontSize: 12, fontWeight: "600", color: colores.textoSuave }}>{c.etiqueta}</Text>
+              <View key={campo.clave} style={{ gap: 6 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: c.textoSuave }}>{campo.etiqueta}</Text>
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   <TextInput
                     value={v === null || v === undefined ? "" : String(v)}
-                    onChangeText={(t) => poner(c.clave, t)}
-                    placeholder={c.placeholder}
-                    placeholderTextColor={colores.placeholder}
-                    selectionColor={colores.marca}
-                    secureTextEntry={secreto && !mostrar[c.clave]}
-                    keyboardType={c.tipo === "numero" ? "number-pad" : c.tipo === "email" ? "email-address" : "default"}
+                    onChangeText={(t) => poner(campo.clave, t)}
+                    placeholder={campo.placeholder}
+                    placeholderTextColor={c.placeholder}
+                    selectionColor={c.marca}
+                    secureTextEntry={secreto && !mostrar[campo.clave]}
+                    keyboardType={campo.tipo === "numero" ? "number-pad" : campo.tipo === "email" ? "email-address" : "default"}
                     autoCapitalize="none"
                     autoCorrect={false}
                     style={{
                       flex: 1,
                       borderWidth: 1,
-                      borderColor: colores.bordeFuerte,
+                      borderColor: c.bordeFuerte,
                       borderRadius: radios.medio,
                       paddingHorizontal: 14,
                       paddingVertical: 12,
                       fontSize: 16,
-                      color: colores.texto,
-                      backgroundColor: colores.superficie,
+                      color: c.texto,
+                      backgroundColor: c.superficie,
                     }}
                   />
                   {secreto ? (
                     <Pressable
-                      onPress={() => setMostrar((m) => ({ ...m, [c.clave]: !m[c.clave] }))}
+                      onPress={() => setMostrar((m) => ({ ...m, [campo.clave]: !m[campo.clave] }))}
                       style={{ justifyContent: "center", paddingHorizontal: 10 }}
                     >
-                      <Text style={{ fontSize: 18 }}>{mostrar[c.clave] ? "🙈" : "👁"}</Text>
+                      <Icono nombre={mostrar[campo.clave] ? "ocultar" : "ver"} tam={20} color={c.textoSecundario} />
                     </Pressable>
                   ) : null}
-                  {c.generar ? (
+                  {campo.generar ? (
                     <Pressable
                       onPress={() => {
                         toque();
-                        poner(c.clave, claveSegura());
-                        setMostrar((m) => ({ ...m, [c.clave]: true }));
+                        poner(campo.clave, claveSegura());
+                        setMostrar((m) => ({ ...m, [campo.clave]: true }));
                       }}
-                      style={{ justifyContent: "center", paddingHorizontal: 12, borderRadius: radios.medio, backgroundColor: colores.superficie3 }}
+                      style={{ justifyContent: "center", paddingHorizontal: 12, borderRadius: radios.medio, backgroundColor: c.superficie3 }}
                     >
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: colores.textoSuave }}>Generar</Text>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: c.textoSuave }}>Generar</Text>
                     </Pressable>
                   ) : null}
                 </View>
-                {c.ayuda ? <Text style={{ fontSize: 12, color: colores.textoSecundario, lineHeight: 16 }}>{c.ayuda}</Text> : null}
+                {campo.ayuda ? <Text style={{ fontSize: 12, color: c.textoSecundario, lineHeight: 16 }}>{campo.ayuda}</Text> : null}
               </View>
             );
           })}

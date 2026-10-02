@@ -5,14 +5,23 @@ import { View } from "react-native";
 import { AuthProvider, useAuth } from "@/src/auth/AuthContext";
 import { Bloqueo } from "@/src/Bloqueo";
 import { SoftphoneProvider } from "@/src/softphone/SoftphoneContext";
-import { colores } from "@/src/tema";
+import { TemaProvider, useTema } from "@/src/tema";
 
 function Contenido() {
   const { cargando, bloqueada } = useAuth();
+  const { c, oscuro } = useTema();
   const oculta = !cargando && bloqueada;
+  const cabecera = {
+    headerShown: true,
+    headerTintColor: c.marca,
+    headerTitleStyle: { color: c.texto, fontWeight: "700" as const },
+    headerStyle: { backgroundColor: c.superficie },
+    headerShadowVisible: false,
+  };
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: c.fondo }}>
+      <StatusBar style={oscuro ? "light" : "dark"} />
       {/* Con el bloqueo puesto, la app de abajo no debe recibir toques ni ser
           alcanzable por lectores de pantalla (TalkBack/VoiceOver): una capa
           encima solo tapa lo visible, no lo bloquea. */}
@@ -22,19 +31,10 @@ function Contenido() {
         accessibilityElementsHidden={oculta}
         importantForAccessibility={oculta ? "no-hide-descendants" : "auto"}
       >
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen
-            name="asistente"
-            options={{ headerShown: true, presentation: "modal", title: "Asistente", headerTintColor: colores.marca, headerStyle: { backgroundColor: colores.superficie }, headerShadowVisible: false }}
-          />
-          <Stack.Screen
-            name="diagnostico"
-            options={{ headerShown: true, title: "Llamadas entrantes", headerTintColor: colores.marca, headerStyle: { backgroundColor: colores.superficie }, headerShadowVisible: false }}
-          />
-          <Stack.Screen
-            name="llamada/[id]"
-            options={{ headerShown: true, title: "Llamada", headerTintColor: colores.marca, headerStyle: { backgroundColor: colores.superficie }, headerShadowVisible: false }}
-          />
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: c.fondo } }}>
+          <Stack.Screen name="asistente" options={{ ...cabecera, presentation: "modal", title: "Asistente" }} />
+          <Stack.Screen name="diagnostico" options={{ ...cabecera, title: "Llamadas entrantes" }} />
+          <Stack.Screen name="llamada/[id]" options={{ ...cabecera, title: "Llamada" }} />
         </Stack>
       </View>
       <Bloqueo />
@@ -44,11 +44,12 @@ function Contenido() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <SoftphoneProvider>
-        <StatusBar style="dark" />
-        <Contenido />
-      </SoftphoneProvider>
-    </AuthProvider>
+    <TemaProvider>
+      <AuthProvider>
+        <SoftphoneProvider>
+          <Contenido />
+        </SoftphoneProvider>
+      </AuthProvider>
+    </TemaProvider>
   );
 }

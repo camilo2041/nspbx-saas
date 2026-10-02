@@ -1,10 +1,11 @@
 import { Redirect, router } from "expo-router";
 import { useEffect, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, Switch, Text, View } from "react-native";
 
 import { useAuth } from "@/src/auth/AuthContext";
 import { ultimoUsuario } from "@/src/seguridad/biometria";
-import { colores } from "@/src/tema";
+import { Icono } from "@/src/Icono";
+import { crearEstilos, useColores } from "@/src/tema";
 import { Boton, Campo, Logo, Tarjeta } from "@/src/ui";
 
 function mensajeAmigable(e: unknown): string {
@@ -16,6 +17,8 @@ function mensajeAmigable(e: unknown): string {
 }
 
 export default function LoginScreen() {
+  const estilos = useEstilos();
+  const c = useColores();
   const { usuario, login, bioDisponible, bioActiva, activarBiometria, avisoAcceso, limpiarAvisoAcceso } = useAuth();
   const [recordar, setRecordar] = useState(true);
   const [aviso, setAviso] = useState("");
@@ -44,7 +47,7 @@ export default function LoginScreen() {
         try {
           await activarBiometria(username.trim(), password);
         } catch {
-          setAviso("No se activó la huella. Puedes hacerlo luego en la pestaña Cuenta.");
+          setAviso("No se activó la huella. Puedes hacerlo luego en Menú → Mi cuenta.");
         }
       }
       router.replace("/(app)");
@@ -67,6 +70,7 @@ export default function LoginScreen() {
         <Tarjeta style={{ gap: 16, padding: 20 }}>
           <Campo
             etiqueta="Usuario"
+            icono="usuario"
             placeholder="tu usuario"
             autoCapitalize="none"
             autoCorrect={false}
@@ -75,6 +79,7 @@ export default function LoginScreen() {
           />
           <Campo
             etiqueta="Contraseña"
+            icono="candado"
             placeholder="tu contraseña"
             secureTextEntry
             autoCapitalize="none"
@@ -85,6 +90,7 @@ export default function LoginScreen() {
 
           {bioDisponible && !bioActiva ? (
             <View style={estilos.recordar}>
+              <Icono nombre="huella" tam={22} color={c.marca} />
               <View style={{ flex: 1 }}>
                 <Text style={estilos.recordarTitulo}>Recordar con huella</Text>
                 <Text style={estilos.recordarDetalle}>Entra la próxima vez sin escribir tu contraseña</Text>
@@ -92,7 +98,7 @@ export default function LoginScreen() {
               <Switch
                 value={recordar}
                 onValueChange={setRecordar}
-                trackColor={{ false: colores.bordeFuerte, true: colores.marca }}
+                trackColor={{ false: c.bordeFuerte, true: c.marca }}
                 thumbColor="#fff"
               />
             </View>
@@ -103,6 +109,7 @@ export default function LoginScreen() {
 
           {error ? (
             <View style={estilos.error}>
+              <Icono nombre="alerta" tam={18} color={c.peligroTexto} />
               <Text style={estilos.errorTexto}>{error}</Text>
             </View>
           ) : null}
@@ -116,23 +123,25 @@ export default function LoginScreen() {
   );
 }
 
-const estilos = StyleSheet.create({
-  contenedor: { flex: 1, backgroundColor: colores.fondo },
+const useEstilos = crearEstilos((c) => ({
+  contenedor: { flex: 1, backgroundColor: c.fondo },
   contenido: { flexGrow: 1, padding: 20, justifyContent: "center", gap: 24 },
   cabecera: { alignItems: "center", gap: 6 },
-  titulo: { fontSize: 24, fontWeight: "700", color: colores.texto, marginTop: 10, letterSpacing: -0.3 },
-  subtitulo: { fontSize: 14, color: colores.textoSecundario },
+  titulo: { fontSize: 24, fontWeight: "700", color: c.texto, marginTop: 10, letterSpacing: -0.3 },
+  subtitulo: { fontSize: 14, color: c.textoSecundario },
   error: {
-    backgroundColor: colores.peligroSuave,
+    flexDirection: "row",
+    gap: 8,
+    backgroundColor: c.peligroSuave,
     borderWidth: 1,
-    borderColor: colores.peligro,
+    borderColor: c.peligro,
     borderRadius: 10,
     padding: 12,
   },
-  errorTexto: { color: colores.peligroTexto, fontSize: 13 },
-  recordar: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colores.superficie2, borderRadius: 12, padding: 12 },
-  recordarTitulo: { fontSize: 14, fontWeight: "600", color: colores.texto },
-  recordarDetalle: { fontSize: 12, color: colores.textoSecundario },
-  aviso: { fontSize: 12, color: colores.avisoTexto },
-  pie: { textAlign: "center", fontSize: 12, color: colores.placeholder },
-});
+  errorTexto: { flex: 1, color: c.peligroTexto, fontSize: 13, lineHeight: 18 },
+  recordar: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: c.superficie2, borderRadius: 12, padding: 12 },
+  recordarTitulo: { fontSize: 14, fontWeight: "600", color: c.texto },
+  recordarDetalle: { fontSize: 12, color: c.textoSecundario },
+  aviso: { fontSize: 12, color: c.avisoTexto },
+  pie: { textAlign: "center", fontSize: 12, color: c.placeholder },
+}));

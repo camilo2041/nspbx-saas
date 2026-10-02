@@ -83,3 +83,22 @@ jobs:
       # Los hallazgos ya revisados están en .gitleaksignore, cada uno con
       # su motivo.
       - run: ./gitleaks git . --redact --no-banner --exit-code 1
+
+  movil:
+    name: App móvil (tipos y colores iguales al panel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      # La app y el panel web tienen que verse como un solo producto.
+      - run: node scripts/verificar-tokens.js
+      - run: npm ci
+      - run: npx tsc --noEmit

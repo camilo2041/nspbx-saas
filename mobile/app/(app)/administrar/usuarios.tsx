@@ -18,6 +18,7 @@ import {
   Pantalla,
 } from "@/src/gestion";
 import { exito } from "@/src/haptico";
+import { useColores } from "@/src/tema";
 import { Boton, Pildora } from "@/src/ui";
 
 interface Usuario {
@@ -52,6 +53,7 @@ function ultimoAcceso(iso: string | null): string {
 }
 
 export default function Usuarios() {
+  const c = useColores();
   const { usuario: yo } = useAuth();
   const u = useDatos<Usuario[]>("/api/users");
   const r = useDatos<Rol[]>("/api/users/roles", { ttl: 5 * 60_000 });
@@ -154,7 +156,7 @@ export default function Usuarios() {
   return (
     <>
       <Pantalla refrescando={u.refrescando} onRefrescar={u.recargar}>
-        <Boton titulo="+ Nuevo usuario" onPress={() => setEditando("nuevo")} deshabilitado={!r.datos} />
+        <Boton titulo="Nuevo usuario" icono="agregar" onPress={() => setEditando("nuevo")} deshabilitado={!r.datos} />
         <Buscador valor={q} onChange={setQ} placeholder="Buscar por nombre o usuario" />
         <FiltroChips
           valor={filtro}
@@ -168,7 +170,7 @@ export default function Usuarios() {
         {u.sinConexion ? <AvisoSinConexion /> : null}
         {u.error && !u.datos ? <Aviso texto={u.error} /> : null}
         {u.cargando && !u.datos ? <ListaEsqueleto /> : null}
-        {u.datos && lista.length === 0 ? <EstadoVacio icono="👥" titulo="Sin resultados" texto="Prueba con otro nombre o quita el filtro." /> : null}
+        {u.datos && lista.length === 0 ? <EstadoVacio icono="usuarios" titulo="Sin resultados" texto="Prueba con otro nombre o quita el filtro." /> : null}
         {lista.map((x) => (
           <Fila
             key={x.id}
@@ -177,7 +179,7 @@ export default function Usuarios() {
             izquierda={<Avatar nombre={x.full_name} />}
             derecha={
               x.enabled ? (
-                <Text style={{ fontSize: 11, color: "#64748b" }}>{ultimoAcceso(x.last_login_at)}</Text>
+                <Text style={{ fontSize: 11, color: c.textoSecundario }}>{ultimoAcceso(x.last_login_at)}</Text>
               ) : (
                 <Pildora texto="Desactivada" tono="neutro" />
               )

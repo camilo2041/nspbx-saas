@@ -15,7 +15,7 @@ import {
   Pantalla,
 } from "@/src/gestion";
 import { exito } from "@/src/haptico";
-import { colores } from "@/src/tema";
+import { useColores } from "@/src/tema";
 import { Boton, Pildora } from "@/src/ui";
 
 interface Extension {
@@ -36,6 +36,7 @@ const CAMPOS: CampoDef[] = [
 ];
 
 export default function Extensiones() {
+  const c = useColores();
   const { datos, cargando, refrescando, error, sinConexion, recargar } = useDatos<Extension[]>("/api/extensions");
   const [q, setQ] = useState("");
   const [editando, setEditando] = useState<Extension | "nueva" | null>(null);
@@ -86,13 +87,13 @@ export default function Extensiones() {
   return (
     <>
       <Pantalla refrescando={refrescando} onRefrescar={recargar}>
-        <Boton titulo="+ Nueva extensión" onPress={() => setEditando("nueva")} />
+        <Boton titulo="Nueva extensión" icono="agregar" onPress={() => setEditando("nueva")} />
         <Buscador valor={q} onChange={setQ} placeholder="Buscar por número o nombre" />
         {sinConexion ? <AvisoSinConexion /> : null}
         {error && !datos ? <Aviso texto={error} /> : null}
         {cargando && !datos ? <ListaEsqueleto /> : null}
         {datos && lista.length === 0 ? (
-          <EstadoVacio icono="☎️" titulo={q ? "Sin resultados" : "Aún no hay extensiones"} texto={q ? undefined : "Crea la primera con el botón de arriba."} />
+          <EstadoVacio icono="extension" titulo={q ? "Sin resultados" : "Aún no hay extensiones"} texto={q ? undefined : "Crea la primera con el botón de arriba."} />
         ) : null}
         {lista.map((e) => (
           <Fila
@@ -100,8 +101,8 @@ export default function Extensiones() {
             titulo={`${e.number}${e.caller_id_name ? " · " + e.caller_id_name : ""}`}
             subtitulo={e.voicemail ? "Con buzón de voz" : "Sin buzón de voz"}
             izquierda={
-              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: colores.infoSuave, alignItems: "center", justifyContent: "center" }}>
-                <Text style={{ fontWeight: "800", color: colores.infoTexto, fontSize: 12 }}>{e.number.slice(-4)}</Text>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: c.infoSuave, alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontWeight: "800", color: c.infoTexto, fontSize: 12 }}>{e.number.slice(-4)}</Text>
               </View>
             }
             derecha={<Pildora texto={e.enabled ? "Activa" : "Apagada"} tono={e.enabled ? "ok" : "neutro"} />}

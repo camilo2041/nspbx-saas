@@ -7,7 +7,9 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { conversacionAsistente } from "@/src/datos";
 import { Aviso } from "@/src/gestion";
 import { fallo, impacto, toque } from "@/src/haptico";
-import { colores, radios } from "@/src/tema";
+import { Icono } from "@/src/Icono";
+import { radios, useColores } from "@/src/tema";
+import { CajaIcono } from "@/src/ui";
 
 // Pantallas de la app a las que el asistente puede mandar, con el permiso que pide cada una.
 const DESTINOS: Record<string, { ruta: string; etiqueta: string; permiso: string | null }> = {
@@ -18,7 +20,7 @@ const DESTINOS: Record<string, { ruta: string; etiqueta: string; permiso: string
   "/trunks": { ruta: "/administrar/troncales", etiqueta: "Troncales", permiso: "telefonia:gestionar" },
   "/users": { ruta: "/administrar/usuarios", etiqueta: "Usuarios", permiso: "usuarios:gestionar" },
   "/voicebots": { ruta: "/administrar/bots", etiqueta: "Voizbots", permiso: "voizbots:ver" },
-  "/settings": { ruta: "/settings", etiqueta: "Cuenta", permiso: null },
+  "/settings": { ruta: "/administrar/cuenta", etiqueta: "Cuenta", permiso: null },
 };
 
 const SUGERENCIAS = ["¿Cómo van las llamadas?", "¿Cómo creo una extensión?", "¿Cómo activo las llamadas internacionales?", "¿Qué es una troncal?"];
@@ -50,6 +52,7 @@ function Texto({ texto, color }: { texto: string; color: string }) {
 }
 
 export default function Asistente() {
+  const col = useColores();
   const router = useRouter();
   const { puede } = useAuth();
   const [mensajes, setMensajes] = useState(conversacionAsistente.lista);
@@ -101,13 +104,13 @@ export default function Asistente() {
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colores.fondo }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: col.fondo }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView ref={scroll} contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }} keyboardShouldPersistTaps="handled">
         {mensajes.length === 0 ? (
           <View style={{ alignItems: "center", gap: 10, paddingVertical: 28 }}>
-            <Text style={{ fontSize: 44 }}>✨</Text>
-            <Text style={{ fontSize: 18, fontWeight: "700", color: colores.texto }}>¿En qué te ayudo?</Text>
-            <Text style={{ fontSize: 14, color: colores.textoSecundario, textAlign: "center", lineHeight: 20, paddingHorizontal: 20 }}>
+            <CajaIcono icono="asistente" tono="marca" tam={64} />
+            <Text style={{ fontSize: 18, fontWeight: "700", color: col.texto }}>¿En qué te ayudo?</Text>
+            <Text style={{ fontSize: 14, color: col.textoSecundario, textAlign: "center", lineHeight: 20, paddingHorizontal: 20 }}>
               Te explico cómo usar la central y te cuento cómo van tus llamadas. Solo consulto: los cambios los haces tú.
             </Text>
             <View style={{ gap: 8, alignSelf: "stretch", marginTop: 8 }}>
@@ -115,9 +118,10 @@ export default function Asistente() {
                 <Pressable
                   key={s}
                   onPress={() => enviar(s)}
-                  style={{ backgroundColor: colores.superficie, borderWidth: 1, borderColor: colores.borde, borderRadius: radios.medio, paddingVertical: 12, paddingHorizontal: 14 }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: col.superficie, borderWidth: 1, borderColor: col.borde, borderRadius: radios.medio, paddingVertical: 12, paddingHorizontal: 14 }}
                 >
-                  <Text style={{ color: colores.textoSuave, fontSize: 14.5 }}>{s}</Text>
+                  <Icono nombre="asistente" tam={16} color={col.marca} />
+                  <Text style={{ flex: 1, color: col.textoSuave, fontSize: 14.5 }}>{s}</Text>
                 </Pressable>
               ))}
             </View>
@@ -131,9 +135,9 @@ export default function Asistente() {
             <View key={i} style={{ alignSelf: mio ? "flex-end" : "flex-start", maxWidth: "88%", gap: 8 }}>
               <View
                 style={{
-                  backgroundColor: mio ? colores.marca : m.error ? colores.peligroSuave : colores.superficie,
+                  backgroundColor: mio ? col.marca : m.error ? col.peligroSuave : col.superficie,
                   borderWidth: mio ? 0 : 1,
-                  borderColor: colores.borde,
+                  borderColor: col.borde,
                   borderRadius: 18,
                   borderBottomRightRadius: mio ? 4 : 18,
                   borderBottomLeftRadius: mio ? 18 : 4,
@@ -142,9 +146,9 @@ export default function Asistente() {
                 }}
               >
                 {mio ? (
-                  <Text style={{ color: "#fff", fontSize: 15, lineHeight: 21 }}>{limpio}</Text>
+                  <Text style={{ color: col.sobreMarca, fontSize: 15, lineHeight: 21 }}>{limpio}</Text>
                 ) : (
-                  <Texto texto={limpio} color={m.error ? colores.peligroTexto : colores.textoSuave} />
+                  <Texto texto={limpio} color={m.error ? col.peligroTexto : col.textoSuave} />
                 )}
               </View>
               {rutas.length ? (
@@ -157,9 +161,10 @@ export default function Asistente() {
                         router.dismiss();
                         router.navigate(DESTINOS[r].ruta as never);
                       }}
-                      style={{ backgroundColor: colores.marcaSuave, borderRadius: 999, paddingVertical: 7, paddingHorizontal: 14 }}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: col.marcaSuave, borderRadius: 999, paddingVertical: 7, paddingLeft: 14, paddingRight: 10 }}
                     >
-                      <Text style={{ color: colores.marcaTexto, fontWeight: "700", fontSize: 13 }}>Abrir {DESTINOS[r].etiqueta} →</Text>
+                      <Text style={{ color: col.marcaTexto, fontWeight: "700", fontSize: 13 }}>Abrir {DESTINOS[r].etiqueta}</Text>
+                      <Icono nombre="derecha" tam={14} color={col.marcaTexto} />
                     </Pressable>
                   ))}
                 </View>
@@ -167,32 +172,32 @@ export default function Asistente() {
             </View>
           );
         })}
-        {pensando ? <ActivityIndicator color={colores.marca} style={{ alignSelf: "flex-start", marginLeft: 8 }} /> : null}
+        {pensando ? <ActivityIndicator color={col.marca} style={{ alignSelf: "flex-start", marginLeft: 8 }} /> : null}
         {mensajes.length > 0 ? (
           <Pressable onPress={() => guardar([])} style={{ alignSelf: "center", padding: 8 }}>
-            <Text style={{ fontSize: 12, color: colores.textoSecundario }}>Empezar una conversación nueva</Text>
+            <Text style={{ fontSize: 12, color: col.textoSecundario }}>Empezar una conversación nueva</Text>
           </Pressable>
         ) : null}
         {mensajes.some((m) => m.error) ? <Aviso tono="aviso" texto="Si el asistente no responde, un administrador debe configurar el modelo de IA en Ajustes del panel web." /> : null}
       </ScrollView>
 
-      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 12, backgroundColor: colores.superficie, borderTopWidth: 1, borderTopColor: colores.borde }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 12, backgroundColor: col.superficie, borderTopWidth: 1, borderTopColor: col.borde }}>
         <TextInput
           value={texto}
           onChangeText={setTexto}
           placeholder="Escribe tu pregunta…"
-          placeholderTextColor={colores.placeholder}
-          selectionColor={colores.marca}
+          placeholderTextColor={col.placeholder}
+          selectionColor={col.marca}
           multiline
           maxLength={2000}
-          style={{ flex: 1, maxHeight: 110, borderWidth: 1, borderColor: colores.bordeFuerte, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: colores.texto }}
+          style={{ flex: 1, maxHeight: 110, borderWidth: 1, borderColor: col.bordeFuerte, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: col.texto, backgroundColor: col.superficie }}
         />
         <Pressable
           onPress={() => enviar(texto)}
           disabled={!texto.trim() || pensando}
-          style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colores.marca, alignItems: "center", justifyContent: "center", opacity: !texto.trim() || pensando ? 0.4 : 1 }}
+          style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: col.marca, alignItems: "center", justifyContent: "center", opacity: !texto.trim() || pensando ? 0.4 : 1 }}
         >
-          <Text style={{ color: "#fff", fontSize: 20 }}>➤</Text>
+          <Icono nombre="enviar" tam={20} color={col.sobreMarca} />
         </Pressable>
       </View>
     </KeyboardAvoidingView>

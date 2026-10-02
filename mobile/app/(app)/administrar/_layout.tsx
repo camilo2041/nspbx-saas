@@ -1,19 +1,21 @@
 import { Stack } from "expo-router";
 
-import { colores } from "@/src/tema";
+import { useColores } from "@/src/tema";
 
-export default function AdministrarLayout() {
+export default function MenuLayout() {
+  const c = useColores();
   return (
     <Stack
       screenOptions={{
-        headerStyle: { backgroundColor: colores.superficie },
+        headerStyle: { backgroundColor: c.superficie },
         headerShadowVisible: false,
-        headerTitleStyle: { color: colores.texto, fontWeight: "700", fontSize: 18 },
-        headerTintColor: colores.marca,
-        contentStyle: { backgroundColor: colores.fondo },
+        headerTitleStyle: { color: c.texto, fontWeight: "700", fontSize: 18 },
+        headerTintColor: c.marca,
+        contentStyle: { backgroundColor: c.fondo },
       }}
     >
-      <Stack.Screen name="index" options={{ title: "Administrar" }} />
+      <Stack.Screen name="index" options={{ title: "Menú" }} />
+      <Stack.Screen name="cuenta" options={{ title: "Mi cuenta" }} />
       <Stack.Screen name="troncales" options={{ title: "Troncales" }} />
       <Stack.Screen name="extensiones" options={{ title: "Extensiones" }} />
       <Stack.Screen name="usuarios" options={{ title: "Usuarios" }} />

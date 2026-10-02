@@ -1,22 +1,15 @@
+import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { peticion } from "@/src/api/client";
 import type { AiUsageSummary, CallLogOut, CallStats } from "@/src/api/types";
 import { useAuth } from "@/src/auth/AuthContext";
-import { colores } from "@/src/tema";
-import { Pildora, Tarjeta } from "@/src/ui";
+import { Aviso, EstadoVacio, Esqueleto, Pantalla } from "@/src/gestion";
+import { crearEstilos, radios } from "@/src/tema";
+import { FilaMenu, Metrica, Pildora, Seccion, Tarjeta, Titulo, Tono } from "@/src/ui";
 
-function Dato({ etiqueta, valor, tono }: { etiqueta: string; valor: string | number; tono?: string }) {
-  return (
-    <View style={estilos.dato}>
-      <Text style={[estilos.datoValor, tono ? { color: tono } : null]}>{valor}</Text>
-      <Text style={estilos.datoEtiqueta}>{etiqueta}</Text>
-    </View>
-  );
-}
-
-const ESTADOS: Record<string, { texto: string; tono: "ok" | "aviso" | "peligro" | "neutro" }> = {
+const ESTADOS: Record<string, { texto: string; tono: Tono }> = {
   answered: { texto: "Contestada", tono: "ok" },
   no_answer: { texto: "Sin respuesta", tono: "aviso" },
   busy: { texto: "Ocupado", tono: "aviso" },
@@ -37,8 +30,27 @@ function duracion(seg: number): string {
   return m > 0 ? `${m} min ${s}s` : `${s}s`;
 }
 
-export default function MetricasScreen() {
-  const { puede } = useAuth();
+function saludo(): string {
+  const h = new Date().getHours();
+  return h < 12 ? "Buenos días" : h < 19 ? "Buenas tardes" : "Buenas noches";
+}
+
+const usd = (n: number, dec = 2) => `US$ ${n.toFixed(dec)}`;
+
+/** Barra de proporción (contestadas sobre el total). */
+function Barra({ valor, tono }: { valor: number; tono: string }) {
+  const e = useEstilos();
+  return (
+    <View style={e.barra}>
+      <View style={[e.barraLlena, { width: `${Math.max(0, Math.min(100, valor))}%`, backgroundColor: tono }]} />
+    </View>
+  );
+}
+
+export default function ResumenScreen() {
+  const router = useRouter();
+  const e = useEstilos();
+  const { usuario, puede } = useAuth();
   const verTodas = puede("llamadas:ver_todas");
   const verLlamadas = puede("llamadas:ver_propias") || verTodas;
   const verConsumoIa = puede("consumo_ia:ver");
@@ -56,7 +68,7 @@ export default function MetricasScreen() {
       if (verLlamadas) {
         const [s, l] = await Promise.all([
           peticion<CallStats>("/api/calls/stats"),
-          peticion<CallLogOut[]>("/api/calls?limit=30"),
+          peticion<CallLogOut[]>("/api/calls?limit=8"),
         ]);
         setStats(s);
         setLlamadas(l);
@@ -64,8 +76,8 @@ export default function MetricasScreen() {
       if (verConsumoIa) {
         setIa(await peticion<AiUsageSummary>("/api/ai-usage/summary?days=30"));
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudieron cargar las métricas");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron cargar las métricas");
     }
   }, [verLlamadas, verConsumoIa]);
 
@@ -73,118 +85,118 @@ export default function MetricasScreen() {
     cargar().finally(() => setCargando(false));
   }, [cargar]);
 
+  const nombre = (usuario?.full_name || usuario?.username || "").split(" ")[0];
+
   if (!verLlamadas && !verConsumoIa) {
     return (
-      <View style={estilos.centro}>
-        <Tarjeta style={{ alignItems: "center", gap: 8 }}>
-          <Text style={{ fontSize: 32 }}>🔒</Text>
-          <Text style={estilos.titulo}>Sin acceso a métricas</Text>
-          <Text style={estilos.texto}>Tu rol no tiene permiso para ver las métricas. Pídelo a un administrador.</Text>
-        </Tarjeta>
-      </View>
+      <Pantalla>
+        <Titulo titulo={`${saludo()}${nombre ? `, ${nombre}` : ""}`} />
+        <EstadoVacio
+          icono="candado"
+          titulo="Sin acceso a métricas"
+          texto="Tu rol no tiene permiso para ver las métricas. Pídelo a un administrador."
+        />
+      </Pantalla>
     );
   }
 
-  return (
-    <ScrollView
-      style={{ backgroundColor: colores.fondo }}
-      contentContainerStyle={estilos.contenido}
-      refreshControl={
-        <RefreshControl
-          refreshing={refrescando}
-          colors={[colores.marca]}
-          onRefresh={async () => {
-            setRefrescando(true);
-            await cargar();
-            setRefrescando(false);
-          }}
-        />
-      }
-    >
-      {cargando ? <ActivityIndicator color={colores.marca} style={{ marginTop: 40 }} /> : null}
+  const tasa = stats && stats.total > 0 ? Math.round((stats.answered / stats.total) * 100) : 0;
 
-      {error ? (
-        <View style={estilos.error}>
-          <Text style={estilos.errorTexto}>{error}</Text>
+  return (
+    <Pantalla
+      refrescando={refrescando}
+      onRefrescar={async () => {
+        setRefrescando(true);
+        await cargar();
+        setRefrescando(false);
+      }}
+    >
+      <Titulo
+        titulo={`${saludo()}${nombre ? `, ${nombre}` : ""}`}
+        subtitulo={verTodas ? "Así va la operación de la empresa" : "Así van tus llamadas"}
+      />
+
+      {error ? <Aviso texto={error} /> : null}
+
+      {cargando ? (
+        <View style={{ gap: 10 }}>
+          <View style={e.rejilla}>
+            <Esqueleto alto={104} style={{ flex: 1, borderRadius: radios.grande }} />
+            <Esqueleto alto={104} style={{ flex: 1, borderRadius: radios.grande }} />
+          </View>
+          <View style={e.rejilla}>
+            <Esqueleto alto={104} style={{ flex: 1, borderRadius: radios.grande }} />
+            <Esqueleto alto={104} style={{ flex: 1, borderRadius: radios.grande }} />
+          </View>
         </View>
       ) : null}
 
       {stats ? (
-        <Tarjeta style={{ gap: 14 }}>
-          <Text style={estilos.seccion}>{verTodas ? "Llamadas de la empresa" : "Mis llamadas"}</Text>
-          <View style={estilos.rejilla}>
-            <Dato etiqueta="Total" valor={stats.total} />
-            <Dato etiqueta="Contestadas" valor={stats.answered} tono={colores.ok} />
-            <Dato etiqueta="Sin respuesta" valor={stats.no_answer} tono={colores.aviso} />
+        <>
+          <View style={e.rejilla}>
+            <Metrica etiqueta="Llamadas" valor={stats.total} icono="telefono" tono="marca" />
+            <Metrica etiqueta="Contestadas" valor={stats.answered} icono="ok" tono="ok" />
           </View>
-          <View style={estilos.rejilla}>
-            <Dato etiqueta="Ocupado" valor={stats.busy} />
-            <Dato etiqueta="Fallidas" valor={stats.failed} tono={colores.peligro} />
-            <Dato etiqueta="Min. hablados" valor={stats.talk_minutes} tono={colores.marca} />
+          <View style={e.rejilla}>
+            <Metrica etiqueta="Sin respuesta" valor={stats.no_answer + stats.busy} icono="perdida" tono="aviso" />
+            <Metrica etiqueta="Min. hablados" valor={stats.talk_minutes} icono="horario" tono="info" />
           </View>
-        </Tarjeta>
+          <Tarjeta style={{ gap: 10 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={e.etiqueta}>Tasa de contestación</Text>
+              <Text style={e.porcentaje}>{tasa}%</Text>
+            </View>
+            <Barra valor={tasa} tono={tasa >= 80 ? e.ok.color : tasa >= 50 ? e.aviso.color : e.peligro.color} />
+            {stats.failed > 0 ? <Text style={e.nota}>{stats.failed} fallidas por la red o el destino</Text> : null}
+          </Tarjeta>
+        </>
       ) : null}
 
       {ia ? (
-        <Tarjeta style={{ gap: 14 }}>
-          <Text style={estilos.seccion}>Consumo de IA · 30 días</Text>
-          <View style={estilos.rejilla}>
-            <Dato etiqueta="Llamadas" valor={ia.calls} />
-            <Dato etiqueta="Resueltas" valor={ia.resolved} tono={colores.ok} />
-            <Dato etiqueta="Contención" valor={`${Math.round(ia.containment_rate * 100)}%`} />
-          </View>
-          <View style={estilos.rejilla}>
-            <Dato etiqueta="Costo total" valor={`$${ia.cost_usd.toFixed(2)}`} tono={colores.marca} />
-            <Dato etiqueta="Por llamada" valor={`$${ia.cost_per_call.toFixed(3)}`} />
-            <Dato etiqueta="Por minuto" valor={`$${ia.cost_per_minute.toFixed(3)}`} />
-          </View>
-        </Tarjeta>
+        <Seccion titulo="Voizbots · últimos 30 días">
+          <FilaMenu titulo="Llamadas atendidas" icono="bot" tono="info" valor={String(ia.calls)} />
+          <FilaMenu titulo="Resueltas sin agente" icono="ok" tono="ok" valor={`${ia.resolved} · ${Math.round(ia.containment_rate * 100)}%`} />
+          <FilaMenu titulo="Costo total" icono="dinero" tono="marca" valor={usd(ia.cost_usd)} />
+          <FilaMenu titulo="Costo por minuto" icono="tendencia" tono="neutro" valor={usd(ia.cost_per_minute, 3)} ultima />
+        </Seccion>
       ) : null}
 
-      {verLlamadas ? (
-        <Tarjeta style={{ paddingVertical: 8 }}>
-          <Text style={[estilos.seccion, { paddingVertical: 8 }]}>Últimas llamadas</Text>
-          {!cargando && llamadas.length === 0 ? <Text style={estilos.texto}>Todavía no hay llamadas registradas.</Text> : null}
-          {llamadas.map((l, i) => {
-            const entrante = l.direction === "inbound";
-            const est = ESTADOS[l.status] ?? { texto: l.status, tono: "neutro" as const };
-            return (
-              <View key={l.id} style={[estilos.llamada, i > 0 && estilos.llamadaBorde]}>
-                <Text style={estilos.flecha}>{entrante ? "↙️" : "↗️"}</Text>
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={estilos.llamadaNumero} numberOfLines={1}>
-                    {(entrante ? l.caller_name || l.caller_number : l.callee_number) || "Desconocido"}
-                  </Text>
-                  <Text style={estilos.llamadaDetalle}>
-                    {fechaCorta(l.started_at)}
-                    {l.billsec > 0 ? ` · ${duracion(l.billsec)}` : ""}
-                  </Text>
-                </View>
-                <Pildora texto={est.texto} tono={est.tono} />
-              </View>
-            );
-          })}
-        </Tarjeta>
+      {verLlamadas && !cargando ? (
+        <Seccion titulo="Últimas llamadas">
+          {llamadas.length === 0 ? (
+            <FilaMenu titulo="Todavía no hay llamadas registradas" icono="info" ultima />
+          ) : (
+            llamadas.map((l, i) => {
+              const entrante = l.direction === "inbound";
+              const est = ESTADOS[l.status] ?? { texto: l.status, tono: "neutro" as const };
+              return (
+                <FilaMenu
+                  key={l.id}
+                  titulo={(entrante ? l.caller_name || l.caller_number : l.callee_number) || "Desconocido"}
+                  detalle={`${fechaCorta(l.started_at)}${l.billsec > 0 ? ` · ${duracion(l.billsec)}` : ""}`}
+                  icono={entrante ? "entrante" : "saliente"}
+                  tono={entrante ? "info" : "ok"}
+                  derecha={<Pildora texto={est.texto} tono={est.tono} />}
+                  onPress={() => router.push({ pathname: "/llamada/[id]", params: { id: String(l.id) } })}
+                  ultima={i === llamadas.length - 1}
+                />
+              );
+            })
+          )}
+        </Seccion>
       ) : null}
-    </ScrollView>
+    </Pantalla>
   );
 }
 
-const estilos = StyleSheet.create({
-  contenido: { padding: 16, gap: 14 },
-  centro: { flex: 1, justifyContent: "center", padding: 20, backgroundColor: colores.fondo },
-  titulo: { fontSize: 17, fontWeight: "700", color: colores.texto },
-  texto: { fontSize: 14, color: colores.textoSecundario, textAlign: "center", lineHeight: 20 },
-  seccion: { fontSize: 15, fontWeight: "700", color: colores.texto },
-  rejilla: { flexDirection: "row", gap: 8 },
-  dato: { flex: 1, backgroundColor: colores.superficie2, borderRadius: 12, padding: 10, gap: 2 },
-  datoValor: { fontSize: 21, fontWeight: "800", color: colores.texto },
-  datoEtiqueta: { fontSize: 11, color: colores.textoSecundario },
-  llamada: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 },
-  llamadaBorde: { borderTopWidth: 1, borderTopColor: colores.borde },
-  flecha: { fontSize: 18 },
-  llamadaNumero: { fontSize: 15, fontWeight: "600", color: colores.texto },
-  llamadaDetalle: { fontSize: 12, color: colores.textoSecundario },
-  error: { backgroundColor: colores.peligroSuave, borderRadius: 10, padding: 12 },
-  errorTexto: { color: colores.peligroTexto, fontSize: 13 },
-});
+const useEstilos = crearEstilos((c) => ({
+  rejilla: { flexDirection: "row", gap: 10 },
+  etiqueta: { fontSize: 13, fontWeight: "600", color: c.textoSecundario },
+  porcentaje: { fontSize: 18, fontWeight: "800", color: c.texto, fontVariant: ["tabular-nums"] },
+  nota: { fontSize: 12, color: c.textoSecundario },
+  barra: { height: 8, borderRadius: 4, backgroundColor: c.superficie3, overflow: "hidden" },
+  barraLlena: { height: 8, borderRadius: 4 },
+  ok: { color: c.ok },
+  aviso: { color: c.aviso },
+  peligro: { color: c.peligro },
+}));
