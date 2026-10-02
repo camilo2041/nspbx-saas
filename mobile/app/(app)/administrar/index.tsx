@@ -30,6 +30,7 @@ const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
     titulo: "Operación",
     entradas: [
       { titulo: "Citas", detalle: "Agenda y confirmaciones del voizbot", icono: "calendario", tono: "info", permiso: "citas:gestionar", modulo: "voicebot", ruta: "/administrar/citas" },
+      { titulo: "Contactos", detalle: "Clientes, su historial, notas y no llamar", icono: "contactos", tono: "marca", permiso: "crm:ver", ruta: "/administrar/contactos" },
       { titulo: "Cobranza", detalle: "Cartera, promesas de pago y resultados", icono: "dinero", tono: "ok", permiso: "campanas:gestionar", modulo: "voicebot", ruta: "/administrar/cobranza" },
     ],
   },

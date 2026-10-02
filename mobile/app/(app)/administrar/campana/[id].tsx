@@ -22,6 +22,7 @@ import {
 import { invalidar, useDatos } from "@/src/datos";
 import { Aviso, Buscador, CampoDef, EstadoVacio, Esqueleto, Fila, FiltroChips, Hoja, HojaFormulario, Pantalla } from "@/src/gestion";
 import { exito, fallo } from "@/src/haptico";
+import { ListasCampana } from "@/src/ListasCampana";
 import { radios, useColores } from "@/src/tema";
 import { BarraProgreso, Boton, FilaMenu, Metrica, Pildora, Seccion, Tarjeta } from "@/src/ui";
 
@@ -235,6 +236,17 @@ export default function DetalleCampana() {
         </Tarjeta>
 
         {stats?.tope_alcanzado ? <Aviso tono="aviso" texto={stats.tope_alcanzado} /> : null}
+        {(stats?.en_espera ?? 0) > 0 || (stats?.no_llamar ?? 0) > 0 ? (
+          <Aviso
+            tono="info"
+            texto={[
+              (stats?.en_espera ?? 0) > 0 ? `${stats?.en_espera} pendiente(s) esperando su próximo intento o con la lista en pausa` : "",
+              (stats?.no_llamar ?? 0) > 0 ? `${stats?.no_llamar} en la lista de no llamar (no se marcan)` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          />
+        ) : null}
         {error ? <Aviso texto={error} /> : null}
 
         <View style={{ flexDirection: "row", gap: 10 }}>
@@ -269,6 +281,8 @@ export default function DetalleCampana() {
             tono="peligro"
           />
         </View>
+
+        <ListasCampana campaignId={String(id)} version={stats?.total ?? 0} onCambio={() => est.recargar()} />
 
         <Seccion titulo="Configuración">
           <FilaMenu titulo="Troncal" icono="troncal" valor={troncal ?? "Sin troncal"} />

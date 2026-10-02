@@ -91,6 +91,10 @@ export class ApiError extends Error {
 function mensajeDe(cuerpo: unknown, respaldo: string): string {
   const detalle = (cuerpo as { detail?: unknown } | null)?.detail;
   if (typeof detalle === "string" && detalle) return detalle;
+  // Detalle con datos extra (p. ej. el contacto que ya existe): el texto va en «mensaje».
+  if (detalle && typeof detalle === "object" && typeof (detalle as { mensaje?: unknown }).mensaje === "string") {
+    return (detalle as { mensaje: string }).mensaje;
+  }
   if (Array.isArray(detalle) && detalle.length) {
     const primero = detalle[0] as { msg?: string };
     if (primero?.msg) return primero.msg;
@@ -173,6 +177,32 @@ export async function peticion<T>(
   }
   if (resp.status === 204) return undefined as T;
   if (opciones.texto) return (await resp.text()) as T;
+  return resp.json() as Promise<T>;
+}
+
+/** Formulario con archivo (multipart), con el mismo refresco de sesión que
+ * `peticion`. El archivo va como {uri, name, type}, que es como lo entiende
+ * el fetch de React Native. Más tiempo que una petición normal: un CSV
+ * grande tarda en procesarse. */
+export async function subirFormulario<T>(path: string, campos: Record<string, string | { uri: string; name: string; type: string }>): Promise<T> {
+  const hacer = async (): Promise<Response> => {
+    const datos = new FormData();
+    for (const [k, v] of Object.entries(campos)) datos.append(k, v as unknown as Blob);
+    return conTiempo(
+      `${SERVIDOR_FIJO.apiBase}${path}`,
+      { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: datos },
+      120_000
+    );
+  };
+  let resp = await hacer();
+  if (resp.status === 401 && refreshToken) {
+    const resultado = await refrescarSesion();
+    if (resultado === "ok") resp = await hacer();
+  }
+  if (!resp.ok) {
+    const cuerpo = await resp.json().catch(() => null);
+    throw new ApiError(mensajeDe(cuerpo, `Error ${resp.status}`), resp.status);
+  }
   return resp.json() as Promise<T>;
 }
 

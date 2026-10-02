@@ -95,6 +95,8 @@ export interface Campaign {
   max_minutes_per_day: number | null;
   message_template: string | null;
   ai_intent: string | null;
+  /** Minutos de espera antes de volver a marcar, por resultado. */
+  reglas_reciclaje: Partial<Record<"busy" | "noanswer" | "failed", number>> | null;
   status: string;
   started_at: string | null;
   finished_at: string | null;
@@ -130,6 +132,10 @@ export interface CampaignStats {
   noanswer: number;
   failed: number;
   done: number;
+  /** En la lista de no llamar: no se marcan. */
+  no_llamar?: number;
+  /** Pendientes que esperan su próximo intento o cuya lista está pausada. */
+  en_espera?: number;
   active_calls: number;
   llamadas_hoy?: number;
   minutos_hoy?: number;
@@ -437,6 +443,8 @@ export const PERMISOS = {
   citas: "citas:gestionar",
   consumoIa: "consumo_ia:ver",
   softphone: "softphone:usar",
+  crmVer: "crm:ver",
+  crmGestionar: "crm:gestionar",
 } as const;
 
 export type Rol = "admin" | "supervisor" | "coordinador" | "asesor" | "plataforma";
@@ -574,4 +582,119 @@ export interface RegistroAuditoria {
   request_id: string | null;
   /** Solo en la vista de la plataforma. */
   tenant_id?: number | null;
+}
+
+// ---------- CRM ----------
+
+export interface TelefonoExtra {
+  numero: string;
+  tipo: string;
+}
+
+export interface Contacto {
+  id: number;
+  nombre: string;
+  documento: string | null;
+  telefono: string;
+  telefonos: TelefonoExtra[];
+  email: string | null;
+  direccion: string | null;
+  ciudad: string | null;
+  campos: Record<string, string | number | boolean>;
+  fuente: string | null;
+  no_llamar: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TipoCampo = "texto" | "numero" | "fecha" | "opciones" | "si_no";
+
+export interface CampoContacto {
+  id: number;
+  clave: string;
+  nombre: string;
+  tipo: TipoCampo;
+  opciones: string[];
+  obligatorio: boolean;
+  visible_agente: boolean;
+  orden: number;
+}
+
+export interface NotaContacto {
+  id: number;
+  texto: string;
+  autor: string | null;
+  created_at: string;
+}
+
+export interface FichaContacto {
+  contacto: Contacto;
+  telefonos_no_llamar: string[];
+  campos_definidos: CampoContacto[];
+  notas: NotaContacto[];
+  secciones: { llamadas: boolean; campanas: boolean; cobranza: boolean; citas: boolean };
+  llamadas: {
+    id: number;
+    direction: "inbound" | "outbound";
+    status: string;
+    caller_number: string | null;
+    callee_number: string | null;
+    billsec: number;
+    ring_ms: number | null;
+    started_at: string | null;
+    tiene_grabacion: boolean;
+  }[];
+  campanas: {
+    numero_id: number;
+    campaign_id: number;
+    campana: string;
+    phone: string;
+    status: string;
+    attempts: number;
+    last_error: string | null;
+    ultimo_intento_at: string | null;
+    proximo_intento_at: string | null;
+  }[];
+  deudas: { id: number; amount: number; due_date: string | null; status: string; invoice_number: string | null }[];
+  promesas: { id: number; amount_promised: number; promise_date: string; plan: string; status: string }[];
+  citas: { id: number; appointment_date: string; status: string; patient_name: string }[];
+}
+
+export interface RegistroNoLlamar {
+  id: number;
+  telefono: string;
+  motivo: string | null;
+  hasta: string | null;
+  creado_por: string | null;
+  created_at: string;
+  vigente: boolean;
+}
+
+export interface ListaCampana {
+  id: number;
+  campaign_id: number;
+  nombre: string;
+  activa: boolean;
+  prioridad: number;
+  origen: "manual" | "csv" | "api";
+  created_at: string;
+  total: number;
+  pendientes: number;
+  por_estado: Record<string, number>;
+}
+
+export interface VistaPreviaImportacion {
+  columnas: string[];
+  filas: string[][];
+  total_filas: number;
+  sugerido: Record<string, string>;
+}
+
+export interface ReporteImportacion {
+  filas: number;
+  creados: number;
+  actualizados: number;
+  con_error: number;
+  errores: { fila: number; motivo: string }[];
+  campana: CampaignNumbersUploadResult | null;
 }

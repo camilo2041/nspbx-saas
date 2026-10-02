@@ -35,6 +35,7 @@ import {
   Trunk,
   VoiceBot,
 } from "@/lib/types";
+import { ListasCampana } from "@/components/listas-campana";
 import { statusBadge } from "@/lib/utils";
 
 const empty = {
@@ -47,6 +48,10 @@ const empty = {
   max_minutes_per_day: "",
   ai_intent: "",
   message_template: "",
+  // Minutos de espera antes de volver a marcar, por resultado (vacío = ya).
+  espera_busy: "",
+  espera_noanswer: "",
+  espera_failed: "",
 };
 
 const INTENCIONES = [
@@ -58,6 +63,19 @@ const INTENCIONES = [
 ];
 
 const POR_PAGINA = 50;
+
+function reglasDe(f: typeof empty) {
+  const reglas: Record<string, number> = {};
+  for (const [resultado, valor] of [
+    ["busy", f.espera_busy],
+    ["noanswer", f.espera_noanswer],
+    ["failed", f.espera_failed],
+  ] as const) {
+    const n = Number(valor);
+    if (valor.trim() && n > 0) reglas[resultado] = Math.round(n);
+  }
+  return Object.keys(reglas).length ? reglas : null;
+}
 
 export default function CampaignsPage() {
   const [items, setItems] = useState<CampaignWithStats[]>([]);
@@ -136,6 +154,9 @@ export default function CampaignsPage() {
       max_minutes_per_day: c.max_minutes_per_day != null ? String(c.max_minutes_per_day) : "",
       ai_intent: c.ai_intent ?? "",
       message_template: c.message_template ?? "",
+      espera_busy: c.reglas_reciclaje?.busy != null ? String(c.reglas_reciclaje.busy) : "",
+      espera_noanswer: c.reglas_reciclaje?.noanswer != null ? String(c.reglas_reciclaje.noanswer) : "",
+      espera_failed: c.reglas_reciclaje?.failed != null ? String(c.reglas_reciclaje.failed) : "",
     });
     setModal(true);
   };
@@ -157,6 +178,7 @@ export default function CampaignsPage() {
         max_minutes_per_day: form.max_minutes_per_day.trim() ? Number(form.max_minutes_per_day) : null,
         ai_intent: form.ai_intent || null,
         message_template: form.message_template.trim() || null,
+        reglas_reciclaje: reglasDe(form),
       };
       if (editing) {
         await api.put(`/api/campaigns/${editing.id}`, payload);
@@ -597,6 +619,17 @@ export default function CampaignsPage() {
             value={form.retries}
             onChange={(v) => setForm({ ...form, retries: Number(v) })}
           />
+          <div>
+            <span className="mb-1.5 block text-xs font-medium text-fg-soft">Esperar antes de reintentar (minutos)</span>
+            <div className="grid grid-cols-3 gap-2">
+              <Input label="Ocupado" type="number" value={form.espera_busy} onChange={(v) => setForm({ ...form, espera_busy: v })} />
+              <Input label="No contesta" type="number" value={form.espera_noanswer} onChange={(v) => setForm({ ...form, espera_noanswer: v })} />
+              <Input label="Falló" type="number" value={form.espera_failed} onChange={(v) => setForm({ ...form, espera_failed: v })} />
+            </div>
+            <span className="mt-1.5 block text-[11px] leading-snug text-faint">
+              Cuántas veces sigue siendo «Reintentos». Vacío = en la vuelta siguiente. Hasta 7 días (10080).
+            </span>
+          </div>
           <Input
             label="Tope de llamadas por día"
             type="number"
@@ -661,6 +694,13 @@ export default function CampaignsPage() {
                 {selected.max_minutes_per_day ? ` de ${selected.max_minutes_per_day}` : ""} min
               </p>
             )}
+            {stats && ((stats.en_espera ?? 0) > 0 || (stats.no_llamar ?? 0) > 0) && (
+              <p className="mb-3 text-xs text-muted">
+                {(stats.en_espera ?? 0) > 0 && `${stats.en_espera} pendiente(s) esperando su próximo intento o con la lista en pausa`}
+                {(stats.en_espera ?? 0) > 0 && (stats.no_llamar ?? 0) > 0 && " · "}
+                {(stats.no_llamar ?? 0) > 0 && `${stats.no_llamar} en la lista de no llamar (no se marcan)`}
+              </p>
+            )}
             {stats && (
               <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[
@@ -680,6 +720,12 @@ export default function CampaignsPage() {
                 ))}
               </div>
             )}
+
+            <ListasCampana
+              campaignId={selected.id}
+              version={stats?.total ?? 0}
+              onCambio={async () => setStats(await api.get<CampaignStats>(`/api/campaigns/${selected.id}/stats`))}
+            />
 
             <div className="mb-5">
               {nombresColumnas.length > 0 ? (

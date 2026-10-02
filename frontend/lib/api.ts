@@ -124,6 +124,8 @@ export const api = {
   del: <T = void>(path: string) => request<T>(path, { method: "DELETE", headers: jsonHeaders }),
   patch: <T>(path: string, data: unknown) =>
     request<T>(path, { method: "PATCH", headers: jsonHeaders, body: JSON.stringify(data) }),
+  /** Formulario con archivos y campos (multipart). */
+  form: <T>(path: string, datos: FormData) => request<T>(path, { method: "POST", body: datos }),
   upload: <T>(path: string, file: File, method: "POST" | "PUT" = "POST") => {
     const form = new FormData();
     form.append("file", file);

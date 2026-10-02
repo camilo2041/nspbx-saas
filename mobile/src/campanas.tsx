@@ -18,6 +18,10 @@ export interface Estadisticas {
   failed: number;
   done: number;
   active_calls: number;
+  /** En la lista de no llamar: no se marcan. */
+  no_llamar?: number;
+  /** Pendientes que esperan su próximo intento o cuya lista está pausada. */
+  en_espera?: number;
   llamadas_hoy?: number;
   minutos_hoy?: number;
   tope_alcanzado?: string | null;
@@ -34,6 +38,8 @@ export interface Campana {
   max_minutes_per_day: number | null;
   message_template: string | null;
   ai_intent: string | null;
+  /** Minutos de espera antes de volver a marcar, por resultado. */
+  reglas_reciclaje?: Partial<Record<"busy" | "noanswer" | "failed", number>> | null;
   status: string;
   trunk_name?: string | null;
   voicebot_name?: string | null;
@@ -114,6 +120,20 @@ export function camposCampana(troncales: { id: number; name: string }[], bots: {
     { clave: "max_concurrency", etiqueta: "Llamadas a la vez", tipo: "numero", ayuda: "De 1 a 100." },
     { clave: "retries", etiqueta: "Reintentos por número", tipo: "numero", ayuda: "De 0 a 10." },
     {
+      clave: "espera_busy",
+      etiqueta: "Si estaba ocupado, reintentar a los (minutos)",
+      tipo: "numero",
+      placeholder: "En la vuelta siguiente",
+    },
+    { clave: "espera_noanswer", etiqueta: "Si no contestó, reintentar a los (minutos)", tipo: "numero", placeholder: "En la vuelta siguiente" },
+    {
+      clave: "espera_failed",
+      etiqueta: "Si falló, reintentar a los (minutos)",
+      tipo: "numero",
+      placeholder: "En la vuelta siguiente",
+      ayuda: "Hasta 7 días (10080). Cuántas veces sigue siendo «Reintentos».",
+    },
+    {
       clave: "max_calls_per_day",
       etiqueta: "Tope de llamadas por día",
       tipo: "numero",
@@ -149,6 +169,9 @@ export function inicialCampana(c?: Campana | null): Record<string, unknown> {
     max_calls_per_day: c?.max_calls_per_day ?? "",
     max_minutes_per_day: c?.max_minutes_per_day ?? "",
     message_template: c?.message_template ?? "",
+    espera_busy: c?.reglas_reciclaje?.busy ?? "",
+    espera_noanswer: c?.reglas_reciclaje?.noanswer ?? "",
+    espera_failed: c?.reglas_reciclaje?.failed ?? "",
   };
 }
 
@@ -167,7 +190,17 @@ export function cuerpoCampana(v: Record<string, unknown>) {
     max_calls_per_day: numeroOVacio(v.max_calls_per_day),
     max_minutes_per_day: numeroOVacio(v.max_minutes_per_day),
     message_template: String(v.message_template ?? "").trim() || null,
+    reglas_reciclaje: reglasDe(v),
   };
+}
+
+function reglasDe(v: Record<string, unknown>) {
+  const reglas: Record<string, number> = {};
+  for (const resultado of ["busy", "noanswer", "failed"] as const) {
+    const n = Number(v[`espera_${resultado}`]);
+    if (String(v[`espera_${resultado}`] ?? "").trim() && n > 0) reglas[resultado] = Math.round(n);
+  }
+  return Object.keys(reglas).length ? reglas : null;
 }
 
 /** {variables} del mensaje de apertura, en orden y sin repetir. */
