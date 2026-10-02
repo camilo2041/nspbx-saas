@@ -20,6 +20,9 @@ const DESTINOS: Record<string, { ruta: string; etiqueta: string; permiso: string
   "/trunks": { ruta: "/administrar/troncales", etiqueta: "Troncales", permiso: "telefonia:gestionar" },
   "/users": { ruta: "/administrar/usuarios", etiqueta: "Usuarios", permiso: "usuarios:gestionar" },
   "/voicebots": { ruta: "/administrar/bots", etiqueta: "Voizbots", permiso: "voizbots:ver" },
+  "/appointments": { ruta: "/administrar/citas", etiqueta: "Citas", permiso: "citas:gestionar" },
+  "/cobranza": { ruta: "/administrar/cobranza", etiqueta: "Cobranza", permiso: "campanas:gestionar" },
+  "/campaigns": { ruta: "/administrar/campanas", etiqueta: "Campañas", permiso: "campanas:gestionar" },
   "/settings": { ruta: "/administrar/cuenta", etiqueta: "Cuenta", permiso: null },
 };
 

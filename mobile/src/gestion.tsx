@@ -19,6 +19,7 @@ import {
   ViewStyle,
 } from "react-native";
 
+import { SelectorFecha } from "@/src/fecha";
 import { exito, fallo, toque } from "@/src/haptico";
 import { Icono, NombreIcono } from "@/src/Icono";
 import { radios, useColores } from "@/src/tema";
@@ -357,7 +358,9 @@ export function Hoja({
 export interface CampoDef {
   clave: string;
   etiqueta: string;
-  tipo?: "texto" | "numero" | "secreto" | "conmutador" | "opciones" | "email";
+  tipo?: "texto" | "numero" | "secreto" | "conmutador" | "opciones" | "email" | "fecha" | "fechaHora" | "multilinea" | "telefono";
+  /** Fecha que se puede dejar vacía. */
+  opcional?: boolean;
   ayuda?: string;
   opciones?: { valor: string; etiqueta: string; detalle?: string }[];
   /** Solo se muestra si devuelve true (según lo ya escrito). */
@@ -471,7 +474,21 @@ export function HojaFormulario({
                 </View>
               );
             }
+            if (campo.tipo === "fecha" || campo.tipo === "fechaHora") {
+              return (
+                <SelectorFecha
+                  key={campo.clave}
+                  etiqueta={campo.etiqueta}
+                  valor={v ? String(v) : ""}
+                  conHora={campo.tipo === "fechaHora"}
+                  opcional={campo.opcional}
+                  ayuda={campo.ayuda}
+                  onChange={(x) => poner(campo.clave, x)}
+                />
+              );
+            }
             const secreto = campo.tipo === "secreto";
+            const multilinea = campo.tipo === "multilinea";
             return (
               <View key={campo.clave} style={{ gap: 6 }}>
                 <Text style={{ fontSize: 12, fontWeight: "600", color: c.textoSuave }}>{campo.etiqueta}</Text>
@@ -483,8 +500,12 @@ export function HojaFormulario({
                     placeholderTextColor={c.placeholder}
                     selectionColor={c.marca}
                     secureTextEntry={secreto && !mostrar[campo.clave]}
-                    keyboardType={campo.tipo === "numero" ? "number-pad" : campo.tipo === "email" ? "email-address" : "default"}
-                    autoCapitalize="none"
+                    keyboardType={
+                      campo.tipo === "numero" ? "number-pad" : campo.tipo === "email" ? "email-address" : campo.tipo === "telefono" ? "phone-pad" : "default"
+                    }
+                    multiline={multilinea}
+                    textAlignVertical={multilinea ? "top" : undefined}
+                    autoCapitalize={multilinea ? "sentences" : "none"}
                     autoCorrect={false}
                     style={{
                       flex: 1,
@@ -496,6 +517,7 @@ export function HojaFormulario({
                       fontSize: 16,
                       color: c.texto,
                       backgroundColor: c.superficie,
+                      minHeight: multilinea ? 96 : undefined,
                     }}
                   />
                   {secreto ? (

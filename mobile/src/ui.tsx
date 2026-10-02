@@ -464,3 +464,62 @@ const useEstilos = crearEstilos((c) => ({
   titulo: { fontSize: 26, fontWeight: "800", color: c.texto, letterSpacing: -0.4 },
   subtitulo: { fontSize: 14, color: c.textoSecundario, marginTop: 2 },
 }));
+
+/** Pestañas dentro de una pantalla (Recientes / Contactos, Gestión / Agenda…). */
+export function Segmentado<T extends string>({
+  opciones,
+  valor,
+  onChange,
+}: {
+  opciones: { valor: T; etiqueta: string; icono?: NombreIcono }[];
+  valor: T;
+  onChange: (v: T) => void;
+}) {
+  const c = useColores();
+  return (
+    <View style={{ flexDirection: "row", backgroundColor: c.superficie3, borderRadius: radios.medio, padding: 3, gap: 3 }} accessibilityRole="tablist">
+      {opciones.map((o) => {
+        const activo = o.valor === valor;
+        return (
+          <Pressable
+            key={o.valor}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activo }}
+            onPress={() => {
+              toque();
+              onChange(o.valor);
+            }}
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              gap: 6,
+              justifyContent: "center",
+              alignItems: "center",
+              paddingVertical: 9,
+              borderRadius: radios.chico,
+              backgroundColor: activo ? c.superficie : "transparent",
+              borderWidth: activo ? 1 : 0,
+              borderColor: c.borde,
+            }}
+          >
+            {o.icono ? <Icono nombre={o.icono} tam={16} color={activo ? c.marcaTexto : c.textoSecundario} /> : null}
+            <Text style={{ fontSize: 13.5, fontWeight: "700", color: activo ? c.texto : c.textoSecundario }} numberOfLines={1}>
+              {o.etiqueta}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Barra de avance (0 a 100). */
+export function BarraProgreso({ valor, tono = "marca", alto = 8 }: { valor: number; tono?: Tono; alto?: number }) {
+  const c = useColores();
+  const color = colorDeTono(c, tono)[2];
+  return (
+    <View style={{ height: alto, borderRadius: alto / 2, backgroundColor: c.superficie3, overflow: "hidden" }}>
+      <View style={{ height: alto, width: `${Math.max(0, Math.min(100, valor))}%`, backgroundColor: color, borderRadius: alto / 2 }} />
+    </View>
+  );
+}

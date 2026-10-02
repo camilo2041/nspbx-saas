@@ -173,6 +173,10 @@ async def list_campaigns_detail(session: AsyncSession = Depends(get_session)):
                 "voicebot_id": c.voicebot_id,
                 "max_concurrency": c.max_concurrency,
                 "retries": c.retries,
+                # Sin los topes, el formulario de edición del panel los
+                # recibía vacíos y al guardar los borraba.
+                "max_calls_per_day": c.max_calls_per_day,
+                "max_minutes_per_day": c.max_minutes_per_day,
                 "message_template": c.message_template,
                 "ai_intent": c.ai_intent,
                 "status": c.status,

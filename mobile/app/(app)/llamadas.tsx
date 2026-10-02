@@ -5,13 +5,14 @@ import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import type { CallLogOut } from "@/src/api/types";
 import { useContactos, type ContactoTel } from "@/src/contactos";
 import { useDatos } from "@/src/datos";
+import { SelectorFecha } from "@/src/fecha";
 import { useFavoritos } from "@/src/favoritos";
 import { Aviso, AvisoSinConexion, Avatar, Buscador, EstadoVacio, FiltroChips, Fila, Hoja, ListaEsqueleto } from "@/src/gestion";
 import { impacto, toque } from "@/src/haptico";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
 import { Icono } from "@/src/Icono";
-import { radios, useColores } from "@/src/tema";
-import { Boton, BotonIcono, CajaIcono } from "@/src/ui";
+import { useColores } from "@/src/tema";
+import { Boton, BotonIcono, CajaIcono, Segmentado } from "@/src/ui";
 
 type Vista = "recientes" | "contactos" | "favoritos";
 type Tipo = "todas" | "inbound" | "outbound" | "perdidas";
@@ -48,6 +49,7 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
   const [q, setQ] = useState("");
   const [busqueda, setBusqueda] = useState("");
   const [limite, setLimite] = useState(100);
+  const [dia, setDia] = useState("");
 
   // Espera a que la persona deje de escribir para no pedir al servidor en cada tecla.
   useEffect(() => {
@@ -56,7 +58,7 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
   }, [q]);
 
   const direccion = tipo === "inbound" || tipo === "perdidas" ? "&direction=inbound" : tipo === "outbound" ? "&direction=outbound" : "";
-  const path = `/api/calls?limit=${limite}${direccion}${busqueda ? `&search=${encodeURIComponent(busqueda)}` : ""}`;
+  const path = `/api/calls?limit=${limite}${direccion}${busqueda ? `&search=${encodeURIComponent(busqueda)}` : ""}${dia ? `&day=${dia}` : ""}`;
   const { datos, cargando, refrescando, error, sinConexion, recargar } = useDatos<CallLogOut[]>(path, { ttl: 15_000 });
 
   const items = useMemo<Item[]>(() => {
@@ -88,6 +90,7 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
           { valor: "outbound", etiqueta: "Salientes" },
         ]}
       />
+      <SelectorFecha etiqueta="Día" valor={dia} onChange={setDia} conHora={false} opcional />
       {sinConexion ? <AvisoSinConexion /> : null}
       {error && !datos ? <Aviso texto={error} /> : null}
       {cargando && !datos ? <ListaEsqueleto /> : null}
@@ -109,8 +112,8 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
         datos ? (
           <EstadoVacio
             icono="historial"
-            titulo={busqueda || tipo !== "todas" ? "Sin resultados" : "Aún no hay llamadas"}
-            texto={busqueda || tipo !== "todas" ? "Prueba con otro filtro." : "Aquí aparecerán las llamadas que hagas y recibas."}
+            titulo={busqueda || dia || tipo !== "todas" ? "Sin resultados" : "Aún no hay llamadas"}
+            texto={busqueda || dia || tipo !== "todas" ? "Prueba con otro filtro." : "Aquí aparecerán las llamadas que hagas y recibas."}
           />
         ) : null
       }
@@ -295,26 +298,15 @@ export default function Llamadas() {
   return (
     <View style={{ flex: 1, backgroundColor: col.fondo }}>
       <View style={{ padding: 16, paddingBottom: 4 }}>
-        <View style={{ flexDirection: "row", backgroundColor: col.superficie3, borderRadius: radios.medio, padding: 3 }}>
-          {(
-            [
-              ["recientes", "Recientes"],
-              ["contactos", "Contactos"],
-              ["favoritos", "Favoritos"],
-            ] as [Vista, string][]
-          ).map(([v, etiqueta]) => (
-            <Pressable
-              key={v}
-              onPress={() => {
-                toque();
-                setVista(v);
-              }}
-              style={{ flex: 1, paddingVertical: 9, borderRadius: radios.chico, alignItems: "center", backgroundColor: vista === v ? col.superficie : "transparent" }}
-            >
-              <Text style={{ fontSize: 13.5, fontWeight: "700", color: vista === v ? col.texto : col.textoSecundario }}>{etiqueta}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <Segmentado<Vista>
+          valor={vista}
+          onChange={setVista}
+          opciones={[
+            { valor: "recientes", etiqueta: "Recientes", icono: "historial" },
+            { valor: "contactos", etiqueta: "Contactos", icono: "contactos" },
+            { valor: "favoritos", etiqueta: "Favoritos", icono: "favorito" },
+          ]}
+        />
       </View>
       {vista === "recientes" ? <Recientes llamar={llamar} /> : vista === "contactos" ? <Contactos llamar={llamar} /> : <Favoritos llamar={llamar} />}
     </View>

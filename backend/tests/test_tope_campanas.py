@@ -142,3 +142,12 @@ def test_disponibles():
     assert tope_campanas.disponibles(c, hoy, 30)[0] == 0
     sin = Campaign(max_calls_per_day=None, max_minutes_per_day=None, calls_today=0)
     assert tope_campanas.disponibles(sin, hoy, 9999) == (None, None)
+
+
+async def test_la_lista_con_detalle_trae_los_topes(cliente, juliett):
+    """El panel edita la campaña con lo que trae esta lista: si faltaban los
+    topes, al guardar cualquier cambio quedaban borrados."""
+    await _poner(juliett["campaign"], max_calls_per_day=7, max_minutes_per_day=90)
+    lista = (await cliente.get("/api/campaigns/list/detail", headers=juliett["cab"])).json()
+    c = next(x for x in lista if x["id"] == juliett["campaign"])
+    assert (c["max_calls_per_day"], c["max_minutes_per_day"]) == (7, 90)

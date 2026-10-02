@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import filtro_empresa, get_session, traer_propio
 from app.models import Debt, PaymentPromise
-from app.schemas import DebtCreate, DebtOut, DebtUpdate, PaymentPromiseOut
+from app.schemas import DebtCreate, DebtOut, DebtUpdate, PaymentPromiseOut, PaymentPromiseUpdate
 
 router = APIRouter(prefix="/api/cobranza", tags=["cobranza"])
 
@@ -85,6 +85,22 @@ async def list_promises(
         query = query.where(PaymentPromise.status == estado)
     query = query.order_by(PaymentPromise.created_at.desc()).limit(min(limit, 500)).offset(max(0, offset))
     return (await session.execute(query)).scalars().all()
+
+
+@router.put("/promises/{promise_id}", response_model=PaymentPromiseOut)
+async def update_promise(promise_id: int, payload: PaymentPromiseUpdate, session: AsyncSession = Depends(get_session)):
+    """Marcar la promesa como cumplida o incumplida según el cobro real.
+
+    Cumplida no salda la deuda sola: un abono o una cuota cumplen la
+    promesa y la deuda sigue. Eso se cambia en la deuda."""
+    promesa = await traer_propio(session, PaymentPromise, promise_id)
+    if not promesa:
+        raise HTTPException(status_code=404, detail="Promesa no encontrada")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(promesa, field, value)
+    await session.commit()
+    await session.refresh(promesa)
+    return promesa
 
 
 @router.get("/summary")

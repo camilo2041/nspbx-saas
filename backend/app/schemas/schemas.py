@@ -910,6 +910,13 @@ class DebtOut(BaseModel):
     created_at: datetime
 
 
+class PaymentPromiseUpdate(BaseModel):
+    """Lo que se marca a mano según el cobro real: si pagó o no, y una nota."""
+
+    status: Optional[str] = Field(default=None, pattern="^(pending|completed|missed)$")
+    notes: Optional[str] = None
+
+
 class PaymentPromiseOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

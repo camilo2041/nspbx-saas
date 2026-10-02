@@ -4,6 +4,7 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@livekit/react-native-webrtc": "^144.2.0",
+    "@react-native-community/datetimepicker": "9.1.0",
     "expo": "~57.0.23",
     "expo-audio": "~57.0.5",
     "expo-callkit-telecom": "0.5.0",
