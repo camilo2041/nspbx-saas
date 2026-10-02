@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { Alert, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { useAuth } from "@/src/auth/AuthContext";
 import { Avatar, Pantalla } from "@/src/gestion";
@@ -17,8 +17,7 @@ interface Entrada {
   permiso: string | string[] | null;
   /** Paquete que tiene que tener la empresa (igual que el panel). */
   modulo?: "pbx" | "voicebot";
-  /** Sin ruta: está en el panel web y llega a la app en una próxima versión. */
-  ruta?: string;
+  ruta: string;
 }
 
 /**
@@ -49,7 +48,7 @@ const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
     entradas: [
       { titulo: "Voizbots", detalle: "Prueba tus bots como lo haría un cliente", icono: "bot", tono: "info", permiso: "voizbots:ver", modulo: "voicebot", ruta: "/administrar/bots" },
       { titulo: "Campañas", detalle: "Llamadas masivas, avance y topes del día", icono: "campana", tono: "info", permiso: "campanas:gestionar", modulo: "voicebot", ruta: "/administrar/campanas" },
-      { titulo: "Consumo IA", detalle: "Minutos y costo de los voizbots", icono: "tendencia", tono: "info", permiso: "consumo_ia:ver", modulo: "voicebot" },
+      { titulo: "Consumo IA", detalle: "Minutos y costo de los voizbots", icono: "tendencia", tono: "info", permiso: "consumo_ia:ver", modulo: "voicebot", ruta: "/administrar/consumo" },
     ],
   },
   {
@@ -57,9 +56,9 @@ const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
     entradas: [
       { titulo: "Usuarios", detalle: "Crear, editar roles y desactivar cuentas", icono: "usuario", tono: "neutro", permiso: "usuarios:gestionar", ruta: "/administrar/usuarios" },
       { titulo: "Roles y permisos", detalle: "Qué puede hacer cada rol", icono: "llave", tono: "neutro", permiso: "usuarios:gestionar", ruta: "/administrar/roles" },
-      { titulo: "Seguridad", detalle: "Bloqueos, alertas y auditoría", icono: "seguridad", tono: "neutro", permiso: "ajustes:gestionar" },
+      { titulo: "Seguridad", detalle: "Bloqueos, alertas y auditoría", icono: "seguridad", tono: "neutro", permiso: "ajustes:gestionar", ruta: "/administrar/seguridad" },
       { titulo: "Ajustes", detalle: "Horarios, emergencias y datos de la empresa", icono: "ajustes", tono: "neutro", permiso: "ajustes:gestionar", ruta: "/administrar/ajustes" },
-      { titulo: "Empresas", detalle: "Clientes de la plataforma y sus licencias", icono: "servidor", tono: "neutro", permiso: "empresas:gestionar" },
+      { titulo: "Empresas", detalle: "Clientes de la plataforma y sus licencias", icono: "servidor", tono: "neutro", permiso: "empresas:gestionar", ruta: "/administrar/empresas" },
     ],
   },
 ];
@@ -84,8 +83,7 @@ export default function Menu() {
 
   const abrir = (x: Entrada) => {
     toque();
-    if (x.ruta) router.push(x.ruta as never);
-    else Alert.alert(x.titulo, "Esta sección llega pronto a la app. Mientras tanto la tienes en el panel web.");
+    router.push(x.ruta as never);
   };
 
   return (
@@ -113,7 +111,6 @@ export default function Menu() {
               icono={x.icono}
               tono={x.tono}
               onPress={() => abrir(x)}
-              derecha={x.ruta ? undefined : <Pildora texto="Pronto" tono="neutro" />}
               ultima={i === g.entradas.length - 1}
             />
           ))}

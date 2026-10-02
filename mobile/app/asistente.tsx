@@ -27,6 +27,9 @@ const DESTINOS: Record<string, { ruta: string; etiqueta: string; permiso: string
   "/inbound-routes": { ruta: "/administrar/rutas-entrantes", etiqueta: "Rutas entrantes", permiso: "telefonia:gestionar" },
   "/outbound-routes": { ruta: "/administrar/rutas-salientes", etiqueta: "Rutas salientes", permiso: "telefonia:gestionar" },
   "/queues": { ruta: "/administrar/colas", etiqueta: "Colas", permiso: "colas:gestionar" },
+  "/ai-usage": { ruta: "/administrar/consumo", etiqueta: "Consumo de IA", permiso: "consumo_ia:ver" },
+  "/seguridad": { ruta: "/administrar/seguridad", etiqueta: "Seguridad", permiso: "ajustes:gestionar" },
+  "/empresas": { ruta: "/administrar/empresas", etiqueta: "Empresas", permiso: "empresas:gestionar" },
   "/roles": { ruta: "/administrar/roles", etiqueta: "Roles y permisos", permiso: "usuarios:gestionar" },
 };
 

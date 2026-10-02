@@ -149,7 +149,7 @@ async function refrescarSesion(): Promise<"ok" | "rechazado" | "red"> {
  * mandar a la persona a loguearse de nuevo cada 8 horas. */
 export async function peticion<T>(
   path: string,
-  opciones: { method?: string; body?: unknown } = {}
+  opciones: { method?: string; body?: unknown; /** Devuelve el cuerpo como texto (CSV). */ texto?: boolean } = {}
 ): Promise<T> {
   const hacer = async (): Promise<Response> =>
     conTiempo(`${SERVIDOR_FIJO.apiBase}${path}`, {
@@ -171,6 +171,7 @@ export async function peticion<T>(
     throw new ApiError(mensajeDe(cuerpo, `Error ${resp.status}`), resp.status);
   }
   if (resp.status === 204) return undefined as T;
+  if (opciones.texto) return (await resp.text()) as T;
   return resp.json() as Promise<T>;
 }
 

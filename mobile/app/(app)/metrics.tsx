@@ -5,6 +5,7 @@ import { Text, View } from "react-native";
 import { peticion } from "@/src/api/client";
 import type { AiUsageSummary, CallLogOut, CallStats } from "@/src/api/types";
 import { useAuth } from "@/src/auth/AuthContext";
+import { ResumenCentral } from "@/src/ResumenCentral";
 import { Aviso, EstadoVacio, Esqueleto, Pantalla } from "@/src/gestion";
 import { crearEstilos, radios } from "@/src/tema";
 import { FilaMenu, Metrica, Pildora, Seccion, Tarjeta, Titulo, Tono } from "@/src/ui";
@@ -96,6 +97,7 @@ export default function ResumenScreen() {
           titulo="Sin acceso a métricas"
           texto="Tu rol no tiene permiso para ver las métricas. Pídelo a un administrador."
         />
+        <ResumenCentral />
       </Pantalla>
     );
   }
@@ -160,6 +162,8 @@ export default function ResumenScreen() {
           <FilaMenu titulo="Costo por minuto" icono="tendencia" tono="neutro" valor={usd(ia.cost_per_minute, 3)} ultima />
         </Seccion>
       ) : null}
+
+      <ResumenCentral />
 
       {verLlamadas && !cargando ? (
         <Seccion titulo="Últimas llamadas">

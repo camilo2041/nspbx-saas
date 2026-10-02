@@ -6,6 +6,7 @@ import { Ajustes, Seccion as DefSeccion, secciones } from "@/src/ajustes";
 import { invalidar, useDatos } from "@/src/datos";
 import { Aviso, Esqueleto, Hoja, HojaFormulario, Pantalla } from "@/src/gestion";
 import { exito, fallo } from "@/src/haptico";
+import { ConsumoMensual } from "@/src/ConsumoMensual";
 import { useColores } from "@/src/tema";
 import { Boton, FilaMenu, Pildora, Seccion } from "@/src/ui";
 
@@ -244,6 +245,8 @@ export default function AjustesScreen() {
               <Boton titulo="Respaldar ahora" icono="servidor" variante="contorno" cargando={respaldando} onPress={respaldar} />
             ) : null}
             {mant.datos?.last_backup_error ? <Aviso texto={`Último respaldo: ${mant.datos.last_backup_error}`} /> : null}
+
+            <ConsumoMensual />
           </>
         ) : null}
       </Pantalla>

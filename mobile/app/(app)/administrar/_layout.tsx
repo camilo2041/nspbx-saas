@@ -25,6 +25,9 @@ export default function MenuLayout() {
       <Stack.Screen name="colas" options={{ title: "Colas" }} />
       <Stack.Screen name="roles" options={{ title: "Roles y permisos" }} />
       <Stack.Screen name="ajustes" options={{ title: "Ajustes" }} />
+      <Stack.Screen name="consumo" options={{ title: "Consumo de IA" }} />
+      <Stack.Screen name="seguridad" options={{ title: "Seguridad" }} />
+      <Stack.Screen name="empresas" options={{ title: "Empresas" }} />
       <Stack.Screen name="troncales" options={{ title: "Troncales" }} />
       <Stack.Screen name="extensiones" options={{ title: "Extensiones" }} />
       <Stack.Screen name="usuarios" options={{ title: "Usuarios" }} />
