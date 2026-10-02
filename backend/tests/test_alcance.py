@@ -26,6 +26,7 @@ _GLOBALES = [
     ("GET", "/api/plataforma/salientes", None),
     ("PUT", "/api/plataforma/salientes", {"outbound_blocked": True}),
     ("GET", "/api/plataforma/destinos-bloqueados", None),
+    ("POST", "/api/tenants/{beta}/cerrar-sesiones", None),
     ("PUT", "/api/plataforma/destinos-bloqueados", {"prefijos": ""}),
     ("PUT", "/api/tenants/{alfa}", {"outbound_blocked": False}),
 ]

@@ -171,6 +171,17 @@ export default function UsersPage() {
     }
   };
 
+  // Celular de la empresa perdido, alguien que se va: lo saca de todos sus
+  // equipos sin cambiarle la contraseña (POST /api/users/{id}/cerrar-sesiones).
+  const cerrarSesiones = async (u: Usuario) => {
+    if (!confirm(`¿Cerrar todas las sesiones de ${u.full_name}, en la app y en el panel? Podrá volver a entrar con su contraseña.`)) return;
+    try {
+      await api.post(`/api/users/${u.id}/cerrar-sesiones`, {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudieron cerrar las sesiones");
+    }
+  };
+
   const borrar = async () => {
     if (!aBorrar) return;
     try {
@@ -257,6 +268,11 @@ export default function UsersPage() {
                     {u.mfa_enabled && u.id !== yo?.id && (
                       <Button size="sm" variant="ghost" onClick={() => restablecerMfa(u)} title="Perdió el teléfono">
                         Restablecer 2 pasos
+                      </Button>
+                    )}
+                    {u.id !== yo?.id && (
+                      <Button size="sm" variant="ghost" onClick={() => cerrarSesiones(u)} title="Lo saca de todos sus equipos">
+                        Cerrar sesiones
                       </Button>
                     )}
                     <Button

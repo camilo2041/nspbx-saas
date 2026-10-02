@@ -180,6 +180,22 @@ async def eliminar(
     logger.info("Usuario %s eliminado por %s", usuario.username, quien.username)
 
 
+@router.post("/{user_id}/cerrar-sesiones", status_code=status.HTTP_204_NO_CONTENT)
+async def cerrar_sesiones_de(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+    quien: User = Depends(usuario_actual),
+):
+    """Saca a un usuario de todos sus equipos (app y panel) sin cambiarle la
+    contraseña: un celular de la empresa que se perdió, alguien que se va."""
+    usuario = await traer_propio(session, User, user_id)
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    await revocar_sesiones(session, usuario)
+    await session.commit()
+    logger.warning("Sesiones de %s cerradas por %s", usuario.username, quien.username)
+
+
 @router.post("/{user_id}/mfa/reset", response_model=UserOut)
 async def restablecer_mfa(
     user_id: int,

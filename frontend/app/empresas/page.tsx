@@ -284,6 +284,15 @@ export default function EmpresasPage() {
     }
   };
 
+  const cerrarSesionesEmpresa = async (e: Empresa) => {
+    if (!confirm(`¿Sacar a todos los usuarios de ${e.name} de todos sus equipos? Podrán volver a entrar con su contraseña (para impedirlo, desactiva la empresa).`)) return;
+    try {
+      await api.post(`/api/tenants/${e.id}/cerrar-sesiones`, {});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron cerrar las sesiones");
+    }
+  };
+
   const cambiarSalientesGlobal = async () => {
     const cortar = !globalCortado;
     if (cortar && !confirm("¿Cortar las llamadas salientes de TODAS las empresas?")) return;
@@ -473,6 +482,9 @@ export default function EmpresasPage() {
                         title="Cortar o reactivar las llamadas salientes de esta empresa"
                       >
                         {e.outbound_blocked ? "Reactivar salientes" : "Cortar salientes"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => cerrarSesionesEmpresa(e)} title="Saca a todos sus usuarios de todos sus equipos">
+                        Cerrar sesiones
                       </Button>
                       <Button size="sm" variant="secondary" onClick={() => abrirEditar(e)}>
                         Editar

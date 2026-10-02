@@ -415,6 +415,34 @@ export default function Empresas() {
               cargando={cambiando}
               onPress={() => salientesEmpresa(abierta)}
             />
+            <Boton
+              titulo="Cerrar las sesiones de sus usuarios"
+              icono="salir"
+              variante="contorno"
+              onPress={() =>
+                Alert.alert(
+                  "Cerrar sesiones",
+                  `Todos los usuarios de ${abierta.name} salen de todos sus equipos. Pueden volver a entrar con su contraseña; para impedirlo, desactiva la empresa.`,
+                  [
+                    { text: "Cancelar", style: "cancel" },
+                    {
+                      text: "Cerrar sesiones",
+                      style: "destructive",
+                      onPress: async () => {
+                        try {
+                          const r = await peticion<{ usuarios: number }>(`/api/tenants/${abierta.id}/cerrar-sesiones`, { method: "POST" });
+                          exito();
+                          setAviso(`Sesiones cerradas: ${r.usuarios} usuario(s) de ${abierta.name}.`);
+                          setAbierta(null);
+                        } catch (err) {
+                          Alert.alert("No se pudo", err instanceof Error ? err.message : "Error");
+                        }
+                      },
+                    },
+                  ]
+                )
+              }
+            />
             <Boton titulo="Editar" icono="editar" variante="suave" onPress={() => setEditando(abierta)} />
             <Boton titulo="Eliminar empresa" icono="eliminar" variante="texto" onPress={() => eliminar(abierta)} />
           </ScrollView>

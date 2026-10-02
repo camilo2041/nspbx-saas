@@ -153,6 +153,26 @@ export default function Usuarios() {
     ]);
   };
 
+  // Celular de la empresa perdido, alguien que se va: lo saca de todos sus
+  // equipos (app y panel) sin cambiarle la contraseña.
+  const cerrarSesiones = (u: { id: number; full_name: string }) =>
+    Alert.alert("Cerrar sus sesiones", `${u.full_name} tendrá que volver a entrar en todos sus equipos.`, [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Cerrar sesiones",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await peticion(`/api/users/${u.id}/cerrar-sesiones`, { method: "POST" });
+            exito();
+            Alert.alert("Listo", `Se cerraron las sesiones de ${u.full_name}.`);
+          } catch (err) {
+            Alert.alert("No se pudo", err instanceof Error ? err.message : "Error");
+          }
+        },
+      },
+    ]);
+
   return (
     <>
       <Pantalla refrescando={u.refrescando} onRefrescar={u.recargar}>
@@ -210,6 +230,11 @@ export default function Usuarios() {
         onGuardar={guardar}
         onCerrar={() => setEditando(null)}
         onEliminar={editando && editando !== "nuevo" && editando.id !== yo?.id ? eliminar : undefined}
+        extra={() =>
+          editando && editando !== "nuevo" && editando.id !== yo?.id ? (
+            <Boton titulo="Cerrar todas sus sesiones" icono="salir" variante="contorno" onPress={() => cerrarSesiones(editando)} />
+          ) : null
+        }
       />
     </>
   );

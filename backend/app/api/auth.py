@@ -84,16 +84,20 @@ def _sesion(u: User, modulos: list[str] | None = None, refresh_token: str | None
 
 
 async def _nuevo_refresh_token(
-    session: AsyncSession, user_id: int, platform: str | None = None
-) -> str:
+    session: AsyncSession, user_id: int, platform: str | None = None, dispositivo: str | None = None
+) -> str | None:
     """Crea y guarda un refresh token nuevo para `user_id`, devuelve el
-    texto plano (lo único que ve el cliente)."""
+    texto plano (lo único que ve el cliente). Al panel web no se le da:
+    no lo usa (ver ClienteSesion)."""
+    if platform == "web":
+        return None
     token, token_hash, vence = generar_refresh_token()
     session.add(
         RefreshToken(
             user_id=user_id,
             token_hash=token_hash,
             platform=platform,
+            device_label=(dispositivo or "").strip()[:150] or None,
             expires_at=vence.replace(tzinfo=None),
         )
     )
@@ -182,7 +186,7 @@ async def login(payload: LoginRequest, request: Request, session: AsyncSession =
         return MfaRequeridoOut(mfa_token=crear_token_mfa(usuario.id))
 
     logger.info("Sesión iniciada: %s (%s)", usuario.username, usuario.role)
-    refresh = await _nuevo_refresh_token(session, usuario.id)
+    refresh = await _nuevo_refresh_token(session, usuario.id, payload.plataforma, payload.dispositivo)
     return _sesion(usuario, await _modulos_de(session, usuario), refresh_token=refresh)
 
 
@@ -261,7 +265,7 @@ async def activar_mfa(
     await session.commit()
     await session.refresh(fresco)
     logger.warning("Verificación en dos pasos ACTIVADA para %s", fresco.username)
-    refresh = await _nuevo_refresh_token(session, fresco.id)
+    refresh = await _nuevo_refresh_token(session, fresco.id, payload.plataforma, payload.dispositivo)
     sesion = _sesion(fresco, await _modulos_de(session, fresco), refresh_token=refresh)
     return {"codigos_recuperacion": codigos, "sesion": sesion}
 
@@ -317,7 +321,7 @@ async def verificar_mfa(payload: MfaVerificarRequest, request: Request, session:
     await session.commit()
     await session.refresh(usuario)
     logger.info("Sesión iniciada con MFA: %s (%s)", usuario.username, usuario.role)
-    refresh = await _nuevo_refresh_token(session, usuario.id)
+    refresh = await _nuevo_refresh_token(session, usuario.id, payload.plataforma, payload.dispositivo)
     return _sesion(usuario, await _modulos_de(session, usuario), refresh_token=refresh)
 
 
@@ -366,7 +370,7 @@ async def refrescar(payload: RefreshRequest, session: AsyncSession = Depends(get
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La empresa está desactivada")
 
     fila.revoked_at = ahora
-    nuevo = await _nuevo_refresh_token(session, usuario.id, fila.platform)
+    nuevo = await _nuevo_refresh_token(session, usuario.id, fila.platform, fila.device_label)
     return _sesion(usuario, await _modulos_de(session, usuario), refresh_token=nuevo)
 
 
@@ -382,6 +386,60 @@ async def cerrar_sesion(payload: LogoutRequest, session: AsyncSession = Depends(
     if fila and fila.revoked_at is None:
         fila.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
         await session.commit()
+
+
+# --- Sesiones abiertas (Mi cuenta → Sesiones) ------------------------------
+# Cada sesión de la app es un refresh token vivo (uno por equipo: al
+# renovarse, el viejo se revoca y nace otro). El panel web vive del JWT de
+# 8 h y no se lista uno por uno: «Cerrar todas» también lo corta.
+
+
+@router.get("/sesiones")
+async def mis_sesiones(usuario: User = Depends(usuario_actual), session: AsyncSession = Depends(get_admin_session)):
+    ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+    filas = (
+        await session.execute(
+            select(RefreshToken)
+            .where(RefreshToken.user_id == usuario.id, RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > ahora)
+            .order_by(RefreshToken.created_at.desc())
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": f.id,
+            "plataforma": f.platform,
+            "dispositivo": f.device_label,
+            # Se renueva en cada uso: es la última actividad del equipo.
+            "ultima_actividad": f.created_at,
+            "vence": f.expires_at,
+        }
+        for f in filas
+    ]
+
+
+@router.delete("/sesiones/{sesion_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cerrar_una_sesion(
+    sesion_id: int, usuario: User = Depends(usuario_actual), session: AsyncSession = Depends(get_admin_session)
+):
+    """Cierra la sesión de UN equipo (el de un teléfono perdido, por ejemplo).
+    Solo las propias: la de otro usuario responde 404 igual que una que no existe."""
+    fila = await session.get(RefreshToken, sesion_id)
+    if not fila or fila.user_id != usuario.id:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    if fila.revoked_at is None:
+        fila.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await session.commit()
+    logger.info("%s cerró la sesión de un equipo (%s)", usuario.username, fila.device_label or fila.platform or "sin nombre")
+
+
+@router.post("/sesiones/cerrar-todas", status_code=status.HTTP_204_NO_CONTENT)
+async def cerrar_todas_mis_sesiones(usuario: User = Depends(usuario_actual), session: AsyncSession = Depends(get_admin_session)):
+    """Cierra todas las sesiones propias, incluida la que hace el pedido: en
+    la app y en el panel. Para cuando se sospecha que alguien más entró."""
+    fresco = await session.get(User, usuario.id)
+    await revocar_sesiones(session, fresco)
+    await session.commit()
+    logger.warning("%s cerró todas sus sesiones", usuario.username)
 
 
 @router.get("/me", response_model=SesionOut)
@@ -419,7 +477,7 @@ async def cambiar_password(
     await revocar_sesiones(session, fresco)
     await session.commit()
     await session.refresh(fresco)
-    nuevo_refresh = await _nuevo_refresh_token(session, fresco.id)
+    nuevo_refresh = await _nuevo_refresh_token(session, fresco.id, payload.plataforma, payload.dispositivo)
     return _sesion(fresco, await _modulos_de(session, fresco), refresh_token=nuevo_refresh)
 
 

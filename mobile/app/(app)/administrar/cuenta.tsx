@@ -6,6 +6,7 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { Avatar, Pantalla } from "@/src/gestion";
 import { toque } from "@/src/haptico";
 import { Icono, NombreIcono } from "@/src/Icono";
+import { SesionesAbiertas } from "@/src/SesionesAbiertas";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
 import { crearEstilos, Preferencia, radios, useTema } from "@/src/tema";
 import { Boton, Campo, FilaMenu, Pildora, Seccion, Tarjeta } from "@/src/ui";
@@ -164,6 +165,8 @@ export default function CuentaScreen() {
           </View>
         ) : null}
       </Seccion>
+
+      <SesionesAbiertas />
 
       <Seccion titulo="Ayuda">
         <FilaMenu

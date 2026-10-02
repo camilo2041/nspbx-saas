@@ -144,7 +144,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           subdomain = primero;
         }
       }
-      const r = await api.post<Sesion | MfaRequerido>("/api/auth/login", { username, password, subdomain });
+      const r = await api.post<Sesion | MfaRequerido>("/api/auth/login", {
+        username,
+        password,
+        subdomain,
+        // El panel no usa refresh token: así el servidor no le entrega uno.
+        plataforma: "web",
+      });
       if ("mfa_requerido" in r) return r.mfa_token;
       aplicar(r);
       router.replace(r.mfa_pendiente ? "/mfa" : "/");
@@ -155,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const verificarMfa = useCallback(
     async (mfaToken: string, codigo: string) => {
-      const s = await api.post<Sesion>("/api/auth/mfa/verificar", { mfa_token: mfaToken, codigo });
+      const s = await api.post<Sesion>("/api/auth/mfa/verificar", { mfa_token: mfaToken, codigo, plataforma: "web" });
       aplicar(s);
       router.replace("/");
     },

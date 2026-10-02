@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import { borrarSesion, guardar, leer } from "./storage";
 import type { SesionOut } from "./types";
 
@@ -184,12 +185,21 @@ export async function peticion<T>(
 export async function verificarCredenciales(
   servidor: ServidorConfigurado,
   username: string,
-  password: string
+  password: string,
+  soloComprobar = false
 ): Promise<SesionOut> {
   const resp = await conTiempo(`${servidor.apiBase}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, subdomain: servidor.subdomain }),
+    body: JSON.stringify({
+      username,
+      password,
+      subdomain: servidor.subdomain,
+      // Para solo comprobar la contraseña se pide como el panel web: así el
+      // servidor no crea una sesión de la app que habría que revocar.
+      plataforma: soloComprobar ? "web" : Platform.OS === "ios" ? "ios" : "android",
+      dispositivo: soloComprobar ? undefined : nombreDelEquipo(),
+    }),
   });
   const cuerpo = await resp.json().catch(() => null);
   if (!resp.ok) throw new ApiError(mensajeDe(cuerpo, "No se pudo iniciar sesión"), resp.status);
@@ -210,8 +220,21 @@ async function revocarRefresh(refresh: string | null): Promise<void> {
 }
 
 export async function verificarSoloContrasena(servidor: ServidorConfigurado, username: string, password: string): Promise<void> {
-  const sesion = await verificarCredenciales(servidor, username, password);
+  const sesion = await verificarCredenciales(servidor, username, password, true);
+  // Un servidor viejo igual entrega un refresh token: se revoca.
   await revocarRefresh(sesion.refresh_token);
+}
+
+/** "Samsung SM-A515F · Android 13" o "iPhone · iOS 17.5": lo que la persona
+ *  ve en Mi cuenta → Sesiones para reconocer el equipo. */
+function nombreDelEquipo(): string {
+  const k = Platform.constants as unknown as Record<string, string | number | undefined>;
+  if (Platform.OS === "android") {
+    const marca = String(k.Brand ?? "").replace(/^./, (x) => x.toUpperCase());
+    return `${[marca, k.Model].filter(Boolean).join(" ") || "Android"} · Android ${k.Release ?? Platform.Version}`.slice(0, 150);
+  }
+  const equipo = Platform.OS === "ios" ? (Platform.isPad ? "iPad" : "iPhone") : "Equipo";
+  return `${equipo} · iOS ${k.osVersion ?? Platform.Version}`.slice(0, 150);
 }
 
 export async function iniciarSesion(

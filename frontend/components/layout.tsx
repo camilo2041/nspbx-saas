@@ -514,8 +514,8 @@ function Marco({ children }: { children: ReactNode }) {
             )}
             <Link
               href="/mfa"
-              title="Verificación en dos pasos"
-              aria-label="Verificación en dos pasos"
+              title="Seguridad de tu cuenta: verificación en dos pasos y sesiones"
+              aria-label="Seguridad de tu cuenta"
               className={`press shrink-0 rounded-lg p-1.5 text-faint transition-colors hover:bg-surface-2 hover:text-fg ${
                 collapsed ? "hidden" : ""
               }`}

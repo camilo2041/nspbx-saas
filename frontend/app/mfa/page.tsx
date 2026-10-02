@@ -6,6 +6,7 @@ import { Badge, Button, Card, CardBody, CardHeader, ErrorBanner, Input, Note, Pa
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Sesion } from "@/lib/types";
+import { SesionesAbiertas } from "@/components/sesiones-abiertas";
 
 interface Estado {
   activo: boolean;
@@ -54,7 +55,7 @@ export default function MfaPage() {
 
   const activar = () =>
     accion(async () => {
-      const r = await api.post<{ codigos_recuperacion: string[]; sesion: Sesion }>("/api/auth/mfa/activar", { codigo });
+      const r = await api.post<{ codigos_recuperacion: string[]; sesion: Sesion }>("/api/auth/mfa/activar", { codigo, plataforma: "web" });
       // Las demás sesiones se cerraron (se abrieron sin el segundo paso):
       // esta continúa con la sesión nueva que trae la respuesta.
       aplicar(r.sesion);
@@ -180,6 +181,12 @@ export default function MfaPage() {
             )}
           </CardBody>
         </Card>
+      )}
+
+      {!mfaPendiente && (
+        <div className="mt-4">
+          <SesionesAbiertas />
+        </div>
       )}
     </div>
   );

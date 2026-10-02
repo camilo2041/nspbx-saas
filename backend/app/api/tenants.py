@@ -201,6 +201,23 @@ async def colgar_salientes_de_la_empresa(tenant_id: int, session: AsyncSession =
     return {"empresas": 1}
 
 
+@router.post("/{tenant_id}/cerrar-sesiones")
+async def cerrar_sesiones_de_la_empresa(tenant_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Saca a TODOS los usuarios de la empresa de todos sus equipos (ante
+    una intrusión). Pueden volver a entrar con su contraseña: para impedirlo,
+    desactivar la empresa o suspender su licencia."""
+    from app.services.sesiones import revocar_sesiones
+
+    if not await session.get(Tenant, tenant_id):
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    usuarios = (await session.execute(select(User).where(User.tenant_id == tenant_id))).scalars().all()
+    for u in usuarios:
+        await revocar_sesiones(session, u)
+    await session.commit()
+    logger.warning("Sesiones de toda la empresa %s cerradas (%d usuarios)", tenant_id, len(usuarios))
+    return {"usuarios": len(usuarios)}
+
+
 @router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tenant(tenant_id: int, session: AsyncSession = Depends(get_admin_session)):
     ten = await session.get(Tenant, tenant_id)

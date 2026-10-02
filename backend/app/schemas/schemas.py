@@ -1004,7 +1004,19 @@ class UserOut(BaseModel):
     created_at: datetime
 
 
-class LoginRequest(BaseModel):
+class ClienteSesion(BaseModel):
+    """De dónde entra la persona. La app móvil recibe un refresh token (su
+    sesión dura semanas y se renueva); el panel web no lo usa, así que no se
+    le entrega: un token largo que nadie guarda es solo exposición. Sin
+    `plataforma` (apps viejas) se entrega igual, por compatibilidad."""
+
+    plataforma: Optional[str] = Field(default=None, pattern="^(web|android|ios)$")
+    # "Samsung SM-A515F · Android 13": para que la persona reconozca el
+    # equipo en Mi cuenta → Sesiones.
+    dispositivo: Optional[str] = Field(default=None, max_length=150)
+
+
+class LoginRequest(ClienteSesion):
     username: str
     password: str
     # Subdominio del panel desde el que se entra (ej. "consultorio-andino"
@@ -1042,13 +1054,13 @@ class MfaRequeridoOut(BaseModel):
     mfa_token: str
 
 
-class MfaVerificarRequest(BaseModel):
+class MfaVerificarRequest(ClienteSesion):
     mfa_token: str = Field(..., max_length=2000)
     # 6 dígitos de la app, o un código de recuperación ("abcd-efgh").
     codigo: str = Field(..., min_length=6, max_length=20)
 
 
-class MfaCodigoRequest(BaseModel):
+class MfaCodigoRequest(ClienteSesion):
     codigo: str = Field(..., min_length=6, max_length=20)
 
 
@@ -1072,6 +1084,6 @@ class DeviceTokenIn(BaseModel):
     token: str
 
 
-class CambiarPasswordRequest(BaseModel):
+class CambiarPasswordRequest(ClienteSesion):
     password_actual: str
     password_nueva: str = Field(min_length=8, max_length=128)

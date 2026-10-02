@@ -198,7 +198,7 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | `AUTH_SECRET` obligatorio en producción | ✅ | `core/arranque.py` | en producción no arranca sin ella o con menos de 32 caracteres; `test_arranque.py` |
 | MFA (TOTP) | ✅ | `core/mfa.py`, `/api/auth/mfa/*` | obligatorio para `plataforma` y `admin` (`MFA_OBLIGATORIO`): hasta activarla la sesión solo sirve para activarla; códigos de un solo uso y de recuperación; `test_mfa.py` (incluye los vectores de la RFC 6238) |
 | Recuperación de contraseña segura | ❌/por verificar | — | token de un solo uso, 15 min, no revela si el correo existe |
-| Lista de sesiones/dispositivos visible al usuario | ❌ | — | — |
+| Lista de sesiones/dispositivos visible al usuario | ✅ | `/api/auth/sesiones` (Mi cuenta en la app, seguridad de la cuenta en el panel) | cada equipo con su nombre y última actividad; cerrar uno o todas. El panel web ya no recibe un refresh token que no usa. `test_sesiones_abiertas.py` |
 
 ### 5.3 Autorización (RBAC)
 
@@ -371,7 +371,7 @@ una empresa, kill switches.
 | Claves privadas en el historial | ❌ | `freeswitch/conf/tls/wss.pem` y `dtls-srtp.pem` del primer commit | ya no están en el árbol, pero sí en el historial: tratarlas como filtradas y **rotarlas** si el servidor todavía las usa. Detalle en `.gitleaksignore` |
 | Claves de proveedores por empresa (ElevenLabs, Deepgram, LLM, ARI, Turnstile) cifradas en DB | ✅ | `core/cifrado.py` (AES-256-GCM, `DATA_ENCRYPTION_KEY`, rotación con `_ANTERIOR`); la API devuelve `••••••abcd` | `test_cifrado.py`: ningún secreto en claro en ninguna columna |
 | Contraseñas de troncales y extensiones | ✅ | cifradas en DB, en claro solo al generar el XML; la de la troncal enmascarada en la API | `a1-hash` descartado: el softphone del panel necesita la contraseña de la extensión |
-| Rotación documentada (ESL, `AUTH_SECRET`, claves de proveedor, SIP) | ❌ | — | runbook por secreto: cómo rotar y qué se corta |
+| Rotación documentada (ESL, `AUTH_SECRET`, claves de proveedor, SIP) | ✅ | `docs/runbooks/rotacion-de-secretos.md` | runbook por secreto: cómo rotar y qué se corta |
 | TLS en todo lo público | 🟢 | Traefik + WSS | renovación automática; alerta 14 días antes de vencer |
 | Respaldos cifrados con clave fuera del servidor | 🟢 | `scripts/backup-offsite.sh` | restauración de prueba (§6.3) |
 
@@ -432,7 +432,7 @@ tocar código. Cada uno queda auditado.
 | Detener campaña | 🟢 | pausar |
 | Desactivar un voizbot | 🟢 | `VoiceBot.enabled` |
 | Bloquear extensión (y tirar su registro) | ✅ | desactivarla, cambiarle la clave o borrarla cuelga sus salientes en curso (`nspbx_saliente_ext`, el usuario SIP autenticado) y tira su registro. Probado con FreeSWITCH real: la llamada se cortó, el registro desapareció y el teléfono no pudo volver a registrarse |
-| Cerrar sesiones de un usuario / de una empresa | 🟡 | `revocar_sesiones` por usuario |
+| Cerrar sesiones de un usuario / de una empresa | ✅ | Usuarios → Cerrar sesiones (la empresa); Empresas → Cerrar sesiones (la plataforma, todos sus usuarios) |
 | Bloquear un país o prefijo para todos | ✅ | Empresas → Destinos bloqueados (panel y app; `PUT /api/plataforma/destinos-bloqueados`, revisión 0010). Se suman a los fijos de `salientes.CODIGOS_BLOQUEADOS` en el dialplan, el clic para llamar y las campañas, y ganan aunque la empresa tenga el país permitido. `test_destinos_bloqueados.py` (Python y dialplan deciden igual) |
 | Bloquear IP | 🟢 | fail2ban / panel de seguridad |
 
