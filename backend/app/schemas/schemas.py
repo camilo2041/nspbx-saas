@@ -251,6 +251,9 @@ class CampaignBase(BaseModel):
     voicebot_id: Optional[int] = None
     max_concurrency: int = Field(default=5, ge=1, le=100)
     retries: int = Field(default=0, ge=0, le=10)
+    # Topes diarios: llamadas lanzadas y minutos por troncal. Vacío = sin tope.
+    max_calls_per_day: Optional[int] = Field(default=None, ge=1, le=1_000_000)
+    max_minutes_per_day: Optional[int] = Field(default=None, ge=1, le=1_000_000)
     message_template: Optional[str] = None
     # Intención del voizbot para las llamadas de esta campaña (ver
     # app/services/ai_intents.py). Vacío/None = "confirmar" (compatibilidad
@@ -268,6 +271,8 @@ class CampaignUpdate(BaseModel):
     voicebot_id: Optional[int] = None
     max_concurrency: Optional[int] = Field(default=None, ge=1, le=100)
     retries: Optional[int] = Field(default=None, ge=0, le=10)
+    max_calls_per_day: Optional[int] = Field(default=None, ge=1, le=1_000_000)
+    max_minutes_per_day: Optional[int] = Field(default=None, ge=1, le=1_000_000)
     message_template: Optional[str] = None
     ai_intent: Optional[str] = None
 
@@ -745,6 +750,10 @@ class CampaignStats(BaseModel):
     failed: int = 0
     done: int = 0
     active_calls: int = 0
+    # Consumo de hoy contra los topes diarios de la campaña.
+    llamadas_hoy: int = 0
+    minutos_hoy: float = 0
+    tope_alcanzado: Optional[str] = None
 
 
 # ---------- Empresas (tenants) ----------

@@ -90,6 +90,9 @@ export interface Campaign {
   voicebot_id: number | null;
   max_concurrency: number;
   retries: number;
+  /** Topes diarios: llamadas lanzadas y minutos por troncal. null = sin tope. */
+  max_calls_per_day: number | null;
+  max_minutes_per_day: number | null;
   message_template: string | null;
   ai_intent: string | null;
   status: string;
@@ -128,6 +131,10 @@ export interface CampaignStats {
   failed: number;
   done: number;
   active_calls: number;
+  llamadas_hoy?: number;
+  minutos_hoy?: number;
+  /** Si ya llegó a un tope diario, el motivo (sigue mañana). */
+  tope_alcanzado?: string | null;
 }
 
 export interface CampaignWithStats extends Campaign {

@@ -308,7 +308,7 @@ llamante ─► STT ─► LLM ─► pide herramienta(args)
 | Concurrencia por campaña y tope global por empresa | 🟢 | `max_concurrency`, `max_concurrent_calls` | — |
 | Validación de números antes de iniciar (formato, destino permitido, duplicados) | por verificar | — | prueba: lista con números internacionales en empresa sin permiso → rechazo |
 | Horario permitido de marcación (regulación local) | ✅ | `services/horario_marcacion.py`; Ajustes → Horario de marcación | por defecto la franja de la Ley 2300 de 2023 (lunes a viernes 7-19, sábados 8-15, sin domingos ni festivos de Colombia, calculados por la Ley 51 de 1983). La empresa puede achicarla; las campañas de **cobranza nunca salen de la franja legal** aunque la amplíe. Fuera de la franja el marcador espera sin dar números por fallidos, y la pantalla de Campañas dice desde cuándo retoma. `test_horario_marcacion.py` (festivos oficiales 2025-2026, bordes de cada franja, el marcador real) |
-| Límite diario y presupuesto por campaña | ❌ | — | — |
+| Límite diario y presupuesto por campaña | ✅ | `services/tope_campanas.py`; tope de llamadas y de minutos por troncal por día, en cada campaña | llamadas: las cuenta el marcador al lanzarlas (exacto); minutos: el CDR ahora guarda la campaña (`nspbx_campaign_id`, solo si es de la misma empresa). Al llegar, la campaña espera al día siguiente sin dar números por fallidos, y lo dice en sus estadísticas. `test_tope_campanas.py`. Un presupuesto en dinero necesita las tarifas del proveedor (pendiente con "gasto estimado", §5.6) |
 | Detener ya (kill switch) | 🟢 | pausa | prueba: tras pausar, ninguna llamada nueva sale en ≤ 2 s |
 | Auditoría de crear/iniciar/pausar | ✅ | middleware de auditoría (§5.10) | `test_auditoria.py`: toda ruta que modifica queda auditada |
 

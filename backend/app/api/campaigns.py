@@ -469,6 +469,14 @@ async def campaign_stats(campaign_id: int, session: AsyncSession = Depends(get_s
         done=counts.get("done", 0),
         active_calls=counts.get("dialing", 0),
     )
+    from app.core.clock import now_local
+    from app.services import tope_campanas
+
+    hoy = now_local().date()
+    minutos = (await tope_campanas.minutos_hoy(session, [campaign.id])).get(campaign.id, 0)
+    stats.llamadas_hoy = tope_campanas.llamadas_hoy(campaign, hoy)
+    stats.minutos_hoy = round(minutos, 1)
+    stats.tope_alcanzado = tope_campanas.disponibles(campaign, hoy, minutos)[1]
     return stats
 
 

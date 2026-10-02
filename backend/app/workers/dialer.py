@@ -9,7 +9,7 @@ from app.core.clock import fecha_en_palabras, now_local
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import Campaign, CampaignNumber, SystemSettings, Tenant, Trunk, VoiceBot
-from app.services import esl, horario_marcacion, licensing, salientes, templating
+from app.services import esl, horario_marcacion, licensing, salientes, templating, tope_campanas
 from app.services.fechas import formatear_natural, parse_fecha_hora
 from app.services.config_generator import orden_troncales
 from app.services.numeros import numero_a_palabras
@@ -139,6 +139,10 @@ class CampaignDialer:
             if margen_global <= 0:
                 return
 
+            # Topes diarios de cada campaña (services/tope_campanas.py).
+            hoy = ahora.date()
+            minutos_por_campana = await tope_campanas.minutos_hoy(session, [c.id for c in campaigns])
+
             for campaign in campaigns:
                 if margen_global <= 0:
                     break
@@ -153,6 +157,9 @@ class CampaignDialer:
                     margen_global,
                     topes_por_tenant.get(campaign.tenant_id, 0) - activas_empresa,
                 )
+                quedan_hoy, _ = tope_campanas.disponibles(campaign, hoy, minutos_por_campana.get(campaign.id, 0))
+                if quedan_hoy is not None:
+                    slots = min(slots, quedan_hoy)
                 if slots <= 0:
                     continue
                 numbers = await session.execute(
@@ -169,6 +176,7 @@ class CampaignDialer:
                 for number in numbers_list:
                     number.status = "dialing"
                     number.attempts += 1
+                tope_campanas.contar_lanzadas(campaign, hoy, len(numbers_list))
                 await session.commit()
                 for number in numbers_list:
                     task = asyncio.create_task(self._dial(session, campaign, number))
@@ -227,6 +235,8 @@ class CampaignDialer:
                 "nspbx_tenant_id": str(fresh.tenant_id),
                 # Sale por troncal: se puede colgar en curso (services/emergencia.py).
                 "nspbx_saliente": str(fresh.tenant_id),
+                # El CDR la guarda en CallLog.campaign_id: minutos por campaña.
+                "nspbx_campaign_id": str(fresh.id),
                 "nspbx_ai_intent": (fresh.ai_intent or "").strip().lower() or "confirmar",
             }
             intencion = extra_vars["nspbx_ai_intent"]

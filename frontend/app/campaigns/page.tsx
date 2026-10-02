@@ -37,7 +37,17 @@ import {
 } from "@/lib/types";
 import { statusBadge } from "@/lib/utils";
 
-const empty = { name: "", trunk_id: "", voicebot_id: "", max_concurrency: 5, retries: 0, ai_intent: "", message_template: "" };
+const empty = {
+  name: "",
+  trunk_id: "",
+  voicebot_id: "",
+  max_concurrency: 5,
+  retries: 0,
+  max_calls_per_day: "",
+  max_minutes_per_day: "",
+  ai_intent: "",
+  message_template: "",
+};
 
 const INTENCIONES = [
   { value: "confirmar", label: "Confirmar cita" },
@@ -122,6 +132,8 @@ export default function CampaignsPage() {
       voicebot_id: c.voicebot_id ? String(c.voicebot_id) : "",
       max_concurrency: c.max_concurrency,
       retries: c.retries,
+      max_calls_per_day: c.max_calls_per_day != null ? String(c.max_calls_per_day) : "",
+      max_minutes_per_day: c.max_minutes_per_day != null ? String(c.max_minutes_per_day) : "",
       ai_intent: c.ai_intent ?? "",
       message_template: c.message_template ?? "",
     });
@@ -141,6 +153,8 @@ export default function CampaignsPage() {
         voicebot_id: form.voicebot_id ? Number(form.voicebot_id) : null,
         max_concurrency: Number(form.max_concurrency),
         retries: Number(form.retries),
+        max_calls_per_day: form.max_calls_per_day.trim() ? Number(form.max_calls_per_day) : null,
+        max_minutes_per_day: form.max_minutes_per_day.trim() ? Number(form.max_minutes_per_day) : null,
         ai_intent: form.ai_intent || null,
         message_template: form.message_template.trim() || null,
       };
@@ -583,6 +597,20 @@ export default function CampaignsPage() {
             value={form.retries}
             onChange={(v) => setForm({ ...form, retries: Number(v) })}
           />
+          <Input
+            label="Tope de llamadas por día"
+            type="number"
+            value={form.max_calls_per_day}
+            onChange={(v) => setForm({ ...form, max_calls_per_day: v })}
+            hint="Al llegar, la campaña espera al día siguiente (sin dar números por fallidos). Vacío = sin tope."
+          />
+          <Input
+            label="Tope de minutos por día"
+            type="number"
+            value={form.max_minutes_per_day}
+            onChange={(v) => setForm({ ...form, max_minutes_per_day: v })}
+            hint="Minutos hablados por la troncal en el día. Vacío = sin tope."
+          />
           <Textarea
             label="Mensaje de apertura personalizado (opcional)"
             value={form.message_template}
@@ -619,6 +647,19 @@ export default function CampaignsPage() {
               <div ref={errorNumerosRef} className="mb-4">
                 <ErrorBanner message={errorNumeros} onClose={() => setErrorNumeros("")} />
               </div>
+            )}
+            {stats?.tope_alcanzado && (
+              <div className="mb-4">
+                <Note tone="warn">{stats.tope_alcanzado}</Note>
+              </div>
+            )}
+            {stats && (selected.max_calls_per_day || selected.max_minutes_per_day) && (
+              <p className="mb-3 text-xs text-muted">
+                Hoy: {stats.llamadas_hoy ?? 0}
+                {selected.max_calls_per_day ? ` de ${selected.max_calls_per_day}` : ""} llamadas ·{" "}
+                {stats.minutos_hoy ?? 0}
+                {selected.max_minutes_per_day ? ` de ${selected.max_minutes_per_day}` : ""} min
+              </p>
             )}
             {stats && (
               <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">

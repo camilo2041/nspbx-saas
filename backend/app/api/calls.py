@@ -134,6 +134,22 @@ async def _traer(call_id: int, session: AsyncSession, usuario: User) -> CallLog:
     return call
 
 
+async def _campana_de_cdr(session: AsyncSession, variables: dict, tenant_id: int) -> int | None:
+    """La campaña que originó la llamada (la fija el marcador). Solo si es
+    de la misma empresa: una variable alterada no puede cargarle minutos a
+    la campaña de otra."""
+    try:
+        campaign_id = int(variables.get("nspbx_campaign_id") or 0)
+    except (TypeError, ValueError):
+        return None
+    if campaign_id <= 0:
+        return None
+    from app.models import Campaign
+
+    c = await session.get(Campaign, campaign_id)
+    return campaign_id if c is not None and c.tenant_id == tenant_id else None
+
+
 def _epoch_us_to_dt(value) -> datetime | None:
     try:
         micros = int(value or 0)
@@ -231,6 +247,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
 
     call = CallLog(
         tenant_id=tenant_id,
+        campaign_id=await _campana_de_cdr(session, variables, tenant_id),
         uuid=uuid,
         caller_number=caller,
         caller_name=variables.get("caller_id_name") or variables.get("origination_caller_id_name"),

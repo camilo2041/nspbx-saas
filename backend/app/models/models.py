@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -184,6 +185,12 @@ class Campaign(Base):
     voicebot_id: Mapped[int | None] = mapped_column(ForeignKey("voicebots.id"), nullable=True)
     max_concurrency: Mapped[int] = mapped_column(Integer, default=5)
     retries: Mapped[int] = mapped_column(Integer, default=0)
+    # Topes diarios (services/tope_campanas.py). NULL = sin tope.
+    max_calls_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_minutes_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Llamadas lanzadas en `calls_today_date` (las cuenta el marcador).
+    calls_today: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    calls_today_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="idle")  # idle|running|paused|done
     # Qué gestión resuelve el voizbot en las llamadas de esta campaña
     # (confirmar / reagendar / cancelar / agendar / cobranza… — ver
