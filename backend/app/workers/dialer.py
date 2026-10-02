@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 
 from app.core.clock import fecha_en_palabras, now_local
 from app.core.config import settings
-from app.core.database import async_session
+from app.core.database import async_session, sesion_de_empresa
 from app.models import Campaign, CampaignNumber, SystemSettings, Tenant, Trunk, VoiceBot
 from app.services import esl, horario_marcacion, licensing, salientes, templating, tope_campanas
 from app.services.fechas import formatear_natural, parse_fecha_hora
@@ -162,22 +162,28 @@ class CampaignDialer:
                     slots = min(slots, quedan_hoy)
                 if slots <= 0:
                     continue
-                numbers = await session.execute(
-                    select(CampaignNumber)
-                    .where(
-                        CampaignNumber.campaign_id == campaign.id,
-                        CampaignNumber.status == "pending",
+                # Los números se toman en una sesión atada a la empresa de la
+                # campaña: solo pueden salir los suyos (ver sesion_de_empresa).
+                async with sesion_de_empresa(campaign.tenant_id) as s_emp:
+                    propia = await s_emp.get(Campaign, campaign.id)
+                    if propia is None:
+                        continue
+                    numbers = await s_emp.execute(
+                        select(CampaignNumber)
+                        .where(
+                            CampaignNumber.campaign_id == campaign.id,
+                            CampaignNumber.status == "pending",
+                        )
+                        .limit(slots)
                     )
-                    .limit(slots)
-                )
-                numbers_list = list(numbers.scalars().all())
+                    numbers_list = list(numbers.scalars().all())
+                    for number in numbers_list:
+                        number.status = "dialing"
+                        number.attempts += 1
+                    tope_campanas.contar_lanzadas(propia, hoy, len(numbers_list))
+                    await s_emp.commit()
                 margen_global -= len(numbers_list)
                 lanzados_por_tenant[campaign.tenant_id] = lanzados_por_tenant.get(campaign.tenant_id, 0) + len(numbers_list)
-                for number in numbers_list:
-                    number.status = "dialing"
-                    number.attempts += 1
-                tope_campanas.contar_lanzadas(campaign, hoy, len(numbers_list))
-                await session.commit()
                 for number in numbers_list:
                     task = asyncio.create_task(self._dial(session, campaign, number))
                     self._dial_tasks.add(task)
@@ -186,22 +192,20 @@ class CampaignDialer:
     async def _dial(self, session, campaign: Campaign, number: CampaignNumber):
         self._active[campaign.id] = self._active.get(campaign.id, 0) + 1
         try:
-            async with async_session() as s:
+            async with sesion_de_empresa(campaign.tenant_id) as s:
                 fresh = await s.get(Campaign, campaign.id)
                 trunk = await s.get(Trunk, fresh.trunk_id) if fresh.trunk_id else None
                 bot = await s.get(VoiceBot, fresh.voicebot_id) if fresh.voicebot_id else None
-                # Esta sesión es la del DUEÑO (sin aislamiento por empresa): un
-                # trunk_id o voicebot_id que apunte a la troncal o al bot de OTRA
-                # empresa se resolvería igual, y la campaña marcaría por su troncal
-                # (y con su identificador de llamada). Se exige la misma empresa.
+                # La sesión está atada a la empresa de la campaña: un trunk_id o
+                # voicebot_id de OTRA empresa no se resuelve. La comprobación
+                # explícita queda como tercera capa (la campaña marcaría por la
+                # troncal ajena, con su identificador de llamada).
                 if trunk and trunk.tenant_id != fresh.tenant_id:
                     trunk = None
                 if bot and bot.tenant_id != fresh.tenant_id:
                     bot = None
-                # SOLO las troncales de la empresa de la campaña: con la
-                # sesión del dueño, un SELECT sin filtro traería las de
-                # TODAS las empresas y una campaña podría marcar por la
-                # troncal de otra — una fuga de recursos entre tenants.
+                # SOLO las troncales de la empresa de la campaña: la sesión ya
+                # filtra, y el WHERE lo deja escrito.
                 todas_troncales = (
                     await s.execute(
                         select(Trunk).where(Trunk.tenant_id == fresh.tenant_id)
@@ -218,7 +222,7 @@ class CampaignDialer:
             # El originate va directo a la troncal, sin pasar por el
             # dialplan: la política de salientes (internacional, países,
             # destinos premium, interruptores) se aplica acá o no se aplica.
-            async with async_session() as s:
+            async with sesion_de_empresa(campaign.tenant_id) as s:
                 politica = await salientes.politica_de(s, fresh.tenant_id)
             motivo = salientes.motivo_bloqueo(number.phone, politica)
             if motivo:
@@ -337,7 +341,7 @@ class CampaignDialer:
                 extra_vars=extra_vars or None,
                 contexto=contexto,
             )
-            async with async_session() as s:
+            async with sesion_de_empresa(campaign.tenant_id) as s:
                 await s.execute(
                     update(CampaignNumber)
                     .where(CampaignNumber.id == number.id)
@@ -352,7 +356,7 @@ class CampaignDialer:
                 final_status = "busy"
             elif "NO_ANSWER" in cause or "NO_USER_RESPONSE" in cause or "ORIGINATOR_CANCEL" in cause:
                 final_status = "noanswer"
-            async with async_session() as s:
+            async with sesion_de_empresa(campaign.tenant_id) as s:
                 target = await s.get(CampaignNumber, number.id)
                 fresh = await s.get(Campaign, campaign.id)
                 if target:
@@ -373,10 +377,10 @@ class CampaignDialer:
                     await s.commit()
         finally:
             self._active[campaign.id] = max(0, self._active.get(campaign.id, 0) - 1)
-            await self._maybe_finish(campaign.id)
+            await self._maybe_finish(campaign.tenant_id, campaign.id)
 
-    async def _maybe_finish(self, campaign_id: int):
-        async with async_session() as session:
+    async def _maybe_finish(self, tenant_id: int, campaign_id: int):
+        async with sesion_de_empresa(tenant_id) as session:
             remaining = await session.execute(
                 select(CampaignNumber.id)
                 .where(

@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from sqlalchemy import event, false, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -118,6 +119,21 @@ def _rellenar_tenant(session, flush_context, instances):
 def fijar_tenant(session, tenant_id: int | None) -> None:
     """Ata una sesión asíncrona a una empresa. Ver `_aplicar_tenant`."""
     session.sync_session.info["tenant_id"] = tenant_id
+
+
+@asynccontextmanager
+async def sesion_de_empresa(tenant_id: int):
+    """Sesión de la aplicación atada a UNA empresa, para los workers.
+
+    El marcador recorre las campañas de todas las empresas con la sesión del
+    dueño (tiene que verlas todas), pero lo que hace con cada una —tomar sus
+    números, leer su troncal y su bot, anotar el resultado— va por acá: RLS y
+    el filtro de la aplicación, igual que una petición de la API. Un id que
+    apunte a otra empresa no se resuelve, en vez de depender de que cada
+    consulta del worker se acuerde de filtrar."""
+    async with app_session() as session:
+        fijar_tenant(session, tenant_id)
+        yield session
 
 
 def tenant_de_sesion(session) -> int | None:
