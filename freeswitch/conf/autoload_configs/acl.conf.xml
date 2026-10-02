@@ -51,7 +51,13 @@
          visitante) o el relay de TURN. -->
     <list name="public_only" default="allow">
       <node type="deny" cidr="10.0.0.0/8"/>
-      <node type="deny" cidr="172.0.0.0/8"/>
+      <!-- 172.16.0.0/12 y NO 172.0.0.0/8: el /8 también descartaba IPs
+           PÚBLICAS 172.x (varios operadores móviles las usan), y a esos
+           teléfonos FreeSWITCH les respondía 488 en todas las llamadas por
+           no quedarle ningún candidato. -->
+      <node type="deny" cidr="172.16.0.0/12"/>
+      <!-- CGNAT de operador (100.64.0.0/10): tampoco es alcanzable desde afuera. -->
+      <node type="deny" cidr="100.64.0.0/10"/>
       <node type="deny" cidr="192.168.0.0/16"/>
       <node type="deny" cidr="169.254.0.0/16"/>
       <node type="deny" cidr="127.0.0.0/8"/>
