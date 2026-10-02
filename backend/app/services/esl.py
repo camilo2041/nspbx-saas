@@ -160,7 +160,11 @@ async def _ensure_event_listener():
         auth_headers = await _read_headers_raw(reader)
         if "+OK accepted" not in auth_headers.get("reply-text", ""):
             raise PermissionError("ESL auth rechazada (event listener)")
-        writer.write(b"event plain BACKGROUND_JOB\n\n")
+        from app.services.tiempo_real import EVENTOS
+
+        # BACKGROUND_JOB para el resultado de los originate; los de canal
+        # para las llamadas en vivo (services/tiempo_real.py).
+        writer.write(f"event plain BACKGROUND_JOB {' '.join(EVENTOS)}\n\n".encode())
         await writer.drain()
         await _read_headers_raw(reader)  # command/reply del "event"
         _event_reader, _event_writer = reader, writer
@@ -178,6 +182,9 @@ async def _event_loop(reader: asyncio.StreamReader):
             if headers.get("content-type") != "text/event-plain":
                 continue
             event_headers, _, result = body.partition("\n\n")
+            if "\nEvent-Name: BACKGROUND_JOB\n" not in f"\n{event_headers}\n":
+                await _a_tiempo_real(event_headers)
+                continue
             job_uuid = None
             for line in event_headers.split("\n"):
                 if line.lower().startswith("job-uuid:"):
@@ -193,6 +200,25 @@ async def _event_loop(reader: asyncio.StreamReader):
         if _event_writer:
             _event_writer.close()
         _event_writer = None
+        from app.services.tiempo_real import tiempo_real
+
+        tiempo_real.reiniciar()
+
+
+async def _a_tiempo_real(cabeceras: str) -> None:
+    from app.services.tiempo_real import leer_evento, tiempo_real
+
+    try:
+        await tiempo_real.recibir(leer_evento(cabeceras))
+    except Exception:
+        # Un evento raro no puede tumbar la conexión de la que dependen
+        # también los resultados de los originate.
+        logger.exception("Evento de canal no procesado")
+
+
+async def asegurar_eventos() -> None:
+    """Abre la conexión de eventos si no está abierta (ver tiempo_real)."""
+    await _ensure_event_listener()
 
 
 async def bgapi_wait(command: str, timeout: int = 40) -> str:

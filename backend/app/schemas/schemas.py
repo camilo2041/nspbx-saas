@@ -472,6 +472,10 @@ class CallLogOut(BaseModel):
     started_at: Optional[datetime] = None
     answered_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
+    setup_ms: Optional[int] = None
+    ring_ms: Optional[int] = None
+    espera_ms: Optional[int] = None
+    colgo: Optional[str] = None
 
 
 class CampaignNumberRow(BaseModel):

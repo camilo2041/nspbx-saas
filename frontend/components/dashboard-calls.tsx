@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AnimatedNumber, Card, CardBody, CardHeader, Skeleton, StatusDot } from "@/components/ui";
 import { api } from "@/lib/api";
 import { CallLog, CallStats } from "@/lib/types";
+import { tiempoCorto } from "@/lib/utils";
 
 interface Punto {
   dia: string;
@@ -255,6 +256,20 @@ export function DashboardCalls({ stats }: { stats: CallStats | null }) {
               </div>
             ))}
           </div>
+          {stats && (stats.ring_promedio_s !== null || stats.hablado_promedio_s !== null) && (
+            <div className="grid w-full grid-cols-3 gap-2 text-center" aria-label="Tiempos promedio">
+              {[
+                { l: "Ring", v: stats.ring_promedio_s, t: "Desde que empieza a timbrar hasta que contestan" },
+                { l: "Hablado", v: stats.hablado_promedio_s, t: "Conversación de las llamadas contestadas" },
+                { l: "Espera", v: stats.espera_promedio_s, t: "En espera (hold) durante la llamada" },
+              ].map((k) => (
+                <div key={k.l} title={k.t} className="rounded-xl border border-line bg-surface-2 px-2 py-2">
+                  <div className="text-sm font-semibold tabular-nums text-fg">{tiempoCorto(k.v)}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-faint">{k.l} prom.</div>
+                </div>
+              ))}
+            </div>
+          )}
           {stats && (
             <div className="text-[11px] text-faint">
               Histórico: {stats.total} llamadas · {stats.talk_minutes} min hablados
@@ -316,6 +331,7 @@ export function DashboardCalls({ stats }: { stats: CallStats | null }) {
                   <div className="text-[11px] text-faint">
                     {entrante ? "Entrante" : "Saliente"} · {hace(c.started_at)}
                     {c.billsec > 0 && ` · ${Math.floor(c.billsec / 60)}:${String(c.billsec % 60).padStart(2, "0")}`}
+                    {c.ring_ms !== null && ` · ring ${tiempoCorto(c.ring_ms / 1000)}`}
                   </div>
                 </div>
                 <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${e.tono}`}>{e.label}</span>

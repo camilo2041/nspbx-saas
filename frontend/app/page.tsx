@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ReactNode, useEffect, useState } from "react";
 
 import { DashboardCalls } from "@/components/dashboard-calls";
+import { LlamadasEnVivo } from "@/components/llamadas-en-vivo";
 import {
   Card,
   CardBody,
@@ -300,6 +301,8 @@ export default function DashboardPage() {
               ))}
             </div>
           )}
+
+          {puede(PERMISOS.llamadasTodas) && <LlamadasEnVivo delay={90} />}
 
           {veLlamadas && <DashboardCalls stats={callStats} />}
 

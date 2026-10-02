@@ -5,7 +5,7 @@ import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import type { CallLogOut } from "@/src/api/types";
 import { useContactos, type ContactoTel } from "@/src/contactos";
 import { useDatos } from "@/src/datos";
-import { SelectorFecha } from "@/src/fecha";
+import { SelectorFecha, tiempoCorto } from "@/src/fecha";
 import { useFavoritos } from "@/src/favoritos";
 import { Aviso, AvisoSinConexion, Avatar, Buscador, EstadoVacio, FiltroChips, Fila, Hoja, ListaEsqueleto } from "@/src/gestion";
 import { impacto, toque } from "@/src/haptico";
@@ -136,7 +136,9 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
         return (
           <Fila
             titulo={nombre}
-            subtitulo={`${sentido} · ${d ? hora(d) : ""}${c.billsec > 0 ? " · " + duracion(c.billsec) : ""}`}
+            subtitulo={`${sentido} · ${d ? hora(d) : ""}${c.billsec > 0 ? " · " + duracion(c.billsec) : ""}${
+              c.ring_ms !== null && c.ring_ms !== undefined ? " · ring " + tiempoCorto(c.ring_ms / 1000) : ""
+            }`}
             izquierda={
               <CajaIcono
                 icono={perdida ? "perdida" : c.direction === "inbound" ? "entrante" : "saliente"}

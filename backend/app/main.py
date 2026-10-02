@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import secrets
@@ -19,7 +20,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -29,7 +30,7 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import voice_prompts, xml_endpoints
+from app.services import tiempo_real, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
 from app.services.queues_sync import apply_queues
 from app.workers.dialer import dialer
@@ -628,7 +629,11 @@ async def lifespan(app: FastAPI):
             await voice_prompts.ensure_prompts(session, t.id)
     dialer.start()
     maintenance.start()
+    # Llamadas en vivo (services/tiempo_real.py): conexión de eventos de ESL
+    # abierta desde el arranque, no recién con el primer originate.
+    eventos = asyncio.create_task(tiempo_real.mantener_conexion())
     yield
+    eventos.cancel()
     await dialer.stop()
     await maintenance.stop()
     await engine.dispose()
@@ -686,6 +691,7 @@ app.include_router(fs_push.router)
 # Authorization, así que este router valida el token a mano (ver
 # app/api/logs_ws.py) en vez de con el guardia global de arriba.
 app.include_router(logs_ws.router)
+app.include_router(tiempo_real_ws.router)
 
 # El login y "quién soy" se protegen dentro del propio router: pedir el
 # token no puede exigir tener uno.

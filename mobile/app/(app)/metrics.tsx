@@ -5,6 +5,7 @@ import { Text, View } from "react-native";
 import { peticion } from "@/src/api/client";
 import type { AiUsageSummary, CallLogOut, CallStats } from "@/src/api/types";
 import { useAuth } from "@/src/auth/AuthContext";
+import { tiempoCorto } from "@/src/fecha";
 import { ResumenCentral } from "@/src/ResumenCentral";
 import { Aviso, EstadoVacio, Esqueleto, Pantalla } from "@/src/gestion";
 import { crearEstilos, radios } from "@/src/tema";
@@ -150,6 +151,11 @@ export default function ResumenScreen() {
             </View>
             <Barra valor={tasa} tono={tasa >= 80 ? e.ok.color : tasa >= 50 ? e.aviso.color : e.peligro.color} />
             {stats.failed > 0 ? <Text style={e.nota}>{stats.failed} fallidas por la red o el destino</Text> : null}
+            {stats.ring_promedio_s !== null || stats.hablado_promedio_s !== null ? (
+              <Text style={e.nota}>
+                Ring promedio {tiempoCorto(stats.ring_promedio_s)} · hablado promedio {tiempoCorto(stats.hablado_promedio_s)}
+              </Text>
+            ) : null}
           </Tarjeta>
         </>
       ) : null}

@@ -452,6 +452,15 @@ class CallLog(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Tiempos separados, en milisegundos (ver services/tiempos_llamada.py).
+    # `duration` mezcla timbre y conversación; para medir troncales, el
+    # marcador y a los agentes cada tramo va en su columna. NULL = no aplica
+    # o la llamada es anterior a estas columnas.
+    progress_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # empezó a timbrar
+    setup_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # inicio → timbre (red/troncal)
+    ring_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # timbre → contesta (o → cuelga)
+    espera_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # en espera (hold)
+    colgo: Mapped[str | None] = mapped_column(String(10), nullable=True)  # llamante|llamado
 
     campaign: Mapped["Campaign | None"] = relationship(back_populates="calls")
 

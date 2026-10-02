@@ -380,6 +380,11 @@ export interface CallLog {
   started_at: string | null;
   answered_at: string | null;
   ended_at: string | null;
+  /** Tiempos separados, en milisegundos (null si no aplica). */
+  setup_ms: number | null;
+  ring_ms: number | null;
+  espera_ms: number | null;
+  colgo: "llamante" | "llamado" | null;
 }
 
 export interface CallStats {
@@ -389,6 +394,30 @@ export interface CallStats {
   busy: number;
   failed: number;
   talk_minutes: number;
+  /** Promedios en segundos; null mientras no haya llamadas con ese dato. */
+  ring_promedio_s: number | null;
+  setup_promedio_s: number | null;
+  hablado_promedio_s: number | null;
+  espera_promedio_s: number | null;
+}
+
+/** Un canal en curso, tal como lo publica /ws/tiempo-real. */
+export interface LlamadaEnVivo {
+  uuid: string;
+  direccion: "entrante" | "saliente";
+  de: string | null;
+  nombre: string | null;
+  a: string | null;
+  campana_id: string | null;
+  estado: "iniciando" | "timbrando" | "hablando" | "espera" | "colgada";
+  /** Marcas de tiempo en segundos (epoch). */
+  inicio_at: number;
+  timbre_at: number | null;
+  contesta_at: number | null;
+  cambio_at: number;
+  otra_pata: string | null;
+  causa: string | null;
+  ring_ms: number | null;
 }
 
 // ---------- Usuarios y sesión ----------

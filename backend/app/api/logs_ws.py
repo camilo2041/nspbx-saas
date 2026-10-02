@@ -13,6 +13,7 @@ central.
 import asyncio
 import logging
 import re
+from datetime import timezone
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
@@ -23,7 +24,7 @@ from app.core.config import settings
 from app.core.database import async_session, fijar_tenant, get_session
 from app.core.runtime_settings import runtime_settings
 from app.core.security import leer_token
-from app.models import User
+from app.models import Tenant, User
 from app.services import esl
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,19 @@ async def _usuario_del_token(token: str | None, session: AsyncSession) -> User |
         usuario = (await session.execute(select(User).where(User.id == user_id))).unique().scalar_one_or_none()
     if not usuario or not usuario.enabled or usuario.tenant_id != tid or mfa.le_falta_mfa(usuario):
         return None
+    # Lo mismo que sesion_obligatoria: sesiones cerradas (cambio de
+    # contraseña, «Cerrar sesiones») y empresa desactivada cortan también los
+    # WebSocket. Sin esto un token robado seguía abriendo la consola y el
+    # tiempo real aunque se cerraran todas las sesiones del usuario.
+    if usuario.sesiones_desde is not None:
+        corte = int(usuario.sesiones_desde.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        emitido = int(datos.get("iatm") or int(datos.get("iat") or 0) * 1000)
+        if emitido < corte:
+            return None
+    if usuario.tenant_id is not None:
+        empresa = await session.get(Tenant, usuario.tenant_id)
+        if not empresa or not empresa.enabled:
+            return None
     return usuario
 
 

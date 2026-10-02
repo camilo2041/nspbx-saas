@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
-from app.services import deepgram, llm
+from app.services import deepgram, llm, tiempos_llamada
 from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
@@ -245,6 +245,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         or variables.get("ani")
     )
 
+    tiempos = tiempos_llamada.calcular(variables)
     call = CallLog(
         tenant_id=tenant_id,
         campaign_id=await _campana_de_cdr(session, variables, tenant_id),
@@ -262,6 +263,11 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         started_at=_epoch_us_to_dt(variables.get("start_uepoch")),
         answered_at=_epoch_us_to_dt(variables.get("answer_uepoch")),
         ended_at=_epoch_us_to_dt(variables.get("end_uepoch")),
+        progress_at=tiempos.progress_at,
+        setup_ms=tiempos.setup_ms,
+        ring_ms=tiempos.ring_ms,
+        espera_ms=tiempos.espera_ms,
+        colgo=tiempos.colgo,
     )
     session.add(call)
     try:
@@ -335,6 +341,10 @@ def _call_out(call: CallLog) -> dict:
         "started_at": call.started_at,
         "answered_at": call.answered_at,
         "ended_at": call.ended_at,
+        "setup_ms": call.setup_ms,
+        "ring_ms": call.ring_ms,
+        "espera_ms": call.espera_ms,
+        "colgo": call.colgo,
     }
 
 
@@ -445,7 +455,30 @@ async def call_stats(session: AsyncSession = Depends(get_session), usuario: User
     total_min = (
         await session.execute(_acotar(select(func.coalesce(func.sum(CallLog.billsec), 0)), propia))
     ).scalar() or 0
+    contestada = CallLog.status == "answered"
+    promedios = (
+        await session.execute(
+            _acotar(
+                select(
+                    func.avg(CallLog.ring_ms).filter(contestada),
+                    func.avg(CallLog.setup_ms),
+                    func.avg(CallLog.billsec).filter(contestada),
+                    func.avg(CallLog.espera_ms).filter(contestada),
+                ),
+                propia,
+            )
+        )
+    ).one()
+
+    def _seg(ms):
+        return round(float(ms) / 1000, 1) if ms is not None else None
+
     return {
+        # Promedios en segundos; None si todavía no hay llamadas con ese dato.
+        "ring_promedio_s": _seg(promedios[0]),
+        "setup_promedio_s": _seg(promedios[1]),
+        "hablado_promedio_s": round(float(promedios[2]), 1) if promedios[2] is not None else None,
+        "espera_promedio_s": _seg(promedios[3]),
         "total": sum(counts.values()),
         "answered": counts.get("answered", 0),
         "no_answer": counts.get("no_answer", 0),
