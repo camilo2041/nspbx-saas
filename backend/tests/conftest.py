@@ -83,6 +83,9 @@ from app.models import (  # noqa: E402
     CallLog,
     Campaign,
     CampaignNumber,
+    Callback,
+    CodigoPausa,
+    Disposicion,
     CampoContacto,
     Contacto,
     Debt,
@@ -223,7 +226,13 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
     await session.flush()
     numero.contacto_id, numero.lista_id = contacto.id, lista.id
     nota = Nota(tenant_id=tid, contacto_id=contacto.id, texto=f"Nota privada de {marca}")
-    session.add(nota)
+    # Contact center: catálogos y un callback del número.
+    pausa = CodigoPausa(tenant_id=tid, codigo="BREAK", nombre=f"Descanso {marca}", pagada=True, activo=True)
+    disposicion = Disposicion(tenant_id=tid, codigo="VENTA", nombre=f"Venta {marca}", categoria="venta",
+                              contacto_humano=True, activa=True)
+    callback = Callback(tenant_id=tid, lead_id=numero.id, campaign_id=camp.id, contacto_id=contacto.id,
+                        cuando=datetime.utcnow() + timedelta(days=1), estado="pendiente", nota=f"Callback {marca}")
+    session.add_all([nota, pausa, disposicion, callback])
     await session.flush()
 
     for rol in (permissions.ADMIN, permissions.SUPERVISOR, permissions.ASESOR):
@@ -261,6 +270,9 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         "lista": lista.id,
         "campo_contacto": campo.id,
         "no_llamar": dnc.id,
+        "codigo_pausa": pausa.id,
+        "disposicion": disposicion.id,
+        "callback": callback.id,
     }
     return e
 

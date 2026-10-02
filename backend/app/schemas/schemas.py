@@ -262,6 +262,10 @@ class CampaignBase(BaseModel):
     # Minutos de espera antes de volver a marcar según el resultado anterior
     # (busy, noanswer, failed). Ver services/hopper.py.
     reglas_reciclaje: Optional[dict[str, int]] = None
+    # Con agentes (services/agentes.py) o con el voizbot (lo de antes).
+    metodo: str = Field(default="voizbot", pattern="^(voizbot|manual|vista_previa|progresivo)$")
+    guion: Optional[str] = Field(default=None, max_length=10000)
+    grabacion: str = Field(default="todas", pattern="^(todas|ninguna)$")
 
     @field_validator("reglas_reciclaje")
     @classmethod
@@ -286,6 +290,9 @@ class CampaignUpdate(BaseModel):
     message_template: Optional[str] = None
     ai_intent: Optional[str] = None
     reglas_reciclaje: Optional[dict[str, int]] = None
+    metodo: Optional[str] = Field(default=None, pattern="^(voizbot|manual|vista_previa|progresivo)$")
+    guion: Optional[str] = Field(default=None, max_length=10000)
+    grabacion: Optional[str] = Field(default=None, pattern="^(todas|ninguna)$")
 
     @field_validator("reglas_reciclaje")
     @classmethod
@@ -760,6 +767,10 @@ class QueueOut(BaseModel):
     announce_position: bool
     enabled: bool
     created_at: datetime
+
+
+class AgentesCampanaIn(BaseModel):
+    user_ids: list[int] = Field(default_factory=list, max_length=500)
 
 
 class ListaUpdate(BaseModel):

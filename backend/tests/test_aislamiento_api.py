@@ -40,6 +40,9 @@ _RECURSO_POR_PARAMETRO = {
     "lista_id": "lista",
     "campo_id": "campo_contacto",
     "no_llamar_id": "no_llamar",
+    "pausa_id": "codigo_pausa",
+    "disposicion_id": "disposicion",
+    "callback_id": "callback",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por
@@ -77,6 +80,9 @@ _CUERPOS = {
     ("PUT", "/api/campaigns/{campaign_id}/listas/{lista_id}"): {"prioridad": 5},
     ("PUT", "/api/crm/contactos/{contacto_id}"): {"email": "pisado@x.test"},
     ("PUT", "/api/crm/campos/{campo_id}"): {"nombre": "Pisado"},
+    ("PUT", "/api/contact-center/pausas/{pausa_id}"): {"orden": 3},
+    ("PUT", "/api/campaigns/{campaign_id}/agentes"): {"user_ids": []},
+    ("PUT", "/api/contact-center/disposiciones/{disposicion_id}"): {"orden": 3},
     ("POST", "/api/crm/contactos/{contacto_id}/notas"): {"texto": "Pisado"},
     ("POST", "/api/extensions/{extension_id}/call"): {"destination": "1001"},
     ("POST", "/api/voicebots/{bot_id}/tts"): {"text": "Hola", "voice": "es-CO-SalomeNeural"},

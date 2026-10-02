@@ -1,4 +1,11 @@
 from app.models.models import (
+    SesionAgente,
+    EstadoAgente,
+    Disposicion,
+    CodigoPausa,
+    CampanaAgente,
+    Callback,
+    AgenteVivo,
     AiCallUsage,
     ApiKey,
     AuditLog,
@@ -32,6 +39,13 @@ from app.models.models import (
 )
 
 __all__ = [
+    "SesionAgente",
+    "EstadoAgente",
+    "Disposicion",
+    "CodigoPausa",
+    "CampanaAgente",
+    "Callback",
+    "AgenteVivo",
     "AiCallUsage",
     "ApiKey",
     "AuditLog",

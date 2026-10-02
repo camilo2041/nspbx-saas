@@ -246,6 +246,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     )
 
     tiempos = tiempos_llamada.calcular(variables)
+    agente_id, lead_id, disposicion_id = await _agente_de_cdr(session, variables, tenant_id, uuid)
     call = CallLog(
         tenant_id=tenant_id,
         campaign_id=await _campana_de_cdr(session, variables, tenant_id),
@@ -268,6 +269,9 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         ring_ms=tiempos.ring_ms,
         espera_ms=tiempos.espera_ms,
         colgo=tiempos.colgo,
+        agente_id=agente_id,
+        lead_id=lead_id,
+        disposicion_id=disposicion_id,
     )
     session.add(call)
     try:
@@ -275,6 +279,31 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     except Exception:
         await session.rollback()  # carrera con otro POST del mismo uuid
     return {"ok": True}
+
+
+async def _agente_de_cdr(session: AsyncSession, variables: dict, tenant_id: int, uuid: str):
+    """(agente, lead, disposición) de una llamada de agente
+    (services/agentes.py). Solo si el agente y el lead son de la misma
+    empresa: una variable alterada no puede atribuirle la llamada a otro."""
+    from app.models import CampaignNumber
+    from app.services import agentes
+
+    def entero(clave):
+        try:
+            return int(variables.get(clave) or 0) or None
+        except (TypeError, ValueError):
+            return None
+
+    agente_id, lead_id = entero("nspbx_agente_id"), entero("nspbx_lead_id")
+    if agente_id is None:
+        return None, None, None
+    agente = await session.get(User, agente_id)
+    if agente is None or agente.tenant_id != tenant_id:
+        return None, None, None
+    lead = await session.get(CampaignNumber, lead_id) if lead_id else None
+    if lead is not None and lead.tenant_id != tenant_id:
+        lead_id = None
+    return agente_id, lead_id, await agentes.disposicion_de_llamada(session, uuid)
 
 
 def _salio_por_troncal(variables: dict) -> bool:

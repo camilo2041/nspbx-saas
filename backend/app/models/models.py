@@ -209,6 +209,14 @@ class Campaign(Base):
     # "failed": 15}, en minutos. Sin regla, se reintenta en la vuelta
     # siguiente (lo de antes). Cuántas veces sigue siendo `retries`.
     reglas_reciclaje: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Cómo se marca (docs/plan-contact-center.md): "voizbot" = lo de antes
+    # (workers/dialer.py); "manual", "vista_previa" y "progresivo" = con
+    # agentes humanos (services/agentes.py).
+    metodo: Mapped[str] = mapped_column(String(20), default="voizbot", server_default="voizbot")
+    # Guion para el agente, con {variables} del número y del contacto.
+    guion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Grabar las llamadas de agentes: "todas" o "ninguna".
+    grabacion: Mapped[str] = mapped_column(String(10), default="todas", server_default="todas")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -257,6 +265,12 @@ class CampaignNumber(Base):
     # No se marca antes de esta hora (reciclaje; ver services/hopper.py).
     proximo_intento_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ultimo_intento_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Dueño del lead: un callback «solo para mí» lo reserva para ese agente
+    # (services/hopper.py no se lo da a otro). NULL = cualquiera.
+    agente_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    disposicion_id: Mapped[int | None] = mapped_column(
+        ForeignKey("disposiciones.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     campaign: Mapped["Campaign"] = relationship(back_populates="numbers")
@@ -480,6 +494,11 @@ class CallLog(Base):
     ring_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # timbre → contesta (o → cuelga)
     espera_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # en espera (hold)
     colgo: Mapped[str | None] = mapped_column(String(10), nullable=True)  # llamante|llamado
+    # Llamadas de agentes (services/agentes.py): quién atendió, qué lead y
+    # cómo la dispuso.
+    agente_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    lead_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    disposicion_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     campaign: Mapped["Campaign | None"] = relationship(back_populates="calls")
 
@@ -1147,4 +1166,147 @@ class NoLlamar(Base):
     motivo: Mapped[str | None] = mapped_column(String(255), nullable=True)
     hasta: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # NULL = para siempre
     creado_por: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# --- Agentes (docs/plan-contact-center.md, fase 3) ---------------------------
+
+
+class CodigoPausa(Base):
+    """Motivo de pausa del agente (almuerzo, capacitación…)."""
+
+    __tablename__ = "codigos_pausa"
+    __table_args__ = (UniqueConstraint("tenant_id", "codigo", name="ux_codigos_pausa_tenant_codigo"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    codigo: Mapped[str] = mapped_column(String(20))
+    nombre: Mapped[str] = mapped_column(String(60))
+    pagada: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Pasado este tiempo el supervisor lo ve en rojo (fase 5). NULL = sin tope.
+    max_minutos: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    orden: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class Disposicion(Base):
+    """Resultado de una llamada que elige el agente al terminarla.
+
+    La categoría decide qué pasa con el lead (services/agentes.py:disponer):
+    `venta`, `contacto` y `promesa` lo cierran; `no_contacto` lo recicla;
+    `callback` lo agenda; `no_llamar` lo pasa a la lista de no llamar."""
+
+    __tablename__ = "disposiciones"
+    __table_args__ = (UniqueConstraint("tenant_id", "codigo", name="ux_disposiciones_tenant_codigo"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    codigo: Mapped[str] = mapped_column(String(20))
+    nombre: Mapped[str] = mapped_column(String(60))
+    categoria: Mapped[str] = mapped_column(String(15))  # venta|contacto|no_contacto|callback|promesa|no_llamar
+    # Cuenta como conversación con una persona (tasa de contacto).
+    contacto_humano: Mapped[bool] = mapped_column(Boolean, default=True)
+    color: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    activa: Mapped[bool] = mapped_column(Boolean, default=True)
+    orden: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class CampanaAgente(Base):
+    """Qué agentes trabajan en qué campaña."""
+
+    __tablename__ = "campana_agentes"
+    __table_args__ = (UniqueConstraint("campaign_id", "user_id", name="ux_campana_agentes"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+
+class SesionAgente(Base):
+    """Una jornada del agente: desde que entra hasta que sale."""
+
+    __tablename__ = "sesiones_agente"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    campanas: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    extension: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    inicio: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    fin: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    motivo_fin: Mapped[str | None] = mapped_column(String(20), nullable=True)  # normal|forzada|reinicio
+
+
+class EstadoAgente(Base):
+    """Bitácora de estados: una fila por tramo. Todos los tiempos del agente
+    (listo, pausa por código, en llamada, disposición) salen de acá."""
+
+    __tablename__ = "estados_agente"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    sesion_id: Mapped[int] = mapped_column(ForeignKey("sesiones_agente.id", ondelete="CASCADE"), index=True)
+    estado: Mapped[str] = mapped_column(String(15))
+    codigo_pausa_id: Mapped[int | None] = mapped_column(
+        ForeignKey("codigos_pausa.id", ondelete="SET NULL"), nullable=True
+    )
+    campaign_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lead_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    call_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    disposicion_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    inicio: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    fin: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AgenteVivo(Base):
+    """Estado actual de un agente conectado (una fila por agente). La lee
+    la consola del agente y, en la fase 5, el supervisor."""
+
+    __tablename__ = "agentes_vivo"
+    __table_args__ = (UniqueConstraint("user_id", name="ux_agentes_vivo_user"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    sesion_id: Mapped[int] = mapped_column(ForeignKey("sesiones_agente.id", ondelete="CASCADE"))
+    estado: Mapped[str] = mapped_column(String(15))
+    desde: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    codigo_pausa_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    campanas: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    extension: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Pata de audio del agente en su conferencia ("sesión clavada").
+    audio_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    audio: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Lo que el softphone del agente exige para contestar solo esa llamada.
+    token_audio: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Llamada y lead en curso.
+    campaign_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lead_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    call_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    telefono: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    contestada_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Pausa pedida en medio de una llamada: se aplica al disponer.
+    pausa_pendiente_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Antes de marcar a mano desde la pausa: a qué vuelve después.
+    volver_a_pausa_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class Callback(Base):
+    """Volver a llamar a un lead en una fecha, para un agente o para
+    cualquiera de la campaña."""
+
+    __tablename__ = "callbacks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    lead_id: Mapped[int] = mapped_column(ForeignKey("campaign_numbers.id", ondelete="CASCADE"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"))
+    contacto_id: Mapped[int | None] = mapped_column(ForeignKey("contactos.id", ondelete="SET NULL"), nullable=True)
+    agente_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    cuando: Mapped[datetime] = mapped_column(DateTime, index=True)
+    estado: Mapped[str] = mapped_column(String(12), default="pendiente")  # pendiente|hecho|cancelado
+    nota: Mapped[str | None] = mapped_column(Text, nullable=True)
+    creado_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

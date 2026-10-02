@@ -25,16 +25,23 @@ MAX_MINUTOS_RECICLAJE = 7 * 24 * 60
 _VUELTAS = 5
 
 
-def condiciones_disponibles(campaign_id: int, ahora: datetime):
+def condiciones_disponibles(campaign_id: int, ahora: datetime, agente_id: int | None = None):
+    """`agente_id`: los leads sin dueño y los reservados para ese agente
+    (callbacks «solo para mí»). Sin agente (el voizbot): solo los sin dueño."""
+    dueno = CampaignNumber.agente_id.is_(None)
+    if agente_id is not None:
+        dueno = or_(dueno, CampaignNumber.agente_id == agente_id)
     return (
         CampaignNumber.campaign_id == campaign_id,
         CampaignNumber.status == "pending",
         or_(CampaignNumber.proximo_intento_at.is_(None), CampaignNumber.proximo_intento_at <= ahora),
         or_(CampaignNumber.lista_id.is_(None), Lista.activa.is_(True)),
+        dueno,
     )
 
 
-async def tomar(session, campaign: Campaign, cuantos: int, ahora: datetime | None = None) -> list[CampaignNumber]:
+async def tomar(session, campaign: Campaign, cuantos: int, ahora: datetime | None = None,
+                agente_id: int | None = None) -> list[CampaignNumber]:
     """Hasta `cuantos` números listos para marcar, ya marcados como
     "dialing" (sin commit: lo hace quien llama)."""
     ahora = ahora or datetime.utcnow()
@@ -48,7 +55,7 @@ async def tomar(session, campaign: Campaign, cuantos: int, ahora: datetime | Non
                 await session.execute(
                     select(CampaignNumber)
                     .outerjoin(Lista, Lista.id == CampaignNumber.lista_id)
-                    .where(*condiciones_disponibles(campaign.id, ahora))
+                    .where(*condiciones_disponibles(campaign.id, ahora, agente_id))
                     .order_by(
                         func.coalesce(Lista.prioridad, 0).desc(),
                         CampaignNumber.prioridad.desc(),

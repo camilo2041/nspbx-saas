@@ -208,12 +208,19 @@ async def _event_loop(reader: asyncio.StreamReader):
 async def _a_tiempo_real(cabeceras: str) -> None:
     from app.services.tiempo_real import leer_evento, tiempo_real
 
+    from app.services import agentes
+
+    ev = leer_evento(cabeceras)
     try:
-        await tiempo_real.recibir(leer_evento(cabeceras))
+        await tiempo_real.recibir(ev)
     except Exception:
         # Un evento raro no puede tumbar la conexión de la que dependen
         # también los resultados de los originate.
         logger.exception("Evento de canal no procesado")
+    try:
+        await agentes.recibir(ev)
+    except Exception:
+        logger.exception("Evento de canal no procesado por el motor de agentes")
 
 
 async def asegurar_eventos() -> None:

@@ -86,8 +86,10 @@ class CampaignDialer:
             tenants_activos = {
                 t.id for t in (await session.execute(select(Tenant))).scalars().all() if t.enabled
             }
+            # Solo las campañas del voizbot: las de agentes las marca
+            # services/agentes.py (manual, vista previa, progresivo).
             result = await session.execute(
-                select(Campaign).where(Campaign.status == "running")
+                select(Campaign).where(Campaign.status == "running", Campaign.metodo == "voizbot")
             )
             campaigns = []
             topes_por_tenant: dict[int, int] = {}

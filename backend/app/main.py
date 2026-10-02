@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -30,7 +30,7 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import tiempo_real, voice_prompts, xml_endpoints
+from app.services import agentes, tiempo_real, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
 from app.services.queues_sync import apply_queues
 from app.workers.dialer import dialer
@@ -350,6 +350,9 @@ _TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
     "users", "audit_log", "voicebot_versions", "api_keys",
     # CRM (revisión 0012)
     "contactos", "campos_contacto", "listas", "notas", "no_llamar",
+    # Agentes (revisión 0013)
+    "codigos_pausa", "disposiciones", "campana_agentes", "sesiones_agente",
+    "estados_agente", "agentes_vivo", "callbacks",
 ]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
@@ -636,7 +639,12 @@ async def lifespan(app: FastAPI):
     # Llamadas en vivo (services/tiempo_real.py): conexión de eventos de ESL
     # abierta desde el arranque, no recién con el primer originate.
     eventos = asyncio.create_task(tiempo_real.mantener_conexion())
+    # Agentes: las sesiones de antes del reinicio no tienen audio ni
+    # eventos confiables; el agente vuelve a entrar. Después, el progresivo.
+    await agentes.cerrar_todas()
+    agentes.motor.start()
     yield
+    await agentes.motor.stop()
     eventos.cancel()
     await dialer.stop()
     await maintenance.stop()
@@ -755,6 +763,16 @@ app.include_router(
 app.include_router(
     crm_api.router,
     dependencies=[Depends(requiere(permissions.CRM_VER)), Depends(licencia_operativa())],
+)
+# Consola del agente: cualquiera con agente:operar, sobre sí mismo
+# (app/api/agente.py). Catálogos del contact center: quien gestiona campañas.
+app.include_router(
+    agente_api.router,
+    dependencies=[Depends(requiere(permissions.AGENTE_OPERAR)), Depends(licencia_operativa())],
+)
+app.include_router(
+    contact_center_api.router,
+    dependencies=[Depends(requiere(permissions.CAMPANAS_GESTIONAR)), Depends(licencia_operativa())],
 )
 app.include_router(
     ai_usage.router,

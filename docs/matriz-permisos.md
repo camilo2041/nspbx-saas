@@ -9,6 +9,19 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 
 | Método | Ruta | Permiso | Admin | Supervisor | Coordinador | Asesor |
 |---|---|---|---|---|---|---|
+| POST | `/api/agente/audio` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/callbacks/{callback_id}/llamar` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/colgar` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/disponer` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/entrar` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/agente/estado` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/listo` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/marcar` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/nota` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/pausa` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/salir` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/saltar` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/agente/siguiente` | `agente:operar` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/ai-usage/calls` | `consumo_ia:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/ai-usage/daily` | `consumo_ia:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/ai-usage/summary` | `consumo_ia:ver` | ✓ | ✓ | ✓ | ✗ |
@@ -55,6 +68,8 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/campaigns/{campaign_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/campaigns/{campaign_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | PUT | `/api/campaigns/{campaign_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/campaigns/{campaign_id}/agentes` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/campaigns/{campaign_id}/agentes` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/campaigns/{campaign_id}/listas` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | PUT | `/api/campaigns/{campaign_id}/listas/{lista_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | DELETE | `/api/campaigns/{campaign_id}/numbers` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
@@ -79,6 +94,12 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/cobranza/summary` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/consumo` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/consumo/csv` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/contact-center/disposiciones` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/contact-center/disposiciones` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/contact-center/disposiciones/{disposicion_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/contact-center/pausas` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/contact-center/pausas` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/contact-center/pausas/{pausa_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/crm/campos` | `crm:ver` | ✓ | ✓ | ✓ | ✗ |
 | POST | `/api/crm/campos` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
 | DELETE | `/api/crm/campos/{campo_id}` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |

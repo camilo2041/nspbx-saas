@@ -74,6 +74,9 @@ SOFTPHONE_USAR = "softphone:usar"
 # acotado a los leads que atiende.
 CRM_VER = "crm:ver"
 CRM_GESTIONAR = "crm:gestionar"
+# Trabajar como agente en la consola (fase 3): entrar a campañas asignadas,
+# marcar, disponer. Lo que ve del cliente es solo el lead que atiende.
+AGENTE_OPERAR = "agente:operar"
 
 PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
     ADMIN: frozenset(
@@ -92,6 +95,7 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             SOFTPHONE_USAR,
             CRM_VER,
             CRM_GESTIONAR,
+            AGENTE_OPERAR,
         }
     ),
     SUPERVISOR: frozenset(
@@ -107,6 +111,7 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             SOFTPHONE_USAR,
             CRM_VER,
             CRM_GESTIONAR,
+            AGENTE_OPERAR,
         }
     ),
     COORDINADOR: frozenset(
@@ -119,6 +124,7 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CONSUMO_IA_VER,
             CRM_VER,
             CRM_GESTIONAR,
+            AGENTE_OPERAR,
         }
     ),
     ASESOR: frozenset(
@@ -126,6 +132,7 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             LLAMADAS_VER_PROPIAS,
             CITAS_GESTIONAR,
             SOFTPHONE_USAR,
+            AGENTE_OPERAR,
         }
     ),
     # El rol de plataforma solo administra empresas. No ve datos de
@@ -233,6 +240,7 @@ ETIQUETAS_PERMISOS = {
     SOFTPHONE_USAR: "Usar el softphone",
     CRM_VER: "Ver contactos (CRM) y escribir notas",
     CRM_GESTIONAR: "Gestionar contactos: importar, campos y no llamar",
+    AGENTE_OPERAR: "Trabajar como agente (consola de agente)",
 }
 
 TODOS_LOS_PERMISOS = tuple(ETIQUETAS_PERMISOS)

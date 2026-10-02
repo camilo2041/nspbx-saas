@@ -15,6 +15,7 @@ from app.schemas import (
     CampaignNumberUpdate,
     CampaignOut,
     CampaignStats,
+    AgentesCampanaIn,
     CampaignUpdate,
     ListaUpdate,
 )
@@ -339,6 +340,59 @@ def _lista_out(lista: Lista, conteo: dict[str, int] | None = None) -> dict:
         "pendientes": conteo.get("pending", 0),
         "por_estado": conteo,
     }
+
+
+@router.get("/{campaign_id}/agentes")
+async def agentes_de_campana(campaign_id: int, session: AsyncSession = Depends(get_session)):
+    """Quién trabaja esta campaña y quién podría (usuarios con extensión y
+    permiso de agente). Solo nombre y extensión: no hace falta poder
+    administrar usuarios para asignar agentes."""
+    from app.core import permissions
+    from app.models import CampanaAgente, User
+
+    campaign = await traer_propio(session, Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    asignados = set(
+        (await session.execute(select(CampanaAgente.user_id).where(CampanaAgente.campaign_id == campaign_id))).scalars()
+    )
+    usuarios = (await session.execute(select(User).where(User.enabled.is_(True)).order_by(User.full_name))).unique().scalars()
+    return [
+        {
+            "id": u.id,
+            "nombre": u.full_name or u.username,
+            "username": u.username,
+            "extension": u.extension.number if u.extension else None,
+            "asignado": u.id in asignados,
+        }
+        for u in usuarios
+        if u.id in asignados or (u.extension and permissions.puede(u.role, permissions.AGENTE_OPERAR, u.tenant_id))
+    ]
+
+
+@router.put("/{campaign_id}/agentes")
+async def asignar_agentes(campaign_id: int, payload: AgentesCampanaIn, session: AsyncSession = Depends(get_session)):
+    from app.models import CampanaAgente, User
+
+    campaign = await traer_propio(session, Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    pedidos = set(payload.user_ids)
+    if pedidos:
+        propios = set((await session.execute(select(User.id).where(User.id.in_(pedidos)))).scalars())
+        if propios != pedidos:
+            raise HTTPException(status_code=400, detail="Usuario inexistente")
+    actuales = {
+        a.user_id: a
+        for a in (await session.execute(select(CampanaAgente).where(CampanaAgente.campaign_id == campaign_id))).scalars()
+    }
+    for user_id, fila in actuales.items():
+        if user_id not in pedidos:
+            await session.delete(fila)
+    for user_id in pedidos - set(actuales):
+        session.add(CampanaAgente(tenant_id=campaign.tenant_id, campaign_id=campaign_id, user_id=user_id))
+    await session.commit()
+    return await agentes_de_campana(campaign_id, session)
 
 
 @router.put("/{campaign_id}/listas/{lista_id}")
