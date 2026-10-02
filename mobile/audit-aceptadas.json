@@ -1,0 +1,17 @@
+{
+  "GHSA-86w9-cpqp-85rv": {
+    "paquete": "node-forge (vía @expo/cli → @expo/code-signing-certificates)",
+    "motivo": "Herramienta de desarrollo, no va dentro del APK: la usa el servidor de desarrollo (expo start) para firmar manifiestos y las actualizaciones OTA (expo-updates, que la app no usa). No hay versión corregida de node-forge.",
+    "revisar_antes": "2027-01-15"
+  },
+  "GHSA-w5hq-g745-h8pq": {
+    "paquete": "uuid 7 (vía @expo/config-plugins → xcode)",
+    "motivo": "Herramienta de compilación (prebuild de iOS), no va dentro del APK; xcode solo genera ids con v4, y el aviso es de v3/v5/v6 con un búfer propio. Forzar uuid 11 en xcode no está probado por Expo.",
+    "revisar_antes": "2027-01-15"
+  },
+  "GHSA-vcc3-ghjq-m6fr": {
+    "paquete": "decode-uri-component 0.2 (vía expo-router → query-string 7)",
+    "motivo": "Sí va en la app: un enlace profundo manipulado podría colgarla (sin acceso a datos). La versión corregida (0.5) es solo ESM y query-string 7 la carga con require(): forzarla rompería el router. Se corrige cuando expo-router suba query-string.",
+    "revisar_antes": "2027-01-15"
+  }
+}

@@ -11,6 +11,10 @@ name: CI
 on:
   push:
   pull_request:
+  # Una vez por semana aunque nadie empuje: una vulnerabilidad nueva en una
+  # dependencia aparece sin que el código cambie.
+  schedule:
+    - cron: "17 11 * * 1"
 
 permissions:
   contents: read
@@ -83,6 +87,26 @@ jobs:
       # Los hallazgos ya revisados están en .gitleaksignore, cada uno con
       # su motivo.
       - run: ./gitleaks git . --redact --no-banner --exit-code 1
+
+  dependencias:
+    name: Dependencias con vulnerabilidades conocidas
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit==2.10.1
+      # Sin excepciones: las del backend se actualizan.
+      - run: pip-audit -r backend/requirements.txt --progress-spinner off
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # npm audit lee el lockfile; las excepciones aceptadas (con motivo y
+      # fecha de revisión) están en <carpeta>/audit-aceptadas.json.
+      - run: node scripts/auditar-npm.mjs frontend
+      - run: node scripts/auditar-npm.mjs mobile
 
   movil:
     name: App móvil (tipos y colores iguales al panel)

@@ -28,7 +28,7 @@ def _clave_valida(clave: str | None, numero: str) -> str:
         return validacion.generar_clave_sip()
     problema = validacion.problema_clave_sip(clave, numero)
     if problema:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=problema)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=problema)
     return clave
 
 

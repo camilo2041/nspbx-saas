@@ -15,12 +15,11 @@ Esta última comprobación no depende de qué código devolvió cada endpoint.
 import re
 
 import pytest
-from fastapi.routing import APIRoute
 
 from app.core import permissions
-from app.main import app
 
 from .conftest import foto_de_empresa
+from .rutas import rutas_api
 
 # Parámetro de la URL -> recurso de conftest.Empresa.ids
 _RECURSO_POR_PARAMETRO = {
@@ -88,11 +87,11 @@ def _recurso(ruta: str, parametro: str) -> str | None:
 
 
 def _rutas_con_id():
-    for r in app.routes:
-        if not isinstance(r, APIRoute) or not r.path.startswith("/api/") or "{" not in r.path:
+    for ruta, metodos in rutas_api():
+        if "{" not in ruta:
             continue
-        for metodo in sorted(r.methods - {"HEAD", "OPTIONS"}):
-            yield metodo, r.path
+        for metodo in sorted(metodos - {"HEAD", "OPTIONS"}):
+            yield metodo, ruta
 
 
 def _url(ruta: str, empresa) -> str:
@@ -169,9 +168,9 @@ async def test_control_positivo_el_mismo_pedido_funciona_sobre_lo_propio(mundo, 
 
 
 def _listados():
-    for r in app.routes:
-        if isinstance(r, APIRoute) and r.path.startswith("/api/") and "{" not in r.path and "GET" in r.methods:
-            yield r.path
+    for ruta, metodos in rutas_api():
+        if "{" not in ruta and "GET" in metodos:
+            yield ruta
 
 
 _LISTADOS = sorted(set(_listados()))

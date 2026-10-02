@@ -124,7 +124,7 @@ async def update_settings(
     # se valida con la sesión atada a la empresa (RLS), que no ve las ajenas.
     cola = cambios.get("webcall_queue_id")
     if cola and not await traer_propio(session, Queue, cola):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="La cola indicada no existe")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="La cola indicada no existe")
 
     # Se guarda normalizado ("57,1,34") para que el dialplan y el panel lean
     # lo mismo que va a aplicar la política de salientes.

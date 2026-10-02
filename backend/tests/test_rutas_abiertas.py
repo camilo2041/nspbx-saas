@@ -12,9 +12,7 @@ alguien revisa.
 import re
 
 import pytest
-from fastapi.routing import APIRoute
-
-from app.main import app
+from .rutas import MINIMO_DE_RUTAS, rutas_api
 
 _ABIERTAS = {
     # Se autentican con el cuerpo o son el punto de entrada.
@@ -35,10 +33,9 @@ _ABIERTAS_PREFIJO = (
 
 
 def _todas():
-    for r in app.routes:
-        if isinstance(r, APIRoute) and r.path.startswith("/api/"):
-            for metodo in sorted(r.methods - {"HEAD", "OPTIONS"}):
-                yield metodo, r.path
+    for ruta, metodos in rutas_api():
+        for metodo in sorted(metodos - {"HEAD", "OPTIONS"}):
+            yield metodo, ruta
 
 
 _RUTAS = sorted(set(_todas()))
@@ -79,3 +76,11 @@ async def test_websocket_de_logs_sin_token_valido_no_identifica_a_nadie(mundo, t
 
     async with app_session() as session:
         assert await _usuario_del_token(token, session) is None
+
+
+def test_la_enumeracion_de_rutas_no_queda_vacia():
+    """Las pruebas de aislamiento, rutas abiertas y auditoría atacan cada
+    ruta que encuentran: si la enumeración se queda corta (pasó al
+    actualizar FastAPI: veía 1 ruta en vez de ~165) siguen en verde sin
+    probar nada. Esto lo impide."""
+    assert len(rutas_api()) >= MINIMO_DE_RUTAS, f"solo se encontraron {len(rutas_api())} rutas"

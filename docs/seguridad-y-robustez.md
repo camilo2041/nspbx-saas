@@ -400,7 +400,7 @@ una empresa, kill switches.
 | Healthchecks | 🟢 | postgres, freeswitch, backend, voicebot | — |
 | SSH solo con llave, sin root, con allowlist o VPN | por verificar | — | checklist del servidor |
 | Firewall del host: solo 80/443, 5060, 8443, 15080, rango RTP | por verificar | — | escaneo externo trimestral |
-| Actualizaciones de imágenes y dependencias | ❌ | — | Dependabot/Renovate + `pip-audit` / `npm audit` en CI |
+| Dependencias con vulnerabilidades conocidas | ✅ | job `dependencias` de `ci.yml`, en cada push y una vez por semana | `pip-audit` del backend sin excepciones; `scripts/auditar-npm.mjs` en panel y app falla con cualquier aviso moderado o más que no esté aceptado en `<carpeta>/audit-aceptadas.json` con motivo y fecha de revisión (vencida, vuelve a fallar). La primera corrida encontró un RCE crítico en Next.js 16.3.0 (optimizador de imágenes con AVIF) y avisos en starlette, PyJWT, cryptography, python-multipart y h2: todos actualizados. Pendiente: Dependabot/Renovate para que las actualizaciones lleguen solas como PR |
 
 ### 5.14 Cuotas por empresa (noisy neighbor)
 

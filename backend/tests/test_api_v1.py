@@ -10,13 +10,13 @@ import re
 from datetime import datetime, timedelta
 
 import pytest
-from fastapi.routing import APIRoute
 from sqlalchemy import text
 
 from app.core import claves_api
 from app.core.config import settings
 from app.core.database import engine
-from app.main import app
+
+from .rutas import rutas_api
 
 from .conftest import foto_de_empresa
 
@@ -120,10 +120,10 @@ async def test_otra_empresa_no_revoca_mis_claves(mundo, cliente):
 
 
 def _rutas_v1():
-    for r in app.routes:
-        if isinstance(r, APIRoute) and r.path.startswith("/api/v1/"):
-            for m in sorted(r.methods - {"HEAD", "OPTIONS"}):
-                yield m, r.path
+    for ruta, metodos in rutas_api():
+        if ruta.startswith("/api/v1/"):
+            for m in sorted(metodos - {"HEAD", "OPTIONS"}):
+                yield m, ruta
 
 
 _CUERPOS = {

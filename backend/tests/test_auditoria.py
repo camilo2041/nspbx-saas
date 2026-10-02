@@ -187,17 +187,13 @@ def test_toda_ruta_que_modifica_queda_auditada():
     """El middleware audita por método, no por lista de rutas: una ruta nueva
     queda auditada sola. Esto lo comprueba contra TODAS las de la aplicación
     (incluidas las de emergencia, salientes, campañas y la API pública)."""
-    from fastapi.routing import APIRoute
-
-    from app.main import app
+    from .rutas import rutas_api
 
     sin = []
-    for r in app.routes:
-        if not isinstance(r, APIRoute) or not r.path.startswith("/api/"):
-            continue
-        for metodo in r.methods & {"POST", "PUT", "PATCH", "DELETE"}:
-            if not auditoria.se_audita(metodo, r.path) and not r.path.startswith(tuple(_SIN_AUDITORIA)):
-                sin.append(f"{metodo} {r.path}")
+    for ruta, metodos in rutas_api():
+        for metodo in metodos & {"POST", "PUT", "PATCH", "DELETE"}:
+            if not auditoria.se_audita(metodo, ruta) and not ruta.startswith(tuple(_SIN_AUDITORIA)):
+                sin.append(f"{metodo} {ruta}")
     assert not sin, f"Rutas que modifican y no se auditan: {sin}"
     assert set(_SIN_AUDITORIA) == set(auditoria._EXCLUIDAS), "la lista de excluidas cambió: revisar el motivo acá"
 
