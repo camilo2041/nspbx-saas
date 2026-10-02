@@ -208,7 +208,7 @@ Formato: **requisito** · estado · dónde está · cómo se verifica.
 | Toda ruta bajo `/api/` exige sesión salvo lista explícita | ✅ | `core/auth.py:_es_abierta` | `test_rutas_abiertas.py`: llama TODAS las rutas sin token; la lista abierta está repetida en la prueba a propósito |
 | Operaciones globales separadas de las de empresa | ✅ | `core/alcance.py` | `test_alcance.py`: admin, supervisor y asesor de una empresa reciben 403 en empresas, licencias, diagnóstico y respaldos |
 | Licencia suspendida bloquea operación | ✅ | `licencia_operativa()` | `test_fallo_seguro.py`: deja ver, no deja crear (402); empresa desactivada → 403 y fuera de FreeSWITCH |
-| Matriz rol × endpoint documentada y probada | 🟡 | — | `test_alcance.py` cubre lo sensible (troncales, extensiones, rutas, usuarios, ajustes: solo admin); falta la matriz completa |
+| Matriz rol × endpoint documentada y probada | ✅ | — | `docs/matriz-permisos.md` se genera del código (`tests/matriz.py`) y `test_matriz_permisos.py` comprueba que toda ruta declara permiso, que cada rol sin él recibe 403 y que el documento está al día |
 
 ### 5.4 API
 
