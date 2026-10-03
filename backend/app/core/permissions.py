@@ -168,9 +168,9 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
 # permisos se evalúan en CADA petición: ir a la base en cada `requiere()`
 # multiplicaría las consultas por el número de endpoints protegidos.
 #
-# El caché se rellena al arrancar y se invalida al guardar. Asume UN
-# proceso de aplicación, que es como corre hoy (ver docker-compose); con
-# varios workers habría que mover la invalidación a Postgres (LISTEN/NOTIFY).
+# El caché se rellena al arrancar y se invalida al guardar; con varias
+# réplicas, la que guarda avisa a las demás por el bus (services/bus.py,
+# LISTEN/NOTIFY de Postgres) y cada una relee la tabla.
 _OVERRIDES: dict[tuple[int, str], dict[str, bool]] = {}
 
 # Permisos que una empresa NO puede tocar, pase lo que pase en la tabla.

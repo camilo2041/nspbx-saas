@@ -91,8 +91,8 @@ async def resumen(session: AsyncSession = Depends(get_session), usuario: User = 
 
 
 @router.get("/monitoreo", dependencies=_INTERVENIR)
-async def mi_monitoreo(usuario: User = Depends(usuario_actual)):
-    return _monitor_out(monitoreo.de_supervisor(usuario.tenant_id, usuario.id) if usuario.tenant_id else None)
+async def mi_monitoreo(session: AsyncSession = Depends(get_session), usuario: User = Depends(usuario_actual)):
+    return _monitor_out(await monitoreo.de_supervisor(session, usuario.id) if usuario.tenant_id else None)
 
 
 @router.post("/agentes/{user_id}/monitorear", dependencies=_INTERVENIR)
@@ -102,26 +102,29 @@ async def monitorear(user_id: int, payload: MonitorearIn, session: AsyncSession 
         m = await monitoreo.iniciar(session, usuario, user_id, payload.modo)
     except ErrorSupervision as exc:
         raise _error(exc)
+    await session.commit()
     return _monitor_out(m)
 
 
 @router.post("/monitoreo/modo", dependencies=_INTERVENIR)
-async def cambiar_modo(payload: MonitorearIn, usuario: User = Depends(usuario_actual)):
-    m = monitoreo.de_supervisor(usuario.tenant_id, usuario.id) if usuario.tenant_id else None
+async def cambiar_modo(payload: MonitorearIn, session: AsyncSession = Depends(get_session), usuario: User = Depends(usuario_actual)):
+    m = await monitoreo.de_supervisor(session, usuario.id) if usuario.tenant_id else None
     if m is None:
         raise HTTPException(status_code=404, detail="No estás monitoreando a nadie")
     try:
-        await monitoreo.cambiar_modo(m, payload.modo)
+        await monitoreo.cambiar_modo(session, m, payload.modo)
     except ErrorSupervision as exc:
         raise _error(exc)
+    await session.commit()
     return _monitor_out(m)
 
 
 @router.post("/monitoreo/colgar", dependencies=_INTERVENIR)
-async def dejar_de_monitorear(usuario: User = Depends(usuario_actual)):
-    m = monitoreo.de_supervisor(usuario.tenant_id, usuario.id) if usuario.tenant_id else None
+async def dejar_de_monitorear(session: AsyncSession = Depends(get_session), usuario: User = Depends(usuario_actual)):
+    m = await monitoreo.de_supervisor(session, usuario.id) if usuario.tenant_id else None
     if m is not None:
-        await monitoreo.detener(m)
+        await monitoreo.detener(session, m)
+        await session.commit()
     return {"ok": True}
 
 

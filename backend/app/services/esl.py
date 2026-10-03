@@ -160,11 +160,15 @@ async def _ensure_event_listener():
         auth_headers = await _read_headers_raw(reader)
         if "+OK accepted" not in auth_headers.get("reply-text", ""):
             raise PermissionError("ESL auth rechazada (event listener)")
+        from app.services.lider import lider
         from app.services.tiempo_real import EVENTOS
 
         # BACKGROUND_JOB para el resultado de los originate; los de canal
-        # para las llamadas en vivo (services/tiempo_real.py).
-        writer.write(f"event plain BACKGROUND_JOB {' '.join(EVENTOS)}\n\n".encode())
+        # para las llamadas en vivo (services/tiempo_real.py), SOLO en la
+        # réplica líder: si dos los procesaran, cada agente cambiaría de
+        # estado dos veces (services/lider.py).
+        canal = f" {' '.join(EVENTOS)}" if lider.es_lider else ""
+        writer.write(f"event plain BACKGROUND_JOB{canal}\n\n".encode())
         await writer.drain()
         await _read_headers_raw(reader)  # command/reply del "event"
         _event_reader, _event_writer = reader, writer
@@ -183,7 +187,10 @@ async def _event_loop(reader: asyncio.StreamReader):
                 continue
             event_headers, _, result = body.partition("\n\n")
             if "\nEvent-Name: BACKGROUND_JOB\n" not in f"\n{event_headers}\n":
-                await _a_tiempo_real(event_headers)
+                from app.services.lider import lider
+
+                if lider.es_lider:
+                    await _a_tiempo_real(event_headers)
                 continue
             job_uuid = None
             for line in event_headers.split("\n"):
@@ -233,6 +240,16 @@ async def _a_tiempo_real(cabeceras: str) -> None:
         await monitoreo.recibir(ev)
     except Exception:
         logger.exception("Evento de canal no procesado por el monitoreo")
+
+
+async def cerrar_eventos() -> None:
+    """Cierra la conexión de eventos (al ganar o perder el liderazgo: la
+    próxima se abre con la suscripción que corresponda)."""
+    global _event_writer
+    async with _event_listener_lock:
+        if _event_writer is not None:
+            _event_writer.close()
+        _event_writer = None
 
 
 async def asegurar_eventos() -> None:

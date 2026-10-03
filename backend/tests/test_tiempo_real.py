@@ -318,8 +318,10 @@ async def test_la_conexion_de_eventos_reparte_canales_y_resultados(monkeypatch, 
     (BACKGROUND_JOB) y los eventos de canal: cada uno a su destino, y al
     cerrarse el socket el tablero se vacía."""
     from app.services import esl, tiempo_real as modulo
+    from app.services.lider import lider
 
     monkeypatch.setattr(modulo, "tiempo_real", rt)
+    monkeypatch.setattr(lider, "es_lider", True)
     cola = rt.suscribir(mundo.alfa.id)
     futuro = asyncio.get_running_loop().create_future()
     monkeypatch.setitem(esl._pending_jobs, "job-1", futuro)
@@ -343,3 +345,30 @@ async def test_la_conexion_de_eventos_reparte_canales_y_resultados(monkeypatch, 
     assert [m.get("evento") for m in mensajes] == ["nueva", "contesta", None]
     assert mensajes[0]["llamada"]["a"] == "300 555"
     assert mensajes[-1]["tipo"] == "reinicio"
+
+
+
+async def test_una_replica_que_no_es_lider_ignora_los_eventos_de_canal(monkeypatch, rt, mundo):
+    """Solo la líder los procesa (services/lider.py); la otra igual recibe
+    el resultado de sus propios originate."""
+    from app.services import esl, tiempo_real as modulo
+    from app.services.lider import lider
+
+    monkeypatch.setattr(modulo, "tiempo_real", rt)
+    monkeypatch.setattr(lider, "es_lider", False)
+    cola = rt.suscribir(mundo.alfa.id)
+    futuro = asyncio.get_running_loop().create_future()
+    monkeypatch.setitem(esl._pending_jobs, "job-2", futuro)
+
+    def trama(cuerpo: str) -> bytes:
+        datos = cuerpo.encode()
+        return f"Content-Length: {len(datos)}\nContent-Type: text/event-plain\n\n".encode() + datos
+
+    lector = asyncio.StreamReader()
+    lector.feed_data(trama(f"Event-Name: CHANNEL_CREATE\nUnique-ID: k9\nvariable_nspbx_tenant_id: {mundo.alfa.id}\n\n"))
+    lector.feed_data(trama("Event-Name: BACKGROUND_JOB\nJob-UUID: job-2\nContent-Length: 4\n\n+OK\n"))
+    lector.feed_eof()
+    await esl._event_loop(lector)
+    assert futuro.result() == "+OK"
+    assert _vaciar(cola) == []  # ni el canal ni un «reinicio»: nunca tuvo llamadas
+    assert rt.llamadas(mundo.alfa.id) == []

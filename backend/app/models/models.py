@@ -472,6 +472,9 @@ class SystemSettings(Base):
 
 class CallLog(Base):
     __tablename__ = "call_logs"
+    # Reportes por campaña y rango (services/reportes.py). El de empresa y
+    # fecha lo crea main._COLUMN_PATCHES desde antes.
+    __table_args__ = (Index("ix_call_logs_campana_inicio", "campaign_id", "started_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = _tenant_fk()
@@ -1249,6 +1252,7 @@ class SesionAgente(Base):
     """Una jornada del agente: desde que entra hasta que sale."""
 
     __tablename__ = "sesiones_agente"
+    __table_args__ = (Index("ix_sesiones_agente_tenant_inicio", "tenant_id", "inicio"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = _tenant_fk()
@@ -1265,6 +1269,7 @@ class EstadoAgente(Base):
     (listo, pausa por código, en llamada, disposición) salen de acá."""
 
     __tablename__ = "estados_agente"
+    __table_args__ = (Index("ix_estados_agente_tenant_inicio", "tenant_id", "inicio"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = _tenant_fk()
@@ -1428,4 +1433,26 @@ class ReporteProgramado(Base):
     ultimo_periodo: Mapped[str | None] = mapped_column(String(30), nullable=True)
     ultimo_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     creado_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MonitoreoVivo(Base):
+    """Un supervisor escuchando, susurrando o interviniendo a un agente
+    (services/supervision.py). En la base y no en memoria: la petición la
+    puede atender cualquier réplica y los eventos los procesa la líder."""
+
+    __tablename__ = "monitoreos"
+    __table_args__ = (
+        UniqueConstraint("agente_id", name="ux_monitoreos_agente"),
+        UniqueConstraint("supervisor_id", name="ux_monitoreos_supervisor"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    uuid: Mapped[str] = mapped_column(String(64), unique=True)
+    supervisor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    agente_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    modo: Mapped[str] = mapped_column(String(12))
+    token: Mapped[str] = mapped_column(String(64))
+    contestado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

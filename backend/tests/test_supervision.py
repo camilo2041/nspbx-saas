@@ -13,12 +13,12 @@ import asyncio
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from app.core import permissions
 from app.core.database import async_session, sesion_de_empresa
 from app.core.security import crear_token, hash_password
-from app.models import AgenteVivo, Campaign, CodigoPausa, Extension, Tenant, TokenWallboard, User
+from app.models import AgenteVivo, Campaign, CodigoPausa, Extension, MonitoreoVivo, Tenant, TokenWallboard, User
 from app.services import agentes, esl, predictivo, supervision
 from app.services.supervision import monitoreo
 
@@ -51,11 +51,22 @@ def fs(monkeypatch):
     return FSConSalas(monkeypatch)
 
 
+async def _borrar_monitores():
+    async with async_session() as s:
+        await s.execute(delete(MonitoreoVivo))
+        await s.commit()
+
+
 @pytest.fixture(autouse=True)
-def _sin_monitores():
-    monitoreo.activos.clear()
+async def _sin_monitores():
+    await _borrar_monitores()
     yield
-    monitoreo.activos.clear()
+    await _borrar_monitores()
+
+
+async def _monitores() -> list[MonitoreoVivo]:
+    async with async_session() as s:
+        return list((await s.execute(select(MonitoreoVivo))).scalars())
 
 
 async def _usuario(papa, rol, extension=None):  # noqa: F811
@@ -204,10 +215,11 @@ async def test_sacar_pide_confirmar_si_hay_llamada(cliente, papa, fs, sup):  # n
 
 
 async def _supervisor_contesta(papa, fs, sala, agente_audio):  # noqa: F811
-    monitor = next(iter(monitoreo.activos.values()))
+    monitor = (await _monitores())[0]
     fs.salas[sala] = [agente_audio, monitor.uuid]
     await monitoreo.recibir({"Event-Name": "CHANNEL_ANSWER", "Unique-ID": monitor.uuid,
                              "variable_nspbx_supervisor": "1", "variable_nspbx_tenant_id": str(papa["tenant"])})
+    assert (await _monitores())[0].contestado
     return monitor
 
 
@@ -264,6 +276,7 @@ async def test_un_cliente_que_entra_durante_el_susurro_tampoco_lo_oye(papa, fs, 
     async with sesion_de_empresa(papa["tenant"]) as s:
         yo_sup = (await s.execute(select(User).where(User.id == sup["id"]))).unique().scalar_one()
         await monitoreo.iniciar(s, yo_sup, agente, "susurrar")
+        await s.commit()
     monitor = await _supervisor_contesta(papa, fs, sala, audio)
     yo = fs.miembro(sala, monitor.uuid)
     assert fs.api[-1] == f"conference {sala} unmute {yo}"  # sin cliente todavía: habla con el agente
@@ -306,9 +319,10 @@ async def test_reglas_del_monitoreo(cliente, papa, fs, sup):  # noqa: F811
     r = await cliente.post(url, headers=_cab(papa, otro, permissions.ADMIN), json={"modo": "escuchar"})
     assert r.status_code == 409
     # Si el supervisor cuelga desde su teléfono, deja de figurar.
-    m = next(iter(monitoreo.activos.values()))
-    await monitoreo.recibir({"Event-Name": "CHANNEL_HANGUP_COMPLETE", "Unique-ID": m.uuid, "variable_nspbx_supervisor": "1"})
-    assert not monitoreo.activos
+    m = (await _monitores())[0]
+    await monitoreo.recibir({"Event-Name": "CHANNEL_HANGUP_COMPLETE", "Unique-ID": m.uuid, "variable_nspbx_supervisor": "1",
+                             "variable_nspbx_tenant_id": str(papa["tenant"])})
+    assert await _monitores() == []
 
 
 # --- Campañas en caliente --------------------------------------------------------------------------------
@@ -393,3 +407,19 @@ def test_leer_miembros_de_la_conferencia():
         {"id": "2", "uuid": "bbb-2", "flags": "hear"},
     ]
     assert supervision.leer_miembros("-ERR Conference agente_1_2 not found") == []
+
+
+async def test_dos_replicas_no_pueden_poner_dos_supervisores_al_mismo_agente(papa, sup):  # noqa: F811
+    """La regla «uno por agente» la garantiza la base, no la memoria de una
+    réplica: dos pedidos simultáneos en réplicas distintas no pasan los dos."""
+    from sqlalchemy.exc import IntegrityError
+
+    otro = await _usuario(papa, permissions.ADMIN, "296")
+    agente = papa["agentes"][0]
+    async with sesion_de_empresa(papa["tenant"]) as s1, sesion_de_empresa(papa["tenant"]) as s2:
+        s1.add(MonitoreoVivo(tenant_id=papa["tenant"], uuid="r1", supervisor_id=sup["id"], agente_id=agente, modo="escuchar", token="t1"))
+        s2.add(MonitoreoVivo(tenant_id=papa["tenant"], uuid="r2", supervisor_id=otro, agente_id=agente, modo="escuchar", token="t2"))
+        await s1.commit()
+        with pytest.raises(IntegrityError):
+            await s2.commit()
+    assert [m.uuid for m in await _monitores()] == ["r1"]

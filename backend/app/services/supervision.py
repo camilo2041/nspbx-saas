@@ -34,10 +34,12 @@ import uuid as uuidlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 
 from app.core import validacion
-from app.models import AgenteVivo, Campaign, CampaignNumber, CodigoPausa, MetricaCampana, User
+from app.core.database import async_session
+from app.models import AgenteVivo, Campaign, CampaignNumber, CodigoPausa, MetricaCampana, MonitoreoVivo, User
 from app.core.clock import now_local
 from app.services import agentes, esl, predictivo
 
@@ -75,12 +77,13 @@ async def agentes_en_vivo(session) -> list[dict]:
     }
     pausas = {p.id: p for p in (await session.execute(select(CodigoPausa))).scalars()}
     campanas = dict((await session.execute(select(Campaign.id, Campaign.name))).all())
+    monitores = await monitoreo.por_agente(session)
     filas = []
     for v in vivos:
         u = usuarios.get(v.user_id)
         pausa = pausas.get(v.codigo_pausa_id) if v.estado == agentes.PAUSA and v.codigo_pausa_id else None
         en_estado = _segundos(v.desde, ahora)
-        mon = monitoreo.de_agente(v.tenant_id, v.user_id)
+        mon = monitores.get(v.user_id)
         filas.append({
             "user_id": v.user_id,
             "nombre": (u.full_name or u.username) if u else f"#{v.user_id}",
@@ -104,10 +107,6 @@ async def agentes_en_vivo(session) -> list[dict]:
     orden = {agentes.EN_LLAMADA: 0, agentes.TIMBRANDO: 1, agentes.DISPO: 2, agentes.PREVIA: 3, agentes.LISTO: 4, agentes.PAUSA: 5}
     filas.sort(key=lambda f: (orden.get(f["estado"], 9), f["nombre"].lower()))
     return filas
-
-
-def _redondear(valor: float | None, digitos: int = 1) -> float | None:
-    return round(valor, digitos) if valor is not None else None
 
 
 async def campanas_en_vivo(session, agentes_vivos: list[dict] | None = None) -> list[dict]:
@@ -146,7 +145,6 @@ async def campanas_en_vivo(session, agentes_vivos: list[dict] | None = None) -> 
             )
         ).scalars()
     }
-    reloj = predictivo.motor.reloj()
     filas = []
     for c in campanas:
         suyos = [a for a in agentes_vivos if any(x["id"] == c.id for x in a["campanas"])]
@@ -180,21 +178,9 @@ async def campanas_en_vivo(session, agentes_vivos: list[dict] | None = None) -> 
             "ultimos_15": None,
         }
         if c.metodo in predictivo.METODOS:
-            ventana = predictivo.motor.ventana(c.id)
-            ventana._limpiar(reloj)
-            resueltas = len(ventana.resueltas)
-            datos["llamadas"] = {
-                "timbrando": len(predictivo.motor.de_campana(c.id, "timbrando")),
-                "en_espera": len(predictivo.motor.de_campana(c.id, "espera")),
-            }
-            datos["ultimos_15"] = {
-                # Sin la previa del motor: acá se muestra lo observado.
-                "contacto_pct": _redondear(100.0 * len(ventana.contestadas) / resueltas) if resueltas else None,
-                "abandono_pct": _redondear(ventana.abandono(reloj)),
-                "ring_s": _redondear(ventana._promedio(ventana.rings, None)),
-                "aht_s": _redondear(ventana._promedio(ventana.conversaciones, None), 0),
-                "espera_agente_s": _redondear(ventana.espera_agente(reloj)),
-            }
+            foto = predictivo.instantanea(c.id)
+            datos["llamadas"] = {"timbrando": foto["timbrando"], "en_espera": foto["en_espera"]}
+            datos["ultimos_15"] = foto["ultimos_15"]
         filas.append(datos)
     return filas
 
@@ -273,7 +259,7 @@ async def sacar(session, user_id: int, cortar_llamada: bool = False) -> None:
     vivo = await _vivo(session, user_id)
     if vivo.estado in agentes.EN_CURSO and not cortar_llamada:
         raise ErrorSupervision("El agente está en una llamada: confirma que quieres cortarla")
-    await monitoreo.cerrar_sala(vivo.tenant_id, vivo.user_id)
+    await monitoreo.cerrar_sala(session, vivo.user_id)
     await agentes.salir(session, vivo, "supervisor", forzar=True)
 
 
@@ -307,15 +293,31 @@ def leer_miembros(texto: str) -> list[dict]:
     return miembros
 
 
+def _snap(f: MonitoreoVivo) -> Monitor:
+    return Monitor(f.uuid, f.tenant_id, f.supervisor_id, f.agente_id, f.modo, f.token, bool(f.contestado), f.created_at)
+
+
 class Monitoreo:
-    def __init__(self):
-        self.activos: dict[str, Monitor] = {}  # uuid de la pata del supervisor → monitor
+    """Las escuchas en curso viven en la tabla `monitoreos` (una por agente y
+    una por supervisor, garantizado por la base aunque dos réplicas reciban
+    el pedido a la vez)."""
 
-    def de_supervisor(self, tenant_id: int, supervisor_id: int) -> Monitor | None:
-        return next((m for m in self.activos.values() if m.tenant_id == tenant_id and m.supervisor_id == supervisor_id), None)
+    async def _fila(self, session, **filtro) -> MonitoreoVivo | None:
+        q = select(MonitoreoVivo)
+        for clave, valor in filtro.items():
+            q = q.where(getattr(MonitoreoVivo, clave) == valor)
+        return (await session.execute(q.limit(1))).scalar_one_or_none()
 
-    def de_agente(self, tenant_id: int, agente_id: int) -> Monitor | None:
-        return next((m for m in self.activos.values() if m.tenant_id == tenant_id and m.agente_id == agente_id), None)
+    async def de_supervisor(self, session, supervisor_id: int) -> Monitor | None:
+        f = await self._fila(session, supervisor_id=supervisor_id)
+        return _snap(f) if f else None
+
+    async def de_agente(self, session, agente_id: int) -> Monitor | None:
+        f = await self._fila(session, agente_id=agente_id)
+        return _snap(f) if f else None
+
+    async def por_agente(self, session) -> dict[int, Monitor]:
+        return {f.agente_id: _snap(f) for f in (await session.execute(select(MonitoreoVivo))).scalars()}
 
     async def iniciar(self, session, supervisor: User, agente_id: int, modo: str) -> Monitor:
         if modo not in MODOS:
@@ -327,21 +329,29 @@ class Monitoreo:
         vivo = await _vivo(session, agente_id)
         if not vivo.audio:
             raise ErrorSupervision("El audio del agente no está conectado: no hay sala que escuchar")
-        actual = self.de_supervisor(supervisor.tenant_id, supervisor.id)
+        actual = await self.de_supervisor(session, supervisor.id)
         if actual is not None and actual.agente_id == agente_id:
-            await self.cambiar_modo(actual, modo)
+            await self.cambiar_modo(session, actual, modo)
             return actual
         if actual is not None:
-            await self.detener(actual)
-        otro = self.de_agente(supervisor.tenant_id, agente_id)
-        if otro is not None:
+            await self.detener(session, actual)
+        if await self.de_agente(session, agente_id) is not None:
             raise ErrorSupervision("Otro supervisor ya está monitoreando a este agente")
         if not supervisor.extension:
             raise ErrorSupervision("Necesitas una extensión asignada para monitorear", 400)
         extension = validacion.exigir(validacion.EXTENSION_RE, supervisor.extension.number, "Extensión")
         dominio = await agentes._dominio(session, supervisor.tenant_id)
         nombre_agente = (await session.execute(select(User.full_name).where(User.id == agente_id))).scalar_one_or_none()
-        monitor = Monitor(str(uuidlib.uuid4()), supervisor.tenant_id, supervisor.id, agente_id, modo, secrets.token_hex(16))
+        fila = MonitoreoVivo(tenant_id=supervisor.tenant_id, uuid=str(uuidlib.uuid4()), supervisor_id=supervisor.id,
+                             agente_id=agente_id, modo=modo, token=secrets.token_hex(16), contestado=False)
+        session.add(fila)
+        try:
+            await session.flush()
+        except IntegrityError:
+            # Otro supervisor lo tomó en el mismo instante (quizá en otra réplica).
+            await session.rollback()
+            raise ErrorSupervision("Otro supervisor ya está monitoreando a este agente")
+        monitor = _snap(fila)
         variables = agentes._vars({
             "origination_uuid": monitor.uuid,
             "nspbx_tenant_id": str(supervisor.tenant_id),
@@ -351,7 +361,6 @@ class Monitoreo:
             "origination_caller_id_number": "0",
             "call_timeout": "30",
         })
-        self.activos[monitor.uuid] = monitor
         # Entra muteado; el modo se aplica al contestar (ver docstring).
         await esl.bgapi(
             f"originate {{{variables}}}user/{extension}@{dominio} "
@@ -359,21 +368,33 @@ class Monitoreo:
         )
         return monitor
 
-    async def cambiar_modo(self, monitor: Monitor, modo: str) -> None:
+    async def cambiar_modo(self, session, monitor: Monitor, modo: str) -> None:
         if modo not in MODOS:
             raise ErrorSupervision("Modo inválido", 400)
-        monitor.modo = modo
-        if monitor.contestado:
+        fila = await self._fila(session, uuid=monitor.uuid)
+        if fila is None:
+            raise ErrorSupervision("Esa escucha ya terminó", 404)
+        fila.modo = monitor.modo = modo
+        await session.flush()
+        if fila.contestado:
             await self.aplicar(monitor)
 
-    async def detener(self, monitor: Monitor) -> None:
-        self.activos.pop(monitor.uuid, None)
+    async def detener(self, session, monitor: Monitor) -> None:
+        fila = await self._fila(session, uuid=monitor.uuid)
+        if fila is not None:
+            await session.delete(fila)
+            await session.flush()
         await agentes._matar(monitor.uuid)
 
-    async def cerrar_sala(self, tenant_id: int, agente_id: int) -> None:
-        monitor = self.de_agente(tenant_id, agente_id)
+    async def cerrar_sala(self, session, agente_id: int) -> None:
+        monitor = await self.de_agente(session, agente_id)
         if monitor is not None:
-            await self.detener(monitor)
+            await self.detener(session, monitor)
+
+    async def _sigue(self, monitor: Monitor) -> Monitor | None:
+        async with _sesion(monitor.tenant_id) as session:
+            f = await self._fila(session, uuid=monitor.uuid)
+            return _snap(f) if f else None
 
     async def _miembros(self, sala: str) -> list[dict]:
         validacion.exigir(validacion.NOMBRE_RE, sala, "sala")
@@ -414,19 +435,22 @@ class Monitoreo:
         """Tras entrar un cliente: reintenta hasta verlo en la sala. Si nunca
         aparece (colgó antes), aplica igual para no dejar mudo al supervisor."""
         for _ in range(_REINTENTOS_CLIENTE):
-            if monitor.uuid not in self.activos:
+            actual = await self._sigue(monitor)
+            if actual is None:
                 return
-            if await self._aplicar_seguro(monitor, esperar_cliente=True):
+            if await self._aplicar_seguro(actual, esperar_cliente=True):
                 return
             await asyncio.sleep(_PAUSA_REINTENTO_S)
-        if monitor.uuid in self.activos:
-            await self._aplicar_seguro(monitor)
+        actual = await self._sigue(monitor)
+        if actual is not None:
+            await self._aplicar_seguro(actual)
 
     async def antes_de_cliente(self, tenant_id: int, agente_id: int) -> asyncio.Task | None:
         """Un cliente va a entrar a la sala de un agente al que se le está
         susurrando: se mutea al supervisor ANTES de que entre y se le vuelve a
         abrir cuando el cliente ya quedó sin oírlo."""
-        monitor = self.de_agente(tenant_id, agente_id)
+        async with _sesion(tenant_id) as session:
+            monitor = await self.de_agente(session, agente_id)
         if monitor is None or not monitor.contestado or monitor.modo != "susurrar":
             return None
         try:
@@ -440,24 +464,41 @@ class Monitoreo:
     async def recibir(self, ev: dict[str, str]) -> None:
         nombre = ev.get("Event-Name")
         uuid = ev.get("Unique-ID") or ""
+        try:
+            tid = int(ev.get("variable_nspbx_tenant_id") or 0)
+        except ValueError:
+            return
         if ev.get("variable_nspbx_supervisor"):
-            monitor = self.activos.get(uuid)
-            if monitor is None:
+            if not tid or nombre not in ("CHANNEL_ANSWER", "CHANNEL_HANGUP_COMPLETE"):
                 return
-            if nombre == "CHANNEL_ANSWER":
-                monitor.contestado = True
-                await self._aplicar_seguro(monitor)
-            elif nombre == "CHANNEL_HANGUP_COMPLETE":
-                self.activos.pop(uuid, None)
+            async with _sesion(tid) as session:
+                fila = await self._fila(session, uuid=uuid)
+                if fila is None:
+                    return
+                if nombre == "CHANNEL_HANGUP_COMPLETE":
+                    await session.delete(fila)
+                    await session.commit()
+                    return
+                fila.contestado = True
+                monitor = _snap(fila)
+                await session.commit()
+            await self._aplicar_seguro(monitor)
             return
         # Marcación manual y progresiva: el cliente entra a la sala al
         # contestar. (El predictivo avisa desde su motor, antes de pasarlo.)
-        if nombre == "CHANNEL_ANSWER" and ev.get("variable_nspbx_agente_id") and not ev.get("variable_nspbx_pred"):
+        if nombre == "CHANNEL_ANSWER" and ev.get("variable_nspbx_agente_id") and not ev.get("variable_nspbx_pred") and tid:
             try:
-                tid, agente_id = int(ev.get("variable_nspbx_tenant_id") or 0), int(ev["variable_nspbx_agente_id"])
+                agente_id = int(ev["variable_nspbx_agente_id"])
             except ValueError:
                 return
             await self.antes_de_cliente(tid, agente_id)
+
+    async def limpiar_todo(self) -> None:
+        """Al tomar el liderazgo: las escuchas de antes no tienen eventos
+        confiables (sus patas se cortan con la sala del agente)."""
+        async with async_session() as dueno:
+            await dueno.execute(delete(MonitoreoVivo))
+            await dueno.commit()
 
 
 def _sesion(tenant_id: int):

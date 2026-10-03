@@ -30,8 +30,10 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import agentes, integraciones, predictivo, reportes_programados, tiempo_real, voice_prompts, xml_endpoints
+from app.services import agentes, esl, integraciones, predictivo, reportes_programados, supervision, tiempo_real, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
+from app.services.bus import bus
+from app.services.lider import lider
 from app.services.queues_sync import apply_queues
 from app.workers.dialer import dialer
 from app.workers.maintenance import maintenance
@@ -359,6 +361,7 @@ _TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
     "webhooks",
     "entregas_webhook",
     "reportes_programados",
+    "monitoreos",
 ]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
@@ -628,40 +631,64 @@ async def lifespan(app: FastAPI):
         # recargar el módulo al arrancar el backend.
         queues_rows = (await session.execute(select(Queue))).scalars().all()
         await apply_queues(queues_rows, dominios)
-        # Números que quedaron en "dialing" por un reinicio/caída previa del
-        # backend nunca vuelven a "pending" solos (las tareas de _dial se
-        # cancelan sin llegar a su bloque finally) — quedarían excluidos de
-        # por vida del ciclo de marcado. Se recuperan al arrancar.
-        await session.execute(
-            update(CampaignNumber).where(CampaignNumber.status == "dialing").values(status="pending")
-        )
         await session.commit()
         await _asegurar_admin(session)
         await _asegurar_plataforma(session)
         for t in tenantes_rows:
             await voice_prompts.ensure_prompts(session, t.id)
-    dialer.start()
-    maintenance.start()
-    # Llamadas en vivo (services/tiempo_real.py): conexión de eventos de ESL
-    # abierta desde el arranque, no recién con el primer originate.
-    eventos = asyncio.create_task(tiempo_real.mantener_conexion())
-    # Agentes: las sesiones de antes del reinicio no tienen audio ni
-    # eventos confiables; el agente vuelve a entrar. Después, el progresivo.
-    await agentes.cerrar_todas()
-    agentes.motor.start()
-    predictivo.motor.start()
-    # Webhooks hacia los CRM (services/integraciones.py): la cola sobrevive
-    # al reinicio porque vive en la base.
-    integraciones.repartidor.start()
-    reportes_programados.programador.start()
+    # Lo que hace UNA sola réplica (services/lider.py): marcar, procesar los
+    # eventos de FreeSWITCH, webhooks, reportes y mantenimiento. Con una
+    # réplica, toma el liderazgo acá mismo; con varias, la que no lo tiene
+    # atiende HTTP y queda esperando por si el líder cae.
+    tareas: dict[str, asyncio.Task] = {}
+
+    async def ascender() -> None:
+        async with async_session() as s:
+            # Números que quedaron en "dialing" por una caída del líder anterior
+            # nunca vuelven a "pending" solos (las tareas de _dial se cancelan sin
+            # llegar a su bloque finally). Solo el líder: otra réplica que arranca
+            # le pisaría las llamadas en curso.
+            await s.execute(update(CampaignNumber).where(CampaignNumber.status == "dialing").values(status="pending"))
+            await s.commit()
+        # La conexión de eventos que tuviera como seguidora era solo de
+        # BACKGROUND_JOB: se reabre con los de canal.
+        await esl.cerrar_eventos()
+        dialer.start()
+        maintenance.start()
+        # Llamadas en vivo (services/tiempo_real.py): conexión de eventos de ESL
+        # abierta desde el arranque, no recién con el primer originate.
+        tareas["eventos"] = asyncio.create_task(tiempo_real.mantener_conexion())
+        # Agentes: las sesiones de antes no tienen audio ni eventos confiables
+        # (reinicio o cambio de líder); el agente vuelve a entrar.
+        await agentes.cerrar_todas()
+        await supervision.monitoreo.limpiar_todo()
+        agentes.motor.start()
+        predictivo.motor.start()
+        # Webhooks hacia los CRM (services/integraciones.py): la cola sobrevive
+        # al reinicio porque vive en la base.
+        integraciones.repartidor.start()
+        reportes_programados.programador.start()
+
+    async def descender() -> None:
+        await reportes_programados.programador.stop()
+        await integraciones.repartidor.stop()
+        await predictivo.motor.stop()
+        await agentes.motor.stop()
+        if "eventos" in tareas:
+            tareas.pop("eventos").cancel()
+        await esl.cerrar_eventos()
+        await dialer.stop()
+        await maintenance.stop()
+
+    # Mensajes entre réplicas (tiempo real, permisos, foto del predictivo):
+    # en todas, sean líder o no (services/bus.py).
+    await bus.start()
+    lider.al_ascender, lider.al_descender = ascender, descender
+    await lider.intentar()
+    lider.start()
     yield
-    await reportes_programados.programador.stop()
-    await integraciones.repartidor.stop()
-    await predictivo.motor.stop()
-    await agentes.motor.stop()
-    eventos.cancel()
-    await dialer.stop()
-    await maintenance.stop()
+    await lider.stop()
+    await bus.stop()
     await engine.dispose()
 
 

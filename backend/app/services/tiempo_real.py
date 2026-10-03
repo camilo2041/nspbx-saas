@@ -123,6 +123,34 @@ class TiempoReal:
                 self._subs.pop(tenant_id, None)
 
     def publicar(self, tenant_id: int, mensaje: dict) -> None:
+        """A los suscriptores de esta réplica y, por el bus, a los de las
+        demás (services/bus.py)."""
+        self._entregar(tenant_id, mensaje)
+        from app.services.bus import bus
+
+        bus.emitir_pronto("tr", {"tenant": tenant_id, "m": mensaje})
+
+    def desde_otra_replica(self, datos: dict) -> None:
+        """Un mensaje que publicó otra réplica: se entrega acá y, si es de una
+        llamada, se refleja en el estado local (para la foto inicial de los
+        que se conectan a esta réplica)."""
+        try:
+            tenant_id, mensaje = int(datos["tenant"]), datos["m"]
+        except (KeyError, TypeError, ValueError):
+            return
+        if mensaje.get("tipo") == "llamada":
+            llamada = mensaje.get("llamada") or {}
+            uuid = llamada.get("uuid")
+            if uuid and mensaje.get("evento") == "cuelga":
+                self._canales.pop(uuid, None)
+            elif uuid:
+                self._canales[uuid] = {**llamada, "tenant_id": tenant_id, "_visto": time.monotonic()}
+        elif mensaje.get("tipo") == "reinicio":
+            for u in [u for u, c in self._canales.items() if c["tenant_id"] == tenant_id]:
+                self._canales.pop(u, None)
+        self._entregar(tenant_id, mensaje)
+
+    def _entregar(self, tenant_id: int, mensaje: dict) -> None:
         for cola in list(self._subs.get(tenant_id, ())):
             if cola.full():
                 # Un cliente lento no frena a los demás ni hace crecer la
@@ -232,6 +260,15 @@ class TiempoReal:
 
 
 tiempo_real = TiempoReal()
+
+
+def _registrar_en_bus() -> None:
+    from app.services.bus import bus
+
+    bus.registrar("tr", tiempo_real.desde_otra_replica)
+
+
+_registrar_en_bus()
 
 
 async def mantener_conexion(cada_s: float = 5.0) -> None:

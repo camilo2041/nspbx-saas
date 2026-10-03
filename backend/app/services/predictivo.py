@@ -265,6 +265,9 @@ class Motor:
         # tras un reinicio vuelve a FACTOR_INICIAL, que es conservador.
         self.factores: dict[int, float] = {}
         self._ultimo_ajuste: dict[int, float] = {}
+        # Empresa de cada campaña que pasó por el motor (para la foto por empresa).
+        self.tenants: dict[int, int] = {}
+        self._ultima_foto = 0.0
         self._tarea: asyncio.Task | None = None
 
     def ventana(self, campaign_id: int) -> Ventana:
@@ -296,6 +299,12 @@ class Motor:
                 raise
             except Exception:
                 logger.exception("Error en el ciclo predictivo")
+            if time.monotonic() - self._ultima_foto >= INTERVALO_FOTO_S:
+                self._ultima_foto = time.monotonic()
+                try:
+                    publicar_fotos()
+                except Exception:
+                    logger.exception("No se pudo publicar la foto del predictivo")
             await asyncio.sleep(0.5)
 
     async def ciclo(self) -> int:
@@ -321,6 +330,7 @@ class Motor:
         campana = await session.get(Campaign, campaign_id)
         if campana is None or campana.status != "running" or campana.metodo not in METODOS:
             return 0
+        self.tenants[campaign_id] = campana.tenant_id
         ahora = self.reloj()
         ventana = self.ventana(campaign_id)
         vivos = [v for v in (await session.execute(select(AgenteVivo))).scalars() if campaign_id in (v.campanas or [])]
@@ -513,6 +523,86 @@ class Motor:
 
 
 motor = Motor()
+
+
+# --- La foto para las demás réplicas (docs/escala.md) ---------------------------------
+# El motor corre solo en la réplica líder (services/lider.py). Las demás
+# muestran lo que la líder publica por el bus cada INTERVALO_FOTO_S.
+
+INTERVALO_FOTO_S = 2.0
+VIGENCIA_FOTO_S = 10.0
+_fotos: dict[int, tuple[float, dict]] = {}  # campaign_id → (cuándo llegó, datos)
+
+
+def _r(v: float | None, digitos: int = 1) -> float | None:
+    return round(v, digitos) if v is not None else None
+
+
+def _foto_local(campaign_id: int) -> dict:
+    ahora = motor.reloj()
+    v = motor.ventana(campaign_id)
+    v._limpiar(ahora)
+    resueltas = len(v.resueltas)
+    return {
+        "timbrando": len(motor.de_campana(campaign_id, "timbrando")),
+        "en_espera": len(motor.de_campana(campaign_id, "espera")),
+        "ultimos_15": {
+            # Sin la previa del motor: lo observado.
+            "contacto_pct": _r(100.0 * len(v.contestadas) / resueltas) if resueltas else None,
+            "abandono_pct": _r(v.abandono(ahora)),
+            "ring_s": _r(v._promedio(v.rings, None)),
+            "aht_s": _r(v._promedio(v.conversaciones, None), 0),
+            "espera_agente_s": _r(v.espera_agente(ahora)),
+        },
+    }
+
+
+def instantanea(campaign_id: int) -> dict:
+    """Llamadas en curso y métricas de 15 min de una campaña, en cualquier
+    réplica: la líder las calcula; las demás usan la última foto recibida."""
+    from app.services.lider import lider
+
+    if lider.es_lider or campaign_id in motor.ventanas or motor.de_campana(campaign_id):
+        return _foto_local(campaign_id)
+    foto = _fotos.get(campaign_id)
+    if foto and time.monotonic() - foto[0] < VIGENCIA_FOTO_S:
+        return foto[1]
+    return _foto_local(campaign_id)  # vacía
+
+
+def publicar_fotos() -> int:
+    """La líder manda la foto de sus campañas activas, una por empresa."""
+    from app.services.bus import bus
+
+    activas = set(motor.ventanas) | {ll.campaign_id for ll in motor.llamadas.values()}
+    por_empresa: dict[int, dict] = {}
+    tenant_de = {ll.campaign_id: ll.tenant_id for ll in motor.llamadas.values()}
+    tenant_de.update(motor.tenants)
+    for cid in activas:
+        tid = tenant_de.get(cid)
+        if tid is not None:
+            por_empresa.setdefault(tid, {})[str(cid)] = _foto_local(cid)
+    for tid, campanas in por_empresa.items():
+        bus.emitir_pronto("pred", {"tenant": tid, "campanas": campanas})
+    return len(por_empresa)
+
+
+def _foto_de_otra_replica(datos: dict) -> None:
+    ahora = time.monotonic()
+    for cid, foto in (datos or {}).get("campanas", {}).items():
+        try:
+            _fotos[int(cid)] = (ahora, foto)
+        except ValueError:
+            continue
+
+
+def _registrar_en_bus() -> None:
+    from app.services.bus import bus
+
+    bus.registrar("pred", _foto_de_otra_replica)
+
+
+_registrar_en_bus()
 
 
 # --- Mensaje de abandono ----------------------------------------------------------------

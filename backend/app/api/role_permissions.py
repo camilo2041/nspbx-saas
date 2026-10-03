@@ -131,4 +131,24 @@ async def guardar(
     # oculta. Si se recargara con la sesión de esta empresa, las otras
     # perderían sus personalizaciones hasta el próximo reinicio.
     await recargar_cache(admin_session)
+    # Las demás réplicas también tienen su caché (services/bus.py).
+    from app.services.bus import bus
+
+    bus.emitir_pronto("permisos", {})
     return {"ok": True, "permisos": sorted(permissions.permisos_de(payload.role, usuario.tenant_id))}
+
+
+async def _desde_otra_replica(_datos) -> None:
+    from app.core.database import async_session
+
+    async with async_session() as s:
+        await recargar_cache(s)
+
+
+def _registrar_en_bus() -> None:
+    from app.services.bus import bus
+
+    bus.registrar("permisos", _desde_otra_replica)
+
+
+_registrar_en_bus()

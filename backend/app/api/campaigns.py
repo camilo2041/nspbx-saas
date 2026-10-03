@@ -697,8 +697,7 @@ async def campaign_stats(campaign_id: int, session: AsyncSession = Depends(get_s
         stats.predictivo = {
             **await predictivo.metricas_de_hoy(session, campaign.id),
             "nivel": campaign.nivel_actual or campaign.nivel_marcacion,
-            "timbrando": len(predictivo.motor.de_campana(campaign.id, "timbrando")),
-            "en_espera": len(predictivo.motor.de_campana(campaign.id, "espera")),
+            **{k: v for k, v in predictivo.instantanea(campaign.id).items() if k in ("timbrando", "en_espera")},
         }
     return stats
 
