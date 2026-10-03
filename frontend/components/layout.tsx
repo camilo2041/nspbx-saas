@@ -113,6 +113,16 @@ const GROUPS: NavGroup[] = [
         ),
       },
       {
+        href: "/reportes",
+        label: "Reportes",
+        permiso: PERMISOS.reportes,
+        icon: icon(
+          <>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+          </>
+        ),
+      },
+      {
         href: "/crm",
         label: "Contactos",
         permiso: PERMISOS.crmVer,

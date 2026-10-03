@@ -113,6 +113,8 @@ export interface Campaign {
   temporizador_abandono?: number;
   mensaje_abandono?: string | null;
   audio_abandono?: string | null;
+  /** Plantilla de la URL del CRM con {variables}; la consola la abre firmada. */
+  crm_url?: string | null;
   status: string;
   started_at: string | null;
   finished_at: string | null;
@@ -478,6 +480,7 @@ export const PERMISOS = {
   agente: "agente:operar",
   supervisionVer: "supervision:ver",
   supervisionIntervenir: "supervision:intervenir",
+  reportes: "reportes:ver",
 } as const;
 
 export type Rol = "admin" | "supervisor" | "coordinador" | "asesor" | "plataforma";
@@ -766,6 +769,8 @@ export interface LeadAgente {
   variables: Record<string, string>;
   campana: { id: number; nombre: string; metodo: MetodoCampana } | null;
   guion: string | null;
+  /** Ficha en el CRM de la empresa, ya firmada. */
+  crm_url?: string | null;
   contacto: {
     id: number;
     nombre: string;
@@ -905,4 +910,124 @@ export interface TokenWallboard {
   created_at: string | null;
   /** Solo en la respuesta de crear: no se vuelve a mostrar. */
   token?: string;
+}
+
+// --- Reportes e integraciones (fase 6) ----------------------------------------
+
+export interface PausaReporte {
+  codigo_pausa_id: number | null;
+  nombre: string;
+  veces: number;
+  total_s: number;
+  promedio_s: number | null;
+}
+
+export interface FilaAgenteReporte {
+  user_id: number;
+  nombre: string;
+  sesiones: number;
+  login_s: number;
+  listo_s: number;
+  pausa_s: number;
+  previa_s: number;
+  timbrando_s: number;
+  en_llamada_s: number;
+  dispo_s: number;
+  llamadas: number;
+  aht_s: number | null;
+  ocupacion_pct: number | null;
+  utilizacion_pct: number | null;
+  llamadas_hora: number | null;
+  pausas: PausaReporte[];
+}
+
+export interface FilaCampanaReporte {
+  campaign_id: number;
+  nombre: string;
+  metodo: string | null;
+  intentos: number;
+  contestadas: number;
+  abandonadas: number;
+  ocupado: number;
+  no_contesta: number;
+  fallidas: number;
+  contacto_pct: number | null;
+  abandono_pct: number | null;
+  ring_promedio_s: number | null;
+  aht_s: number | null;
+  contactos: number;
+  ventas: number;
+  promesas: number;
+  conversion_pct: number | null;
+}
+
+export interface FilaDisposicionReporte {
+  grupo_id: number | null;
+  grupo: string;
+  disposicion: string;
+  codigo: string | null;
+  categoria: string | null;
+  cantidad: number;
+  pct: number | null;
+}
+
+export interface Cumplimiento {
+  abandono: {
+    fecha: string;
+    campaign_id: number;
+    campana: string;
+    contestadas: number;
+    abandonadas: number;
+    abandono_pct: number | null;
+    objetivo_pct: number;
+    cumple: boolean;
+  }[];
+  abandono_incumplido: number;
+  fuera_de_horario: { fecha: string; campana: string | null; telefono: string | null; agente_id: number | null }[];
+  fuera_de_horario_total: number;
+  contactos_semana: { telefono: string; semana: string; intentos: number; contestadas: number; campanas: string[] }[];
+  contactos_semana_total: number;
+  max_contactos_semana: number;
+  solo_cobranza: boolean;
+}
+
+export interface ReporteProgramado {
+  id: number;
+  nombre: string;
+  tipo: "agentes" | "campanas" | "disposiciones" | "cumplimiento";
+  frecuencia: "diaria" | "semanal" | "mensual";
+  hora: number;
+  destinatarios: string;
+  filtros: { campaign_id?: number; agrupar?: string; max_contactos_semana?: number; solo_cobranza?: boolean };
+  activo: boolean;
+  ultimo_envio_at: string | null;
+  ultimo_periodo: string | null;
+  ultimo_error: string | null;
+}
+
+export interface WebhookCrm {
+  id: number;
+  nombre: string;
+  url: string;
+  eventos: string[];
+  activo: boolean;
+  fallos_seguidos: number;
+  ultimo_ok_at: string | null;
+  created_at: string;
+  pendientes: number;
+  /** Solo al crear: no se vuelve a mostrar. */
+  secreto?: string;
+}
+
+export interface EntregaWebhook {
+  id: number;
+  webhook_id: number;
+  evento: string;
+  estado: "pendiente" | "ok" | "fallida";
+  intentos: number;
+  proximo_intento_at: string | null;
+  ultimo_codigo: number | null;
+  ultimo_error: string | null;
+  entregado_at: string | null;
+  created_at: string;
 }

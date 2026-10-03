@@ -68,6 +68,7 @@ export interface Campana {
   temporizador_abandono?: number;
   mensaje_abandono?: string | null;
   audio_abandono?: string | null;
+  crm_url?: string | null;
   status: string;
   trunk_name?: string | null;
   voicebot_name?: string | null;
@@ -159,6 +160,14 @@ export function camposCampana(troncales: { id: number; name: string }[], bots: {
       ],
       ayuda:
         "Con agentes, ellos trabajan desde la consola de agente del panel web. Progresivo: una llamada por agente listo. Proporcional: varias por agente, nivel fijo. Predictivo: ajusta solo cuántas lanza para no pasar el abandono objetivo.",
+    },
+    {
+      clave: "crm_url",
+      etiqueta: "URL del CRM (opcional)",
+      placeholder: "https://micrm.com/clientes?tel={telefono}",
+      ayuda:
+        "La consola del agente muestra «Abrir en el CRM» con esta dirección, firmada. Variables: {telefono}, {nombre}, {documento}, {email}, {lead_id}, {contacto_id}, {agente_id}, {llamada_uuid}.",
+      visibleSi: (v) => v.metodo !== "voizbot",
     },
     {
       clave: "nivel_marcacion",
@@ -277,6 +286,7 @@ export function inicialCampana(c?: Campana | null): Record<string, unknown> {
     abandono_objetivo: c?.abandono_objetivo ?? 3,
     temporizador_abandono: c?.temporizador_abandono ?? 2,
     mensaje_abandono: c?.mensaje_abandono ?? "",
+    crm_url: c?.crm_url ?? "",
   };
 }
 
@@ -299,6 +309,7 @@ export function cuerpoCampana(v: Record<string, unknown>) {
     metodo: String(v.metodo || "voizbot"),
     grabacion: String(v.grabacion || "todas"),
     guion: String(v.guion ?? "").trim() || null,
+    ...(String(v.metodo || "voizbot") !== "voizbot" && { crm_url: String(v.crm_url ?? "").trim() }),
     ...(SOBREMARCA.includes(String(v.metodo)) && {
       nivel_marcacion: Number(v.nivel_marcacion) || 1,
       nivel_max: Number(v.nivel_max) || 3,

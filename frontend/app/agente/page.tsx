@@ -388,6 +388,13 @@ export default function ConsolaAgente() {
                   )}
                 </CardBody>
               </Card>
+              {lead.crm_url && (
+                <a href={lead.crm_url} target="_blank" rel="noopener noreferrer" className="block">
+                  <Button variant="secondary" className="w-full">
+                    Abrir en el CRM
+                  </Button>
+                </a>
+              )}
               {lead.guion && (
                 <Card>
                   <CardHeader title="Guion" />

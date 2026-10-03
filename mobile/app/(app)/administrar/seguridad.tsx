@@ -8,6 +8,7 @@ import { Auditoria } from "@/src/Auditoria";
 import { exito, fallo } from "@/src/haptico";
 import { radios, useColores } from "@/src/tema";
 import { Boton, Campo, FilaMenu, Pildora, Seccion } from "@/src/ui";
+import { WebhooksCrm } from "@/src/WebhooksCrm";
 
 interface Bloqueo {
   jail: string;
@@ -368,6 +369,8 @@ export default function Seguridad() {
         {(claves.datos ?? []).some((k) => !k.revoked_at) ? (
           <Text style={{ fontSize: 12, color: c.textoSecundario, marginTop: -4 }}>Toca una clave activa para revocarla.</Text>
         ) : null}
+
+        <WebhooksCrm />
 
         <Auditoria endpoint="/api/security/auditoria" titulo="Registro de auditoría" />
       </Pantalla>

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui";
 import { AuditTable } from "@/components/audit-table";
 import { ClavesApi } from "@/components/claves-api";
+import { WebhooksCrm } from "@/components/webhooks-crm";
 import { PrivacidadTitular } from "@/components/privacidad-titular";
 import { api } from "@/lib/api";
 import { AlertaTrafico } from "@/lib/types";
@@ -247,6 +248,7 @@ export default function SeguridadPage() {
       )}
       <PrivacidadTitular />
       <ClavesApi />
+      <WebhooksCrm />
       <AuditTable
         endpoint="/api/security/auditoria"
         title="Registro de auditoría"

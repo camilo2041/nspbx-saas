@@ -63,6 +63,7 @@ const empty = {
   abandono_objetivo: "3",
   temporizador_abandono: "2",
   mensaje_abandono: "",
+  crm_url: "",
 };
 
 const METODOS: { value: MetodoCampana; label: string }[] = [
@@ -187,6 +188,7 @@ export default function CampaignsPage() {
       abandono_objetivo: String(c.abandono_objetivo ?? 3),
       temporizador_abandono: String(c.temporizador_abandono ?? 2),
       mensaje_abandono: c.mensaje_abandono ?? "",
+      crm_url: c.crm_url ?? "",
     });
     setModal(true);
   };
@@ -212,6 +214,7 @@ export default function CampaignsPage() {
         metodo: form.metodo,
         grabacion: form.grabacion,
         guion: form.guion.trim() || null,
+        ...(form.metodo !== "voizbot" && { crm_url: form.crm_url.trim() }),
         ...(SOBREMARCA.has(form.metodo) && {
           nivel_marcacion: Number(form.nivel_marcacion) || 1,
           nivel_max: Number(form.nivel_max) || 3,
@@ -729,6 +732,30 @@ export default function CampaignsPage() {
                 placeholder="Buenos días, {nombre}. Le habla {agente} de…"
                 hint="Con {variables}: {nombre}, {telefono}, {agente}, los campos propios del contacto y las columnas cargadas con el número."
               />
+              <Input
+                label="URL del CRM (opcional)"
+                value={form.crm_url}
+                mono
+                onChange={(v) => setForm({ ...form, crm_url: v })}
+                placeholder="https://micrm.com/clientes?tel={telefono}&doc={documento}"
+                hint="La consola del agente muestra «Abrir en el CRM» con esta dirección. Variables: {telefono}, {nombre}, {documento}, {email}, {lead_id}, {contacto_id}, {agente_id}, {llamada_uuid} y las columnas del número. Va firmada (nspbx_ts y nspbx_firma)."
+              />
+              {editing && form.crm_url.trim() && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={async () => {
+                    try {
+                      const r = await api.post<{ secreto: string }>(`/api/campaigns/${editing.id}/crm-secreto`, {});
+                      prompt("Secreto para verificar la firma en tu CRM: HMAC-SHA256 de la URL sin «&nspbx_firma=…».", r.secreto);
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : "No se pudo obtener el secreto");
+                    }
+                  }}
+                >
+                  Ver secreto de la firma
+                </Button>
+              )}
             </>
           )}
           <Input
