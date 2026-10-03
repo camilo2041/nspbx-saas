@@ -38,6 +38,10 @@ ESCOPOS = {
     "citas:escribir": "Crear citas",
     "campanas:escribir": "Cargar números a campañas",
     "consumo:leer": "Leer el consumo mensual",
+    "contactos:leer": "Buscar contactos del CRM",
+    "contactos:escribir": "Crear y actualizar contactos del CRM",
+    "leads:leer": "Consultar el estado y la disposición de los leads",
+    "callbacks:escribir": "Agendar volver a llamar a un lead",
 }
 
 _PREFIJO_CLAVE = "nspbx_"

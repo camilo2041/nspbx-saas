@@ -55,7 +55,7 @@ from app.models import (
     Trunk,
     User,
 )
-from app.services import crm, esl, horario_marcacion, hopper, salientes
+from app.services import crm, esl, horario_marcacion, hopper, integraciones, salientes
 
 logger = logging.getLogger(__name__)
 
@@ -644,6 +644,7 @@ async def recibir(ev: dict[str, str]) -> None:
         else:
             if nombre == "CHANNEL_ANSWER" and vivo.estado == TIMBRANDO:
                 await _transicion(session, vivo, EN_LLAMADA, contestada_at=datetime.utcnow())
+                await integraciones.emitir_seguro(session, vivo.tenant_id, "llamada.contestada", integraciones.datos_llamada(vivo))
             elif nombre == "CHANNEL_HANGUP_COMPLETE":
                 await _al_colgar(session, vivo, ev.get("Hangup-Cause") or "")
         await session.commit()
@@ -701,6 +702,11 @@ async def disponer(
                 agente_id=usuario.id if callback_propio else None, cuando=callback_at, estado="pendiente",
                 nota=(nota or "").strip() or None, creado_por=usuario.id,
             ))
+            await integraciones.emitir_seguro(session, vivo.tenant_id, "callback.creado", {
+                "lead_id": lead.id, "campana_id": lead.campaign_id, "contacto_id": lead.contacto_id, "telefono": lead.phone,
+                "cuando": callback_at.isoformat() + "Z", "agente_id": usuario.id if callback_propio else None,
+                "nota": (nota or "").strip() or None,
+            })
         elif disp.categoria == "no_llamar":
             lead.status = "no_llamar"
             clave = crm.clave_telefono(lead.phone)
@@ -709,6 +715,10 @@ async def disponer(
                 session.add(NoLlamar(tenant_id=vivo.tenant_id, telefono=lead.phone, telefono_clave=clave,
                                      motivo=f"Disposición del agente: {disp.nombre}",
                                      creado_por=usuario.full_name or usuario.username))
+            await integraciones.emitir_seguro(session, vivo.tenant_id, "lead.no_llamar", {
+                "telefono": lead.phone, "lead_id": lead.id, "campana_id": lead.campaign_id, "contacto_id": lead.contacto_id,
+                "motivo": f"Disposición del agente: {disp.nombre}", "origen": "agente", "agente_id": usuario.id,
+            })
         # Los callbacks anteriores de este lead quedan cumplidos.
         await session.execute(
             update(Callback)
@@ -727,6 +737,11 @@ async def disponer(
             .values(disposicion_id=disp.id)
         )
         await session.execute(update(CallLog).where(CallLog.uuid == vivo.call_uuid).values(disposicion_id=disp.id))
+    await integraciones.emitir_seguro(session, vivo.tenant_id, "llamada.disposicionada", integraciones.datos_llamada(
+        vivo, telefono=lead.phone if lead else None, contacto_id=lead.contacto_id if lead else None,
+        disposicion={"id": disp.id, "codigo": disp.codigo, "nombre": disp.nombre, "categoria": disp.categoria},
+        nota=(nota or "").strip() or None, callback_at=callback_at.isoformat() + "Z" if callback_at else None,
+    ))
     await _volver(session, vivo)
 
 

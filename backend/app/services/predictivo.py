@@ -34,7 +34,7 @@ from app.core import validacion
 from app.core.clock import now_local
 from app.core.database import async_session, sesion_de_empresa
 from app.models import AgenteVivo, Campaign, CampaignNumber, MetricaCampana, SystemSettings
-from app.services import agentes, esl, horario_marcacion, hopper, tope_campanas
+from app.services import agentes, esl, horario_marcacion, hopper, integraciones, tope_campanas
 
 logger = logging.getLogger(__name__)
 
@@ -479,6 +479,7 @@ class Motor:
                 call_uuid=llamada.uuid, telefono=lead.phone if lead else None, contestada_at=ahora_dt,
                 volver_a_pausa_id=None, codigo_pausa_id=None,
             )
+            await integraciones.emitir_seguro(session, vivo.tenant_id, "llamada.contestada", integraciones.datos_llamada(vivo))
             campana = await session.get(Campaign, llamada.campaign_id)
             if campana is not None:
                 await _sumar(session, campana, asignadas=1)

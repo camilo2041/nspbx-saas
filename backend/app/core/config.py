@@ -81,6 +81,16 @@ class Settings(BaseSettings):
     # empresas (Slack, Teams, un relay de correo…). Vacío = solo quedan en
     # el panel. Ver services/alertas.py.
     alertas_webhook_url: str = ""
+    # Correo saliente de la plataforma (reportes programados, ver
+    # services/reportes_programados.py). Sin SMTP_HOST no se envía nada y el
+    # panel lo dice.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_usuario: str = ""
+    smtp_clave: str = ""
+    smtp_remitente: str = ""
+    # starttls (587) | ssl (465) | ninguno (solo un relay dentro de la red).
+    smtp_seguridad: str = "starttls"
     # Días que se conserva el registro de auditoría. Lo borra el worker de
     # mantenimiento con el rol dueño: la aplicación no puede borrar filas.
     auditoria_retencion_dias: int = 365

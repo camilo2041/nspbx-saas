@@ -247,6 +247,13 @@ services:
       # Alertas de tráfico saliente anómalo de todas las empresas (Slack,
       # Teams, un relay de correo). Vacío = solo en el panel.
       ALERTAS_WEBHOOK_URL: ${ALERTAS_WEBHOOK_URL:-}
+      # Correo de los reportes programados. Vacío = no se envían.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USUARIO: ${SMTP_USUARIO:-}
+      SMTP_CLAVE: ${SMTP_CLAVE:-}
+      SMTP_REMITENTE: ${SMTP_REMITENTE:-}
+      SMTP_SEGURIDAD: ${SMTP_SEGURIDAD:-starttls}
       AUDITORIA_RETENCION_DIAS: ${AUDITORIA_RETENCION_DIAS:-365}
       MFA_OBLIGATORIO: ${MFA_OBLIGATORIO:-plataforma,admin}
       API_LIMITE_POR_MINUTO: ${API_LIMITE_POR_MINUTO:-120}

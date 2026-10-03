@@ -29,7 +29,7 @@ from app.models import (
     Nota,
     User,
 )
-from app.services import agentes, templating
+from app.services import agentes, integraciones, templating
 
 router = APIRouter(prefix="/api/agente", tags=["agente"])
 
@@ -129,6 +129,13 @@ async def _lead(session: AsyncSession, vivo: AgenteVivo, usuario: User) -> dict 
         )
     ).scalars().all()
     disposiciones = {d.id: d.nombre for d in (await session.execute(select(Disposicion))).scalars()}
+    crm_url = None
+    if campana is not None and campana.crm_url and campana.crm_secreto:
+        crm_url = integraciones.url_crm(campana.crm_url, campana.crm_secreto, {
+            **variables, "lead_id": lead.id, "contacto_id": lead.contacto_id or "", "campana_id": lead.campaign_id,
+            "agente_id": usuario.id, "llamada_uuid": vivo.call_uuid or "",
+            "documento": (datos_contacto or {}).get("documento") or "", "email": (datos_contacto or {}).get("email") or "",
+        })
     return {
         "id": lead.id,
         "telefono": lead.phone,
@@ -136,6 +143,8 @@ async def _lead(session: AsyncSession, vivo: AgenteVivo, usuario: User) -> dict 
         "variables": variables,
         "campana": {"id": campana.id, "nombre": campana.name, "metodo": campana.metodo} if campana else None,
         "guion": templating.render(campana.guion, variables) if campana and campana.guion else None,
+        # Abre la ficha en el CRM de la empresa, firmada (services/integraciones.py).
+        "crm_url": crm_url,
         "contacto": datos_contacto,
         "notas": notas,
         "llamadas_anteriores": [

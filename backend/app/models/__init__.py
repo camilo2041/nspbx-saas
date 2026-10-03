@@ -1,6 +1,9 @@
 from app.models.models import (
     MetricaCampana,
     TokenWallboard,
+    Webhook,
+    EntregaWebhook,
+    ReporteProgramado,
     SesionAgente,
     EstadoAgente,
     Disposicion,
@@ -43,6 +46,9 @@ from app.models.models import (
 __all__ = [
     "MetricaCampana",
     "TokenWallboard",
+    "Webhook",
+    "EntregaWebhook",
+    "ReporteProgramado",
     "SesionAgente",
     "EstadoAgente",
     "Disposicion",

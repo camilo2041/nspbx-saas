@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -30,7 +30,7 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import agentes, predictivo, tiempo_real, voice_prompts, xml_endpoints
+from app.services import agentes, integraciones, predictivo, reportes_programados, tiempo_real, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
 from app.services.queues_sync import apply_queues
 from app.workers.dialer import dialer
@@ -356,6 +356,9 @@ _TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
     # Predictivo (revisión 0014)
     "metricas_campana",
     "tokens_wallboard",
+    "webhooks",
+    "entregas_webhook",
+    "reportes_programados",
 ]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
@@ -647,7 +650,13 @@ async def lifespan(app: FastAPI):
     await agentes.cerrar_todas()
     agentes.motor.start()
     predictivo.motor.start()
+    # Webhooks hacia los CRM (services/integraciones.py): la cola sobrevive
+    # al reinicio porque vive en la base.
+    integraciones.repartidor.start()
+    reportes_programados.programador.start()
     yield
+    await reportes_programados.programador.stop()
+    await integraciones.repartidor.stop()
     await predictivo.motor.stop()
     await agentes.motor.stop()
     eventos.cancel()
@@ -787,6 +796,16 @@ app.include_router(
     dependencies=[Depends(requiere(permissions.SUPERVISION_VER)), Depends(licencia_operativa())],
 )
 app.include_router(supervision_api.publico)
+app.include_router(
+    reportes_api.router,
+    dependencies=[Depends(requiere(permissions.REPORTES_VER))],
+)
+# Webhooks hacia el CRM de la empresa: como las claves de API, los
+# administra quien administra la empresa.
+app.include_router(
+    integraciones_api.router,
+    dependencies=[Depends(requiere(permissions.AJUSTES_GESTIONAR)), Depends(licencia_operativa())],
+)
 app.include_router(
     ai_usage.router,
     dependencies=[Depends(requiere(permissions.CONSUMO_IA_VER)), *_VOICEBOT],

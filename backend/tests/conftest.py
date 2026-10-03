@@ -87,6 +87,9 @@ from app.models import (  # noqa: E402
     CodigoPausa,
     Disposicion,
     TokenWallboard,
+    Webhook,
+    EntregaWebhook,
+    ReporteProgramado,
     CampoContacto,
     Contacto,
     Debt,
@@ -236,7 +239,15 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
     # Wallboard: un token vigente (el hash es de un token que no se usa).
     wallboard = TokenWallboard(tenant_id=tid, nombre=f"TV {marca}", token_hash=f"{marca:0<64}"[:64],
                                vence=datetime.utcnow() + timedelta(days=30))
-    session.add_all([nota, pausa, disposicion, callback, wallboard])
+    gancho = Webhook(tenant_id=tid, nombre=f"CRM {marca}", url=f"https://crm.{marca}.test/hook", secreto=f"whsec_{marca}",
+                     eventos=["llamada.disposicionada"], activo=True)
+    session.add_all([nota, pausa, disposicion, callback, wallboard, gancho])
+    await session.flush()
+    entrega = EntregaWebhook(tenant_id=tid, webhook_id=gancho.id, evento="llamada.disposicionada", estado="ok",
+                             payload=f'{{"datos": "{marca}"}}', intentos=1)
+    programado = ReporteProgramado(tenant_id=tid, nombre=f"Diario {marca}", tipo="campanas", frecuencia="diaria", hora=7,
+                                   destinatarios=f"jefe@{marca}.test", activo=False)
+    session.add_all([entrega, programado])
     await session.flush()
 
     for rol in (permissions.ADMIN, permissions.SUPERVISOR, permissions.ASESOR):
@@ -278,6 +289,9 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         "disposicion": disposicion.id,
         "callback": callback.id,
         "token_wallboard": wallboard.id,
+        "webhook": gancho.id,
+        "entrega_webhook": entrega.id,
+        "reporte_programado": programado.id,
     }
     return e
 

@@ -70,6 +70,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | PUT | `/api/campaigns/{campaign_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/campaigns/{campaign_id}/agentes` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | PUT | `/api/campaigns/{campaign_id}/agentes` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/campaigns/{campaign_id}/crm-secreto` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/campaigns/{campaign_id}/listas` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | PUT | `/api/campaigns/{campaign_id}/listas/{lista_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | DELETE | `/api/campaigns/{campaign_id}/numbers` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
@@ -128,6 +129,15 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | PUT | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| POST | `/api/integraciones/entregas/{entrega_id}/reintentar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/integraciones/eventos` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/integraciones/webhooks` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| POST | `/api/integraciones/webhooks` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| DELETE | `/api/integraciones/webhooks/{webhook_id}` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| PUT | `/api/integraciones/webhooks/{webhook_id}` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/integraciones/webhooks/{webhook_id}/entregas` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| POST | `/api/integraciones/webhooks/{webhook_id}/probar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| POST | `/api/integraciones/webhooks/{webhook_id}/rotar-secreto` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/outbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/outbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | DELETE | `/api/outbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
@@ -151,6 +161,15 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/queues/{queue_id}` | `colas:gestionar` | ✓ | ✓ | ✗ | ✗ |
 | PUT | `/api/queues/{queue_id}` | `colas:gestionar` | ✓ | ✓ | ✗ | ✗ |
 | GET | `/api/queues/{queue_id}/status` | `colas:gestionar` | ✓ | ✓ | ✗ | ✗ |
+| GET | `/api/reportes/agentes` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/reportes/campanas` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/reportes/cumplimiento` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/reportes/disposiciones` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/reportes/programados` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/reportes/programados` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| DELETE | `/api/reportes/programados/{programado_id}` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/reportes/programados/{programado_id}` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/reportes/programados/{programado_id}/enviar` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/role-permissions` | `usuarios:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | PUT | `/api/role-permissions` | `usuarios:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/security/alertas` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
@@ -204,10 +223,15 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | PUT | `/api/users/{user_id}` | `usuarios:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/users/{user_id}/cerrar-sesiones` | `usuarios:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/users/{user_id}/mfa/reset` | `usuarios:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| POST | `/api/v1/callbacks` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/v1/campanas/{campaign_id}/leads` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/v1/campanas/{campaign_id}/numeros` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/v1/citas` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/v1/citas` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/v1/consumo` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/v1/contactos` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/v1/contactos` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/v1/leads/{lead_id}` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/v1/llamadas` | sesión (API pública) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/voicebots` | `voizbots:ver` | ✓ | ✓ | ✓ | ✗ |
 | POST | `/api/voicebots` | `voizbots:gestionar`, `voizbots:ver` | ✓ | ✓ | ✗ | ✗ |

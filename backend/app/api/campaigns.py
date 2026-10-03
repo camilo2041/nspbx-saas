@@ -19,7 +19,7 @@ from app.schemas import (
     CampaignUpdate,
     ListaUpdate,
 )
-from app.services import crm, hopper, licensing, salientes
+from app.services import crm, hopper, integraciones, licensing, salientes
 from app.services.appointments import is_slot_free
 from app.services.fechas import parse_fecha_hora as _parse_fecha_hora
 from app.workers.dialer import dialer
@@ -246,6 +246,8 @@ async def create_campaign(payload: CampaignCreate, session: AsyncSession = Depen
             )
     await _validar_referencias(session, payload.trunk_id, payload.voicebot_id)
     campaign = Campaign(**payload.model_dump())
+    if campaign.crm_url:
+        campaign.crm_secreto = integraciones.nuevo_secreto()
     session.add(campaign)
     try:
         await session.commit()
@@ -297,10 +299,25 @@ async def update_campaign(
     if "nivel_marcacion" in cambios or "metodo" in cambios:
         # El predictivo arranca desde el nivel configurado.
         campaign.nivel_actual = None
+    if campaign.crm_url and not campaign.crm_secreto:
+        campaign.crm_secreto = integraciones.nuevo_secreto()
     await session.commit()
     await session.refresh(campaign)
     await _audio_abandono(session, campaign, cambio="mensaje_abandono" in cambios and cambios["mensaje_abandono"] != texto_antes)
     return campaign
+
+
+@router.post("/{campaign_id}/crm-secreto")
+async def secreto_crm(campaign_id: int, rotar: bool = False, session: AsyncSession = Depends(get_session)):
+    """El secreto con el que se firma la URL del CRM, para configurarlo del
+    lado del CRM. `rotar=true` lo cambia (los enlaces viejos dejan de valer)."""
+    campaign = await traer_propio(session, Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    if rotar or not campaign.crm_secreto:
+        campaign.crm_secreto = integraciones.nuevo_secreto()
+        await session.commit()
+    return {"secreto": campaign.crm_secreto}
 
 
 @router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)

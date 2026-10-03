@@ -431,6 +431,11 @@ async def agregar_no_llamar(
     registro.motivo = payload.motivo
     registro.hasta = payload.hasta.replace(tzinfo=None) if payload.hasta else None
     registro.creado_por = usuario.full_name or usuario.username
+    from app.services import integraciones
+
+    await integraciones.emitir_seguro(session, _empresa(session), "lead.no_llamar", {
+        "telefono": registro.telefono, "motivo": registro.motivo, "origen": "panel", "por": registro.creado_por,
+    })
     await session.commit()
     return _no_llamar_out(registro)
 

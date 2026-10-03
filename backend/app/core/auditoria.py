@@ -42,7 +42,9 @@ _METODOS_QUE_MODIFICAN = {"POST", "PUT", "PATCH", "DELETE"}
 # a un dato personal (la voz de un tercero).
 # Y todo lo que entra por la API pública: una clave filtrada se nota en lo
 # que lee, no solo en lo que escribe.
-_LECTURAS_SENSIBLES = re.compile(r"^(/api/calls/\d+/recording|/api/v1/.*)$")
+# Y los reportes: el de cumplimiento lleva teléfonos de terceros y todos se
+# exportan a CSV (quién sacó qué datos y cuándo).
+_LECTURAS_SENSIBLES = re.compile(r"^(/api/calls/\d+/recording|/api/v1/.*|/api/reportes/.*)$")
 # No se auditan: el widget anónimo de llamada web (mucho volumen, sin
 # usuario), la renovación de sesión de la app móvil (rutinaria) y los avisos
 # de CSP de los navegadores (ver app/api/csp.py).
@@ -94,6 +96,7 @@ def _secretos_conocidos(settings) -> list[str]:
         settings.fs_xml_secret,
         settings.fs_esl_password,
         settings.turn_secret,
+        settings.smtp_clave,
         os.getenv("AUTH_SECRET", ""),
         os.getenv("DATA_ENCRYPTION_KEY", ""),
         os.getenv("DATA_ENCRYPTION_KEY_ANTERIOR", ""),

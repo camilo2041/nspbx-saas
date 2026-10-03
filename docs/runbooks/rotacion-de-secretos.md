@@ -30,6 +30,7 @@ Reglas generales:
 | `APNS_AUTH_KEY` (+ `APNS_KEY_ID`) | mandar notificaciones a la app en iPhone | revocar la clave en developer.apple.com → crear otra → `.env` → `docker compose up -d backend` | nada |
 | Cuenta de servicio de FCM (`FCM_SERVICE_ACCOUNT_FILE`) | mandar notificaciones a la app en Android | Google Cloud → IAM → cuentas de servicio → borrar la clave vieja y crear otra → reemplazar `secrets/fcm.json` → `docker compose up -d backend` | nada |
 | `ALERTAS_WEBHOOK_URL` | escribir en el canal de alertas | regenerar el webhook en Slack/Teams → `.env` → `docker compose up -d backend` | nada |
+| `SMTP_CLAVE` | mandar correo como la plataforma | cambiarla en el proveedor de correo → `.env` → `docker compose up -d backend` | nada (los reportes que fallen se reintentan en la próxima vuelta) |
 | `ADMIN_PASSWORD` | solo se usa al crear la base por primera vez | quitarla del `.env` después del primer arranque; la contraseña del admin se cambia en Usuarios | — |
 
 ## Secretos que se rotan desde el panel o la app

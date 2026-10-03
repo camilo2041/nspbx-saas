@@ -245,6 +245,18 @@ class VoiceBotOut(VoiceBotBase):
     flow_json: Optional[str] = None
 
 
+def _plantilla_crm(v):
+    if v is None or not str(v).strip():
+        return None
+    from app.core import urls
+    from app.services.integraciones import validar_plantilla_crm
+
+    try:
+        return validar_plantilla_crm(v)
+    except urls.UrlNoPermitida as exc:
+        raise ValueError(str(exc))
+
+
 class CampaignBase(BaseModel):
     name: str
     trunk_id: Optional[int] = None
@@ -272,6 +284,9 @@ class CampaignBase(BaseModel):
     abandono_objetivo: float = Field(default=3.0, ge=0.5, le=10.0)
     temporizador_abandono: int = Field(default=2, ge=1, le=10)
     mensaje_abandono: Optional[str] = Field(default=None, max_length=500)
+    # CRM externo: la consola del agente abre esta URL con las {variables}
+    # del lead, firmada (services/integraciones.py).
+    crm_url: Optional[str] = Field(default=None, max_length=1000)
 
     @field_validator("reglas_reciclaje")
     @classmethod
@@ -279,6 +294,11 @@ class CampaignBase(BaseModel):
         from app.services.hopper import validar_reglas
 
         return validar_reglas(v)
+
+    @field_validator("crm_url")
+    @classmethod
+    def _crm(cls, v):
+        return _plantilla_crm(v)
 
 
 class CampaignCreate(CampaignBase):
@@ -304,6 +324,7 @@ class CampaignUpdate(BaseModel):
     abandono_objetivo: Optional[float] = Field(default=None, ge=0.5, le=10.0)
     temporizador_abandono: Optional[int] = Field(default=None, ge=1, le=10)
     mensaje_abandono: Optional[str] = Field(default=None, max_length=500)
+    crm_url: Optional[str] = Field(default=None, max_length=1000)
 
     @field_validator("reglas_reciclaje")
     @classmethod
@@ -311,6 +332,11 @@ class CampaignUpdate(BaseModel):
         from app.services.hopper import validar_reglas
 
         return validar_reglas(v)
+
+    @field_validator("crm_url")
+    @classmethod
+    def _crm(cls, v):
+        return _plantilla_crm(v)
 
 
 class CampaignOut(CampaignBase):

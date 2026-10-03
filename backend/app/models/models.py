@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
@@ -232,6 +233,10 @@ class Campaign(Base):
     # y el audio ya generado para FreeSWITCH.
     mensaje_abandono: Mapped[str | None] = mapped_column(Text, nullable=True)
     audio_abandono: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # CRM externo (fase 6): plantilla de URL con {variables} del lead que la
+    # consola del agente abre firmada con este secreto (services/integraciones.py).
+    crm_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    crm_secreto: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -1362,4 +1367,65 @@ class TokenWallboard(Base):
     vence: Mapped[datetime] = mapped_column(DateTime)
     revocado_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ultimo_uso_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Webhook(Base):
+    """Aviso a un sistema de la empresa (su CRM) cuando pasa algo: se le
+    hace POST con el evento firmado con HMAC (services/integraciones.py)."""
+
+    __tablename__ = "webhooks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    nombre: Mapped[str] = mapped_column(String(80))
+    url: Mapped[str] = mapped_column(String(500))
+    secreto: Mapped[str] = mapped_column(TextoCifrado())
+    eventos: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    fallos_seguidos: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    ultimo_ok_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class EntregaWebhook(Base):
+    """Bitácora y cola de envíos (se escribe en la misma transacción que el
+    cambio que la origina: si el cambio no se guarda, no se avisa)."""
+
+    __tablename__ = "entregas_webhook"
+    __table_args__ = (Index("ix_entregas_webhook_cola", "estado", "proximo_intento_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    webhook_id: Mapped[int] = mapped_column(ForeignKey("webhooks.id", ondelete="CASCADE"), index=True)
+    evento: Mapped[str] = mapped_column(String(40))
+    payload: Mapped[str] = mapped_column(Text)
+    estado: Mapped[str] = mapped_column(String(12), default="pendiente")  # pendiente|ok|fallida
+    intentos: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    proximo_intento_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ultimo_codigo: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ultimo_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entregado_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ReporteProgramado(Base):
+    """Un reporte que sale solo por correo (CSV adjunto) cada día, semana o mes."""
+
+    __tablename__ = "reportes_programados"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    nombre: Mapped[str] = mapped_column(String(80))
+    tipo: Mapped[str] = mapped_column(String(20))  # agentes|campanas|disposiciones|cumplimiento
+    frecuencia: Mapped[str] = mapped_column(String(10))  # diaria|semanal|mensual
+    hora: Mapped[int] = mapped_column(Integer, default=7, server_default="7")  # hora local de envío
+    destinatarios: Mapped[str] = mapped_column(Text)
+    filtros: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    ultimo_envio_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ultimo_intento_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ultimo_periodo: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    ultimo_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    creado_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

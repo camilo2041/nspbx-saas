@@ -82,6 +82,9 @@ AGENTE_OPERAR = "agente:operar"
 # agente y cambiar el nivel de marcación en caliente.
 SUPERVISION_VER = "supervision:ver"
 SUPERVISION_INTERVENIR = "supervision:intervenir"
+# Reportes del contact center (fase 6): agentes, campañas, disposiciones y
+# cumplimiento, con exportación CSV y envío programado por correo.
+REPORTES_VER = "reportes:ver"
 
 PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
     ADMIN: frozenset(
@@ -101,6 +104,7 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CRM_VER,
             CRM_GESTIONAR,
             AGENTE_OPERAR,
+            REPORTES_VER,
             SUPERVISION_VER,
             SUPERVISION_INTERVENIR,
         }
@@ -119,6 +123,7 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CRM_VER,
             CRM_GESTIONAR,
             AGENTE_OPERAR,
+            REPORTES_VER,
             SUPERVISION_VER,
             SUPERVISION_INTERVENIR,
         }
@@ -134,6 +139,7 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CRM_VER,
             CRM_GESTIONAR,
             AGENTE_OPERAR,
+            REPORTES_VER,
             SUPERVISION_VER,
         }
     ),
@@ -253,6 +259,7 @@ ETIQUETAS_PERMISOS = {
     AGENTE_OPERAR: "Trabajar como agente (consola de agente)",
     SUPERVISION_VER: "Ver agentes y campañas en vivo y el wallboard",
     SUPERVISION_INTERVENIR: "Escuchar, susurrar e intervenir llamadas; forzar pausa o salida de agentes",
+    REPORTES_VER: "Ver y exportar reportes del contact center",
 }
 
 TODOS_LOS_PERMISOS = tuple(ETIQUETAS_PERMISOS)

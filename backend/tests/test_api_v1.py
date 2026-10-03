@@ -135,7 +135,7 @@ _CUERPOS = {
 async def test_con_todos_los_permisos_no_alcanza_a_otra_empresa(mundo, cliente, metodo, ruta):
     clave = (await _crear(cliente, mundo.alfa, TODOS))["clave"]
     antes = await foto_de_empresa(mundo.beta.id)
-    recursos = {"campaign_id": "campaign"}
+    recursos = {"campaign_id": "campaign", "lead_id": "campaign_number"}
     url = re.sub(r"\{(\w+)\}", lambda m: str(mundo.beta.ids[recursos[m.group(1)]]), ruta)
     resp = await cliente.request(metodo, url, json=_CUERPOS.get((metodo, ruta)), headers=_con(clave))
     assert resp.status_code in (403, 404), f"{metodo} {ruta}: {resp.status_code} {resp.text[:200]}"
@@ -143,10 +143,14 @@ async def test_con_todos_los_permisos_no_alcanza_a_otra_empresa(mundo, cliente, 
     assert await foto_de_empresa(mundo.beta.id) == antes
 
 
+# Búsquedas que exigen un filtro: se prueban con el teléfono de la OTRA empresa.
+_FILTRO = {"/api/v1/contactos": "?telefono=5730099999"}
+
+
 @pytest.mark.parametrize("metodo,ruta", [r for r in _rutas_v1() if "{" not in r[1] and r[0] == "GET"])
 async def test_los_listados_no_muestran_otra_empresa(mundo, cliente, metodo, ruta):
     clave = (await _crear(cliente, mundo.alfa, TODOS))["clave"]
-    resp = await cliente.get(ruta, headers=_con(clave))
+    resp = await cliente.get(ruta + _FILTRO.get(ruta, ""), headers=_con(clave))
     assert resp.status_code == 200, resp.text
     assert mundo.beta.marca not in resp.text and mundo.beta.telefono not in resp.text
 
@@ -215,3 +219,57 @@ async def test_empresa_desactivada_no_entra(mundo, cliente):
         async with engine.begin() as conn:
             await conn.execute(text("UPDATE tenants SET enabled = true WHERE id = :t"), {"t": mundo.beta.id})
     assert (await cliente.get("/api/v1/llamadas", headers=_con(clave))).status_code == 200
+
+
+# --- CRM por la API (fase 6) ------------------------------------------------------------------------
+
+
+async def test_contactos_crear_o_actualizar_por_telefono(mundo, cliente):
+    clave = (await _crear(cliente, mundo.alfa, ["contactos:leer", "contactos:escribir"]))["clave"]
+    r = await cliente.post("/api/v1/contactos", headers=_con(clave), json={"telefono": "3007770001", "nombre": "Ana API"})
+    assert r.status_code == 201 and r.json()["creado"] is True
+    cid = r.json()["id"]
+    # Mismo número en otro formato: actualiza, no duplica; lo que no viene se deja.
+    r = await cliente.post("/api/v1/contactos", headers=_con(clave), json={"telefono": "+57 300 777 0001", "email": "ana@x.test"})
+    assert r.status_code == 200 and r.json()["creado"] is False and r.json()["id"] == cid
+    assert r.json()["nombre"] == "Ana API" and r.json()["email"] == "ana@x.test"
+    r = await cliente.get("/api/v1/contactos?telefono=3007770001", headers=_con(clave))
+    assert [c["id"] for c in r.json()] == [cid]
+    assert (await cliente.get("/api/v1/contactos", headers=_con(clave))).status_code == 422
+    # Sin el permiso de escribir.
+    solo_leer = (await _crear(cliente, mundo.alfa, ["contactos:leer"], nombre="lector"))["clave"]
+    assert (await cliente.post("/api/v1/contactos", headers=_con(solo_leer), json={"telefono": "3007770002"})).status_code == 403
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM contactos WHERE id = :i"), {"i": cid})
+
+
+async def test_leads_y_callbacks(mundo, cliente):
+    clave = (await _crear(cliente, mundo.alfa, ["leads:leer", "callbacks:escribir"]))["clave"]
+    lead_id = mundo.alfa.ids["campaign_number"]
+    async with engine.connect() as conn:
+        antes = (await conn.execute(text("SELECT status, proximo_intento_at, agente_id, prioridad FROM campaign_numbers WHERE id = :i"),
+                                    {"i": lead_id})).one()
+    r = await cliente.get(f"/api/v1/leads/{lead_id}", headers=_con(clave))
+    assert r.status_code == 200 and r.json()["id"] == lead_id
+    r = await cliente.get(f"/api/v1/campanas/{mundo.alfa.ids['campaign']}/leads", headers=_con(clave))
+    assert lead_id in [x["id"] for x in r.json()["datos"]]
+    cuando = (datetime.utcnow() + timedelta(days=2)).replace(microsecond=0).isoformat() + "+00:00"
+    r = await cliente.post("/api/v1/callbacks", headers=_con(clave), json={"lead_id": lead_id, "cuando": cuando, "nota": "Desde el CRM"})
+    assert r.status_code == 201, r.text
+    cb = r.json()["id"]
+    detalle = (await cliente.get(f"/api/v1/leads/{lead_id}", headers=_con(clave))).json()
+    assert any(c["id"] == cb and c["nota"] == "Desde el CRM" for c in detalle["callbacks"]) and detalle["estado"] == "pending"
+    pasado = (datetime.utcnow() - timedelta(hours=1)).isoformat() + "+00:00"
+    assert (await cliente.post("/api/v1/callbacks", headers=_con(clave), json={"lead_id": lead_id, "cuando": pasado})).status_code == 422
+    # Un lead de otra empresa no existe para esta clave.
+    r = await cliente.post("/api/v1/callbacks", headers=_con(clave), json={"lead_id": mundo.beta.ids["campaign_number"], "cuando": cuando})
+    assert r.status_code == 404
+    # Un agente de otra empresa tampoco.
+    r = await cliente.post("/api/v1/callbacks", headers=_con(clave),
+                           json={"lead_id": lead_id, "cuando": cuando, "agente_id": mundo.beta.ids["user"]})
+    assert r.status_code == 404
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM callbacks WHERE id = :i"), {"i": cb})
+        # El lead sembrado lo usan otras pruebas: queda como estaba.
+        await conn.execute(text("UPDATE campaign_numbers SET status = :s, proximo_intento_at = :p, agente_id = :a, prioridad = :r WHERE id = :i"),
+                           {"s": antes[0], "p": antes[1], "a": antes[2], "r": antes[3], "i": lead_id})

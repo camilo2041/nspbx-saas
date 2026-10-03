@@ -148,6 +148,8 @@ COLUMNAS = [
     ("system_settings", "ari_password"),
     ("system_settings", "webcall_turnstile_secret"),
     ("users", "mfa_secret"),
+    ("webhooks", "secreto"),
+    ("campaigns", "crm_secreto"),
 ]
 
 

@@ -44,6 +44,9 @@ _RECURSO_POR_PARAMETRO = {
     "disposicion_id": "disposicion",
     "callback_id": "callback",
     "token_id": "token_wallboard",
+    "webhook_id": "webhook",
+    "entrega_id": "entrega_webhook",
+    "programado_id": "reporte_programado",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por
@@ -57,6 +60,8 @@ _FUERA_DE_ESTA_PRUEBA = {
     "/api/tenants/{tenant_id}/cerrar-sesiones": "solo plataforma — test_alcance.py",
     "/api/webcall/session/{username}/end": "widget anónimo con credencial temporal propia",
     "/api/v1/campanas/{campaign_id}/numeros": "API pública, entra con clave de API — test_api_v1.py",
+    "/api/v1/campanas/{campaign_id}/leads": "API pública, entra con clave de API — test_api_v1.py",
+    "/api/v1/leads/{lead_id}": "API pública, entra con clave de API — test_api_v1.py",
 }
 
 # Cuerpos válidos para que la petición pase la validación y llegue a buscar
@@ -93,6 +98,8 @@ _CUERPOS = {
     ("POST", "/api/supervision/agentes/{user_id}/monitorear"): {"modo": "escuchar"},
     ("POST", "/api/supervision/agentes/{user_id}/pausa"): {"codigo_pausa_id": None},
     ("POST", "/api/supervision/agentes/{user_id}/sacar"): {"cortar_llamada": False},
+    ("PUT", "/api/integraciones/webhooks/{webhook_id}"): {"nombre": "Pisado"},
+    ("PUT", "/api/reportes/programados/{programado_id}"): {"nombre": "Pisado"},
 }
 
 # PUT que, contra un recurso PROPIO, tienen que funcionar. Es el control
