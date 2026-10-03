@@ -102,6 +102,17 @@ const GROUPS: NavGroup[] = [
         ),
       },
       {
+        href: "/supervision",
+        label: "Supervisión",
+        permiso: PERMISOS.supervisionVer,
+        icon: icon(
+          <>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+            <circle cx="12" cy="12" r="3" />
+          </>
+        ),
+      },
+      {
         href: "/crm",
         label: "Contactos",
         permiso: PERMISOS.crmVer,
@@ -438,7 +449,9 @@ function Marco({ children }: { children: ReactNode }) {
   // sesión de panel ahí, así que ni el sidebar ni la verificación de
   // usuario de abajo tienen sentido (y sin esta excepción, `!usuario`
   // dejaría la página en blanco para siempre).
-  if (pathname === "/login" || pathname === "/webcall") return <>{children}</>;
+  // /wallboard: pantalla completa para la TV de la sala; puede no haber
+  // sesión (entra con su token de pantalla, ver app/wallboard/page.tsx).
+  if (pathname === "/login" || pathname === "/webcall" || pathname === "/wallboard") return <>{children}</>;
   if (cargando || !usuario) return null;
 
   // Escribir la dirección a mano no debe abrir una pantalla que el rol no

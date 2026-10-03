@@ -123,6 +123,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // (ver app/webcall/page.tsx y components/layout.tsx). Nunca hay sesión
     // de panel ahí, así que no debe rebotar a /login.
     if (pathname === "/webcall") return;
+    // /wallboard: la TV de la sala entra con su token de pantalla, sin
+    // sesión; sin token, la página misma ofrece entrar (app/wallboard).
+    if (pathname === "/wallboard" && !usuario) return;
     if (!usuario && pathname !== "/login") router.replace("/login");
     if (usuario && pathname === "/login") router.replace(mfaPendiente ? "/mfa" : "/");
     // El backend rechaza todo lo demás hasta activarlo (ver core/mfa.py).

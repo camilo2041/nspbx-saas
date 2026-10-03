@@ -94,6 +94,15 @@ export function esperarSesionAgente(token: string | null) {
   tokenSesionAgente = token;
 }
 
+// Igual para el monitoreo del supervisor (escuchar, susurrar, intervenir;
+// ver backend/app/services/supervision.py): la pantalla de supervisión fija
+// el token de la escucha en curso y esa llamada se contesta sola.
+let tokenMonitoreo: string | null = null;
+
+export function esperarMonitoreo(token: string | null) {
+  tokenMonitoreo = token;
+}
+
 export function useSoftphone() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useSoftphone debe usarse dentro de <SoftphoneProvider>");
@@ -393,11 +402,13 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           onInvite(invitation: Invitation) {
             const token = invitation.request.getHeader("X-NSPBX-Agente");
             if (token) {
-              if (!tokenSesionAgente || token !== tokenSesionAgente) {
+              const esAgente = !!tokenSesionAgente && token === tokenSesionAgente;
+              const esMonitoreo = !!tokenMonitoreo && token === tokenMonitoreo;
+              if (!esAgente && !esMonitoreo) {
                 invitation.reject().catch(() => {});
                 return;
               }
-              bindSession(invitation, "Sesión de agente", false);
+              bindSession(invitation, esAgente ? "Sesión de agente" : "Monitoreo", false);
               invitation
                 .accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } })
                 .catch(() => {});

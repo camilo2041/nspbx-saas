@@ -476,6 +476,8 @@ export const PERMISOS = {
   crmVer: "crm:ver",
   crmGestionar: "crm:gestionar",
   agente: "agente:operar",
+  supervisionVer: "supervision:ver",
+  supervisionIntervenir: "supervision:intervenir",
 } as const;
 
 export type Rol = "admin" | "supervisor" | "coordinador" | "asesor" | "plataforma";
@@ -818,4 +820,89 @@ export interface AgenteCampana {
   username: string;
   extension: string | null;
   asignado: boolean;
+}
+
+// --- Supervisión (fase 5) ---------------------------------------------------
+
+export type ModoMonitoreo = "escuchar" | "susurrar" | "intervenir";
+
+export interface AgenteEnVivo {
+  user_id: number;
+  nombre: string;
+  extension: string | null;
+  estado: EstadoAgente;
+  desde: string | null;
+  /** Lo calcula el servidor: el reloj del navegador puede estar corrido. */
+  en_estado_s: number | null;
+  audio: boolean;
+  pausa: { id: number; nombre: string; max_minutos: number | null } | null;
+  pausa_excedida: boolean;
+  pausa_pendiente: boolean;
+  campanas: { id: number; nombre: string }[];
+  campaign_id: number | null;
+  campana: string | null;
+  telefono: string | null;
+  lead_id: number | null;
+  hablado_s: number | null;
+  monitoreo: { supervisor_id: number; modo: ModoMonitoreo } | null;
+}
+
+export interface MetricasHoy {
+  intentos: number;
+  contestadas: number;
+  asignadas: number;
+  abandonadas: number;
+  abandono_pct: number | null;
+}
+
+export interface CampanaEnVivo {
+  id: number;
+  nombre: string;
+  metodo: MetodoCampana;
+  status: string;
+  agentes: { conectados: number; listo: number; pausa: number; previa: number; timbrando: number; en_llamada: number; dispo: number };
+  hopper: number;
+  nivel_marcacion: number;
+  nivel_max: number;
+  nivel_actual: number | null;
+  abandono_objetivo: number;
+  max_concurrency: number;
+  hoy: MetricasHoy;
+  llamadas: { timbrando: number; en_espera: number } | null;
+  ultimos_15: {
+    contacto_pct: number | null;
+    abandono_pct: number | null;
+    ring_s: number | null;
+    aht_s: number | null;
+    espera_agente_s: number | null;
+  } | null;
+}
+
+export interface MiMonitoreo {
+  agente_id: number;
+  modo: ModoMonitoreo;
+  contestado: boolean;
+  token: string;
+}
+
+export interface ResumenWallboard {
+  generado_at: string;
+  empresa?: string;
+  agentes: { conectados: number; listos: number; en_llamada: number; en_pausa: number; disposicion: number; pausas_excedidas: number };
+  llamadas: { activas: number; timbrando: number; en_espera: number };
+  hoy: MetricasHoy;
+  campanas: Pick<CampanaEnVivo, "id" | "nombre" | "metodo" | "status" | "agentes" | "hoy" | "llamadas" | "abandono_objetivo">[];
+  agentes_lista: { nombre: string; estado: EstadoAgente; en_estado_s: number | null; pausa: string | null; pausa_excedida: boolean }[];
+}
+
+export interface TokenWallboard {
+  id: number;
+  nombre: string;
+  vence: string;
+  vigente: boolean;
+  revocado_at: string | null;
+  ultimo_uso_at: string | null;
+  created_at: string | null;
+  /** Solo en la respuesta de crear: no se vuelve a mostrar. */
+  token?: string;
 }

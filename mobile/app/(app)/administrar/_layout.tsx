@@ -17,6 +17,7 @@ export default function MenuLayout() {
       <Stack.Screen name="index" options={{ title: "Menú" }} />
       <Stack.Screen name="cuenta" options={{ title: "Mi cuenta" }} />
       <Stack.Screen name="citas" options={{ title: "Citas" }} />
+      <Stack.Screen name="supervision" options={{ title: "Supervisión" }} />
       <Stack.Screen name="contactos" options={{ title: "Contactos" }} />
       <Stack.Screen name="cobranza" options={{ title: "Cobranza" }} />
       <Stack.Screen name="campanas" options={{ title: "Campañas" }} />
