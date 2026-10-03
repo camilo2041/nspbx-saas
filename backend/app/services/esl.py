@@ -221,6 +221,12 @@ async def _a_tiempo_real(cabeceras: str) -> None:
         await agentes.recibir(ev)
     except Exception:
         logger.exception("Evento de canal no procesado por el motor de agentes")
+    from app.services import predictivo
+
+    try:
+        await predictivo.motor.recibir(ev)
+    except Exception:
+        logger.exception("Evento de canal no procesado por el predictivo")
 
 
 async def asegurar_eventos() -> None:

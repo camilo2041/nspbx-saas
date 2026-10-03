@@ -35,7 +35,13 @@ const ESTADO: Record<EstadoAgente, { label: string; color: string }> = {
   DISPO: { label: "Disposición", color: "red" },
 };
 
-const METODO: Record<string, string> = { manual: "Manual", vista_previa: "Vista previa", progresivo: "Progresivo" };
+const METODO: Record<string, string> = {
+  manual: "Manual",
+  vista_previa: "Vista previa",
+  progresivo: "Progresivo",
+  proporcional: "Proporcional",
+  predictivo: "Predictivo",
+};
 
 function aFecha(iso: string) {
   return new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
@@ -427,8 +433,8 @@ export default function ConsolaAgente() {
                 hint={
                   hayVistaPrevia
                     ? "Pide el siguiente lead o marca un número a mano."
-                    : misCampanas.some((c) => c.metodo === "progresivo")
-                      ? "En las campañas progresivas la llamada llega sola cuando estás listo."
+                    : misCampanas.some((c) => ["progresivo", "proporcional", "predictivo"].includes(c.metodo))
+                      ? "En las campañas automáticas la llamada llega sola cuando estás listo."
                       : "Marca un número a mano para empezar."
                 }
               />

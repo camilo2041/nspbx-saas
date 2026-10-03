@@ -25,7 +25,24 @@ export interface Estadisticas {
   llamadas_hoy?: number;
   minutos_hoy?: number;
   tope_alcanzado?: string | null;
+  /** Proporcional y predictivo: lo de hoy y lo que está en curso. */
+  predictivo?: MetricasPredictivo | null;
 }
+
+export interface MetricasPredictivo {
+  intentos: number;
+  contestadas: number;
+  asignadas: number;
+  abandonadas: number;
+  /** null mientras no haya contestadas. */
+  abandono_pct: number | null;
+  nivel: number | null;
+  timbrando: number;
+  en_espera: number;
+}
+
+/** Métodos que lanzan más llamadas que agentes (pueden abandonar). */
+export const SOBREMARCA = ["proporcional", "predictivo"];
 
 export interface Campana {
   id: number;
@@ -41,9 +58,16 @@ export interface Campana {
   /** Minutos de espera antes de volver a marcar, por resultado. */
   reglas_reciclaje?: Partial<Record<"busy" | "noanswer" | "failed", number>> | null;
   /** voizbot = lo de antes; el resto, con agentes humanos (consola web). */
-  metodo?: "voizbot" | "manual" | "vista_previa" | "progresivo";
+  metodo?: "voizbot" | "manual" | "vista_previa" | "progresivo" | "proporcional" | "predictivo";
   guion?: string | null;
   grabacion?: "todas" | "ninguna";
+  nivel_marcacion?: number;
+  nivel_max?: number;
+  nivel_actual?: number | null;
+  abandono_objetivo?: number;
+  temporizador_abandono?: number;
+  mensaje_abandono?: string | null;
+  audio_abandono?: string | null;
   status: string;
   trunk_name?: string | null;
   voicebot_name?: string | null;
@@ -130,8 +154,48 @@ export function camposCampana(troncales: { id: number; name: string }[], bots: {
         { valor: "manual", etiqueta: "Agentes: marcación manual" },
         { valor: "vista_previa", etiqueta: "Agentes: vista previa" },
         { valor: "progresivo", etiqueta: "Agentes: progresivo" },
+        { valor: "proporcional", etiqueta: "Agentes: proporcional (nivel fijo)" },
+        { valor: "predictivo", etiqueta: "Agentes: predictivo (adaptativo)" },
       ],
-      ayuda: "Con agentes, ellos trabajan desde la consola de agente del panel web.",
+      ayuda:
+        "Con agentes, ellos trabajan desde la consola de agente del panel web. Progresivo: una llamada por agente listo. Proporcional: varias por agente, nivel fijo. Predictivo: ajusta solo cuántas lanza para no pasar el abandono objetivo.",
+    },
+    {
+      clave: "nivel_marcacion",
+      etiqueta: "Llamadas por agente libre",
+      tipo: "numero",
+      ayuda:
+        "De 1 a 5 (1 = progresivo). Un nivel fijo no mira el abandono: en simulación, nivel 2 llegó a 22 % de abandono. Si no lo vas a vigilar, usa el predictivo.",
+      visibleSi: (v) => v.metodo === "proporcional",
+    },
+    {
+      clave: "abandono_objetivo",
+      etiqueta: "Abandono objetivo (%)",
+      tipo: "numero",
+      ayuda: "Máximo de contestadas sin agente. 3 % es el estándar.",
+      visibleSi: (v) => v.metodo === "predictivo",
+    },
+    {
+      clave: "nivel_max",
+      etiqueta: "Tope de llamadas por agente",
+      tipo: "numero",
+      ayuda: "De 1 a 5. Nunca marca más que esto.",
+      visibleSi: (v) => v.metodo === "predictivo",
+    },
+    {
+      clave: "temporizador_abandono",
+      etiqueta: "Segundos de espera antes de abandonar",
+      tipo: "numero",
+      ayuda: "Si el cliente contesta y no hay agente libre en este tiempo, escucha el mensaje y se le vuelve a llamar en 10 minutos. De 1 a 10.",
+      visibleSi: (v) => SOBREMARCA.includes(String(v.metodo)),
+    },
+    {
+      clave: "mensaje_abandono",
+      etiqueta: "Mensaje si no hay agente (opcional)",
+      tipo: "multilinea",
+      placeholder: "Hola, le llamábamos de … En este momento todos nuestros asesores están ocupados; le volveremos a llamar en unos minutos.",
+      ayuda: "Vacío = uno estándar con el nombre de la empresa. Se convierte en audio al guardar.",
+      visibleSi: (v) => SOBREMARCA.includes(String(v.metodo)),
     },
     {
       clave: "grabacion",
@@ -208,6 +272,11 @@ export function inicialCampana(c?: Campana | null): Record<string, unknown> {
     metodo: c?.metodo ?? "voizbot",
     grabacion: c?.grabacion ?? "todas",
     guion: c?.guion ?? "",
+    nivel_marcacion: c?.nivel_marcacion ?? 1,
+    nivel_max: c?.nivel_max ?? 3,
+    abandono_objetivo: c?.abandono_objetivo ?? 3,
+    temporizador_abandono: c?.temporizador_abandono ?? 2,
+    mensaje_abandono: c?.mensaje_abandono ?? "",
   };
 }
 
@@ -230,6 +299,13 @@ export function cuerpoCampana(v: Record<string, unknown>) {
     metodo: String(v.metodo || "voizbot"),
     grabacion: String(v.grabacion || "todas"),
     guion: String(v.guion ?? "").trim() || null,
+    ...(SOBREMARCA.includes(String(v.metodo)) && {
+      nivel_marcacion: Number(v.nivel_marcacion) || 1,
+      nivel_max: Number(v.nivel_max) || 3,
+      abandono_objetivo: Number(v.abandono_objetivo) || 3,
+      temporizador_abandono: Number(v.temporizador_abandono) || 2,
+      mensaje_abandono: String(v.mensaje_abandono ?? "").trim() || null,
+    }),
   };
 }
 

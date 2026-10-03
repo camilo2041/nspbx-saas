@@ -101,6 +101,18 @@ export interface Campaign {
   metodo: MetodoCampana;
   guion: string | null;
   grabacion: "todas" | "ninguna";
+  /** Proporcional: llamadas por agente libre (fijo). */
+  nivel_marcacion?: number;
+  /** Predictivo: tope de llamadas por agente libre. */
+  nivel_max?: number;
+  /** Predictivo: lo que está marcando ahora (llamadas en curso por agente libre). */
+  nivel_actual?: number | null;
+  /** % de contestadas sin agente que se tolera (3 % es el estándar). */
+  abandono_objetivo?: number;
+  /** Segundos que espera un cliente que contestó antes de darlo por abandonado. */
+  temporizador_abandono?: number;
+  mensaje_abandono?: string | null;
+  audio_abandono?: string | null;
   status: string;
   started_at: string | null;
   finished_at: string | null;
@@ -145,6 +157,20 @@ export interface CampaignStats {
   minutos_hoy?: number;
   /** Si ya llegó a un tope diario, el motivo (sigue mañana). */
   tope_alcanzado?: string | null;
+  /** Proporcional y predictivo: lo de hoy y lo que está en curso. */
+  predictivo?: MetricasPredictivo | null;
+}
+
+export interface MetricasPredictivo {
+  intentos: number;
+  contestadas: number;
+  asignadas: number;
+  abandonadas: number;
+  /** null mientras no haya contestadas. */
+  abandono_pct: number | null;
+  nivel: number | null;
+  timbrando: number;
+  en_espera: number;
 }
 
 export interface CampaignWithStats extends Campaign {
@@ -706,7 +732,7 @@ export interface ReporteImportacion {
 
 // ---------- Agentes (contact center, fase 3) ----------
 
-export type MetodoCampana = "voizbot" | "manual" | "vista_previa" | "progresivo";
+export type MetodoCampana = "voizbot" | "manual" | "vista_previa" | "progresivo" | "proporcional" | "predictivo";
 export type EstadoAgente = "LISTO" | "PAUSA" | "PREVIA" | "TIMBRANDO" | "EN_LLAMADA" | "DISPO";
 export type CategoriaDisposicion = "venta" | "contacto" | "no_contacto" | "callback" | "promesa" | "no_llamar";
 

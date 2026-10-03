@@ -263,9 +263,15 @@ class CampaignBase(BaseModel):
     # (busy, noanswer, failed). Ver services/hopper.py.
     reglas_reciclaje: Optional[dict[str, int]] = None
     # Con agentes (services/agentes.py) o con el voizbot (lo de antes).
-    metodo: str = Field(default="voizbot", pattern="^(voizbot|manual|vista_previa|progresivo)$")
+    metodo: str = Field(default="voizbot", pattern="^(voizbot|manual|vista_previa|progresivo|proporcional|predictivo)$")
     guion: Optional[str] = Field(default=None, max_length=10000)
     grabacion: str = Field(default="todas", pattern="^(todas|ninguna)$")
+    # Proporcional y predictivo (services/predictivo.py).
+    nivel_marcacion: float = Field(default=1.0, ge=1.0, le=5.0)
+    nivel_max: float = Field(default=3.0, ge=1.0, le=5.0)
+    abandono_objetivo: float = Field(default=3.0, ge=0.5, le=10.0)
+    temporizador_abandono: int = Field(default=2, ge=1, le=10)
+    mensaje_abandono: Optional[str] = Field(default=None, max_length=500)
 
     @field_validator("reglas_reciclaje")
     @classmethod
@@ -290,9 +296,14 @@ class CampaignUpdate(BaseModel):
     message_template: Optional[str] = None
     ai_intent: Optional[str] = None
     reglas_reciclaje: Optional[dict[str, int]] = None
-    metodo: Optional[str] = Field(default=None, pattern="^(voizbot|manual|vista_previa|progresivo)$")
+    metodo: Optional[str] = Field(default=None, pattern="^(voizbot|manual|vista_previa|progresivo|proporcional|predictivo)$")
     guion: Optional[str] = Field(default=None, max_length=10000)
     grabacion: Optional[str] = Field(default=None, pattern="^(todas|ninguna)$")
+    nivel_marcacion: Optional[float] = Field(default=None, ge=1.0, le=5.0)
+    nivel_max: Optional[float] = Field(default=None, ge=1.0, le=5.0)
+    abandono_objetivo: Optional[float] = Field(default=None, ge=0.5, le=10.0)
+    temporizador_abandono: Optional[int] = Field(default=None, ge=1, le=10)
+    mensaje_abandono: Optional[str] = Field(default=None, max_length=500)
 
     @field_validator("reglas_reciclaje")
     @classmethod
@@ -307,6 +318,9 @@ class CampaignOut(CampaignBase):
 
     id: int
     status: str
+    nivel_actual: Optional[float] = None
+    # Si ya hay audio para el mensaje de abandono.
+    audio_abandono: Optional[str] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
@@ -798,6 +812,8 @@ class CampaignStats(BaseModel):
     llamadas_hoy: int = 0
     minutos_hoy: float = 0
     tope_alcanzado: Optional[str] = None
+    # Proporcional y predictivo: lo de hoy y el nivel que lleva.
+    predictivo: Optional[dict] = None
 
 
 # ---------- Empresas (tenants) ----------

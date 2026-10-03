@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 
 LISTO, PAUSA, PREVIA, TIMBRANDO, EN_LLAMADA, DISPO = "LISTO", "PAUSA", "PREVIA", "TIMBRANDO", "EN_LLAMADA", "DISPO"
 EN_CURSO = (TIMBRANDO, EN_LLAMADA)
-METODOS_AGENTE = ("manual", "vista_previa", "progresivo")
+METODOS_AGENTE = ("manual", "vista_previa", "progresivo", "proporcional", "predictivo")
 METODOS = ("voizbot", *METODOS_AGENTE)
 CATEGORIAS = ("venta", "contacto", "no_contacto", "callback", "promesa", "no_llamar")
 PERFIL_CONFERENCIA = "nspbx_agente"
@@ -429,48 +429,7 @@ async def marcar(session, vivo: AgenteVivo, campaign_id: int, telefono: str | No
         validacion.exigir(validacion.TELEFONO_RE, telefono, "Teléfono")
         lead = await _lead_manual(session, campana, telefono)
 
-    # Las mismas reglas que el marcador automático: política de salientes,
-    # no llamar y franja de marcación.
-    politica = await salientes.politica_de(session, vivo.tenant_id)
-    motivo = salientes.motivo_bloqueo(lead.phone, politica)
-    if motivo:
-        raise ErrorAgente(motivo)
-    if await crm.en_no_llamar(session, lead.phone):
-        raise ErrorAgente("Ese número está en la lista de no llamar")
-    ajustes = (await session.execute(select(SystemSettings).limit(1))).scalar_one_or_none()
-    if not horario_marcacion.puede_marcar(ajustes, campana.ai_intent, now_local()):
-        raise ErrorAgente("Fuera de la franja de marcación de la campaña")
-
-    troncal = await session.get(Trunk, campana.trunk_id) if campana.trunk_id else None
-    if troncal is None or troncal.tenant_id != vivo.tenant_id or not troncal.enabled:
-        raise ErrorAgente("La campaña no tiene una troncal habilitada")
-    from app.services.config_generator import orden_troncales
-
-    troncales = (await session.execute(select(Trunk).where(Trunk.tenant_id == vivo.tenant_id))).scalars().all()
-    empresa = await session.get(Tenant, vivo.tenant_id)
-    validacion.exigir(validacion.TELEFONO_RE, lead.phone, "Teléfono")
-    tramos = [f"sofia/gateway/{empresa.slug}_{t.name}/{lead.phone}" for t in orden_troncales(troncales, principal_id=troncal.id)]
-
-    call_uuid = str(uuidlib.uuid4())
-    valores = {
-        "origination_uuid": call_uuid,
-        "ignore_early_media": "true",
-        "call_timeout": "30",
-        "nspbx_tenant_id": str(vivo.tenant_id),
-        "nspbx_saliente": str(vivo.tenant_id),
-        "nspbx_campaign_id": str(campana.id),
-        "nspbx_lead_id": str(lead.id),
-        "nspbx_agente_id": str(vivo.user_id),
-        "nspbx_customer": lead.phone,
-    }
-    cid = troncal.caller_id_number or troncal.username
-    if cid:
-        valores["origination_caller_id_number"] = cid
-    if campana.grabacion == "todas":
-        ruta = _ruta_grabacion(vivo.tenant_id, call_uuid)
-        valores["nspbx_recording"] = ruta
-        valores["RECORD_STEREO"] = "false"
-        valores["execute_on_answer"] = f"record_session {ruta}"
+    call_uuid, tramos, valores = await preparar_llamada(session, campana, lead, agente_id=vivo.user_id)
     await esl.bgapi(
         f"originate {{{_vars(valores)}}}{'|'.join(tramos)} "
         f"&conference({conferencia(vivo.tenant_id, vivo.user_id)}@{PERFIL_CONFERENCIA})"
@@ -487,6 +446,55 @@ async def marcar(session, vivo: AgenteVivo, campaign_id: int, telefono: str | No
                       call_uuid=call_uuid, telefono=lead.phone, contestada_at=None,
                       volver_a_pausa_id=volver, codigo_pausa_id=None)
     return call_uuid
+
+
+async def preparar_llamada(session, campana: Campaign, lead: CampaignNumber, agente_id: int | None) -> tuple[str, list[str], dict]:
+    """Comprueba que se puede llamar (política de salientes, no llamar,
+    franja de marcación, troncal) y arma la pata del cliente: uuid, tramos
+    por troncal y variables del canal. La usan la marcación del agente y el
+    predictivo (services/predictivo.py): las mismas reglas para todos."""
+    politica = await salientes.politica_de(session, campana.tenant_id)
+    motivo = salientes.motivo_bloqueo(lead.phone, politica)
+    if motivo:
+        raise ErrorAgente(motivo)
+    if await crm.en_no_llamar(session, lead.phone):
+        raise ErrorAgente("Ese número está en la lista de no llamar")
+    ajustes = (await session.execute(select(SystemSettings).limit(1))).scalar_one_or_none()
+    if not horario_marcacion.puede_marcar(ajustes, campana.ai_intent, now_local()):
+        raise ErrorAgente("Fuera de la franja de marcación de la campaña")
+
+    troncal = await session.get(Trunk, campana.trunk_id) if campana.trunk_id else None
+    if troncal is None or troncal.tenant_id != campana.tenant_id or not troncal.enabled:
+        raise ErrorAgente("La campaña no tiene una troncal habilitada")
+    from app.services.config_generator import orden_troncales
+
+    troncales = (await session.execute(select(Trunk).where(Trunk.tenant_id == campana.tenant_id))).scalars().all()
+    empresa = await session.get(Tenant, campana.tenant_id)
+    validacion.exigir(validacion.TELEFONO_RE, lead.phone, "Teléfono")
+    tramos = [f"sofia/gateway/{empresa.slug}_{t.name}/{lead.phone}" for t in orden_troncales(troncales, principal_id=troncal.id)]
+
+    call_uuid = str(uuidlib.uuid4())
+    valores = {
+        "origination_uuid": call_uuid,
+        "ignore_early_media": "true",
+        "call_timeout": "30",
+        "nspbx_tenant_id": str(campana.tenant_id),
+        "nspbx_saliente": str(campana.tenant_id),
+        "nspbx_campaign_id": str(campana.id),
+        "nspbx_lead_id": str(lead.id),
+        "nspbx_customer": lead.phone,
+    }
+    if agente_id is not None:
+        valores["nspbx_agente_id"] = str(agente_id)
+    cid = troncal.caller_id_number or troncal.username
+    if cid:
+        valores["origination_caller_id_number"] = cid
+    if campana.grabacion == "todas":
+        ruta = _ruta_grabacion(campana.tenant_id, call_uuid)
+        valores["nspbx_recording"] = ruta
+        valores["RECORD_STEREO"] = "false"
+        valores["execute_on_answer"] = f"record_session {ruta}"
+    return call_uuid, tramos, valores
 
 
 async def colgar(session, vivo: AgenteVivo) -> None:

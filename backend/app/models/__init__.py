@@ -1,4 +1,5 @@
 from app.models.models import (
+    MetricaCampana,
     SesionAgente,
     EstadoAgente,
     Disposicion,
@@ -39,6 +40,7 @@ from app.models.models import (
 )
 
 __all__ = [
+    "MetricaCampana",
     "SesionAgente",
     "EstadoAgente",
     "Disposicion",

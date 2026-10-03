@@ -30,7 +30,7 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import agentes, tiempo_real, voice_prompts, xml_endpoints
+from app.services import agentes, predictivo, tiempo_real, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
 from app.services.queues_sync import apply_queues
 from app.workers.dialer import dialer
@@ -353,6 +353,8 @@ _TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
     # Agentes (revisión 0013)
     "codigos_pausa", "disposiciones", "campana_agentes", "sesiones_agente",
     "estados_agente", "agentes_vivo", "callbacks",
+    # Predictivo (revisión 0014)
+    "metricas_campana",
 ]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
@@ -643,7 +645,9 @@ async def lifespan(app: FastAPI):
     # eventos confiables; el agente vuelve a entrar. Después, el progresivo.
     await agentes.cerrar_todas()
     agentes.motor.start()
+    predictivo.motor.start()
     yield
+    await predictivo.motor.stop()
     await agentes.motor.stop()
     eventos.cancel()
     await dialer.stop()

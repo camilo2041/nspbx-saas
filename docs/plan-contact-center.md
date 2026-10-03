@@ -379,7 +379,7 @@ actuales.
 | **1. Eventos y tiempo de ring** ✅ | Listener ESL con los eventos de canal (`services/tiempo_real.py`); columnas nuevas de `call_logs` (`progress_at`, `setup_ms`, `ring_ms`, `espera_ms`, `colgo`; revisión 0011, `services/tiempos_llamada.py`); bus por empresa y `/ws/tiempo-real`; ring y promedios en el historial, el inicio y la app; «Llamadas en vivo» en el panel | `test_tiempo_real.py`: tiempos de cada forma de CDR, promedios, cada empresa recibe solo sus canales (por variable, dominio o contexto), ciclo completo de una llamada, socket que exige permiso y sesión vigente. Pendiente: probar con CDRs reales de FreeSWITCH en el ambiente local |
 | **2. CRM base y leads** ✅ | `contactos`, `campos_contacto`, `listas`, `notas`, `no_llamar` (revisión 0012). El lead es la fila de `campaign_numbers` enriquecida (contacto, lista, prioridad, próximo intento), no una tabla nueva: el voizbot, la agenda y la cobranza siguen igual y la revisión liga cada número existente a su contacto. Importación CSV con vista previa y mapeo; ficha del contacto; hopper (`services/hopper.py`, una consulta con `FOR UPDATE SKIP LOCKED`, sin tabla aparte por ahora) con reciclaje por resultado, listas pausables y priorizables, y no llamar por empresa. Panel (Contactos) y app (Menú → Contactos, con importación) | `test_crm.py` (29), migración con relleno, aislamiento sobre contactos, listas, campos y no llamar. Pendiente: no llamar de la plataforma (hoy es por empresa; lo global sigue siendo destinos bloqueados) |
 | **3. Agentes: manual, vista previa y progresivo** ✅ | Sesión clavada en conferencia (perfil `nspbx_agente`; el softphone la contesta solo con el token de la sesión); motor de estados con bitácora (`services/agentes.py`); pausas y disposiciones de ejemplo editables; callbacks propios o de la campaña (reservados en el hopper); consola del agente en el panel (`/agente`) con lead, guion, notas, disposición y callbacks; grabación por campaña; métodos manual, vista previa y progresivo; el CDR guarda agente, lead y disposición. App: catálogos, método, guion y agentes de la campaña (la consola es web) | `test_agentes.py` (21) con FreeSWITCH simulado: ciclo completo, bitácora sin huecos, reciclaje, callbacks, caída del audio, progresivo, CDR. Pendiente: probar con FreeSWITCH real (audio WebRTC en la conferencia) |
-| **4. Predictivo** | Proporcional y predictivo; nivel adaptativo; temporizador y mensaje de abandono; AMD (`avmd` y luego `ia`); blended con colas | Simulación: con tasa de contacto y AHT sintéticos el abandono se mantiene bajo el objetivo y la espera del agente baja frente al progresivo. Después, piloto con una campaña real |
+| **4. Predictivo** ✅ (sin AMD ni blended) | `services/predictivo.py`: proporcional (nivel fijo) y predictivo. El predictivo calcula cuántas llamadas tener en curso con un modelo binomial (exceso esperado de contestadas sobre agentes libres) y la tasa de contacto de los últimos 15 min (con una previa prudente y contando solo timbres ya resueltos), más un factor de prudencia que sube si el abandono del día o el reciente pasa el objetivo y baja despacio si los agentes esperan. Con contacto ≥ 50 % se comporta como progresivo. Llamadas a `park`, asignación al agente LISTO que más espera, temporizador de abandono, mensaje con voz (edge-tts) y reintento del lead a los 10 min con prioridad. Métricas del día por campaña (`metricas_campana`, revisión 0014) y abandono en el CDR. Panel y app: campos, aviso de riesgo del nivel fijo y marcador de hoy | `test_predictivo.py` (22): cuentas, motor con FreeSWITCH simulado y el simulador en CI (abajo). Pendiente: AMD (`avmd` solo detecta pitidos; el de IA va por `mod_audio_fork`), blended con colas y piloto con una campaña real |
 | **5. Supervisor y wallboard** | Agentes y campañas en vivo; escuchar, susurrar e intervenir; forzar pausa y salida; nivel en caliente; wallboard; supervisor en la app móvil | Cada acción probada con dos llamadas reales en el ambiente local; auditoría de cada intervención |
 | **6. Reportes e integración CRM** | Reportes de agente, campaña, disposición y cumplimiento; CSV; webhooks firmados; `/api/v1` de leads y callbacks; reportes programados | Las cifras cuadran con la bitácora en pruebas con datos sembrados |
 | **7. Escala** | Varios FreeSWITCH (multi-servidor), motor con líder por `advisory lock`, partición de `estados_agente` y `call_logs` por mes | Prueba de carga con el objetivo de agentes simultáneos que se defina |
@@ -403,6 +403,25 @@ Se reportan abandono, espera del agente y llamadas por hora. Sirve para:
 - ajustar el controlador sin quemar listas
 - tener una prueba automática en CI: con estos parámetros el abandono no
   pasa del 3 %
+
+Hecho (`services/simulador_predictivo.py`, usa las mismas funciones del
+motor). Resultados con AHT 90 s, ACW 10 s, ring de 4 a 20 s y 2 h:
+
+| Contacto | Agentes | Ocupación progresivo | Ocupación predictivo | Abandono predictivo |
+|---|---|---|---|---|
+| 15 % | 30 | 49 % | 75 % | 0,6 % |
+| 30 % | 10 | 64 % | 70 % | 0,7 % |
+| 30 % | 30 | 64 % | 76 % | 0,3 % |
+| 50 % | 10 | 72 % | 72 % | 0 % |
+| 80 % | 30 | 78 % | 78 % | 0 % |
+
+El proporcional fijo en nivel 2 llega a 22 % de abandono con 30 % de
+contacto: por eso el panel avisa al usarlo. Lo que enseñó el simulador:
+
+- Contar como libres a los agentes por terminar disparaba el abandono: el
+  predictivo no los cuenta.
+- Contar los intentos al lanzar (y no al resolverse el timbre) hundía la
+  tasa de contacto y el motor sobremarcaba sin parar.
 
 ## 11. Riesgos y cómo se cubren
 

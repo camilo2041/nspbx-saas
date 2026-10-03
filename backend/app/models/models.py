@@ -217,6 +217,21 @@ class Campaign(Base):
     guion: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Grabar las llamadas de agentes: "todas" o "ninguna".
     grabacion: Mapped[str] = mapped_column(String(10), default="todas", server_default="todas")
+    # Proporcional y predictivo (services/predictivo.py). nivel_marcacion:
+    # llamadas por agente listo (fijo en proporcional, inicial en
+    # predictivo); nivel_actual: el que va ajustando el predictivo.
+    nivel_marcacion: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
+    nivel_max: Mapped[float] = mapped_column(Float, default=3.0, server_default="3.0")
+    nivel_actual: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Porcentaje de contestadas que se quedan sin agente (abandono) que no se
+    # quiere superar, y cuántos segundos espera un cliente contestado antes
+    # de darlo por abandonado.
+    abandono_objetivo: Mapped[float] = mapped_column(Float, default=3.0, server_default="3.0")
+    temporizador_abandono: Mapped[int] = mapped_column(Integer, default=2, server_default="2")
+    # Lo que oye el cliente abandonado (quién llamaba y que volverán a llamar)
+    # y el audio ya generado para FreeSWITCH.
+    mensaje_abandono: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audio_abandono: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -499,6 +514,8 @@ class CallLog(Base):
     agente_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     lead_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     disposicion_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # El cliente contestó y no hubo agente a tiempo (predictivo).
+    abandonada: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     campaign: Mapped["Campaign | None"] = relationship(back_populates="calls")
 
@@ -1310,3 +1327,21 @@ class Callback(Base):
     nota: Mapped[str | None] = mapped_column(Text, nullable=True)
     creado_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MetricaCampana(Base):
+    """Contadores del día de una campaña con marcación automática a agentes.
+    El abandono del día (abandonadas / contestadas) es la cifra de
+    cumplimiento: se guarda en la base para que sobreviva a un reinicio."""
+
+    __tablename__ = "metricas_campana"
+    __table_args__ = (UniqueConstraint("campaign_id", "fecha", name="ux_metricas_campana_dia"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
+    fecha: Mapped[date] = mapped_column(Date)
+    intentos: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    contestadas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    asignadas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    abandonadas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

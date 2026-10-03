@@ -253,7 +253,25 @@ async def create_campaign(payload: CampaignCreate, session: AsyncSession = Depen
         await session.rollback()
         raise HTTPException(status_code=400, detail="Nombre de campaña duplicado")
     await session.refresh(campaign)
+    await _audio_abandono(session, campaign, cambio=True)
     return campaign
+
+
+async def _audio_abandono(session: AsyncSession, campaign: Campaign, cambio: bool) -> None:
+    """Las campañas proporcionales y predictivas necesitan el audio del
+    mensaje de abandono: se genera al guardarlas si cambió el texto o si
+    todavía no lo tienen."""
+    from app.models import Tenant
+    from app.services import predictivo
+
+    if campaign.metodo not in predictivo.METODOS or (campaign.audio_abandono and not cambio):
+        return
+    empresa = await session.get(Tenant, campaign.tenant_id)
+    ruta = await predictivo.generar_audio_abandono(campaign, empresa.name if empresa else "la empresa")
+    if ruta:
+        campaign.audio_abandono = ruta
+        await session.commit()
+        await session.refresh(campaign)
 
 
 @router.get("/{campaign_id}", response_model=CampaignOut)
@@ -273,10 +291,15 @@ async def update_campaign(
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     cambios = payload.model_dump(exclude_unset=True)
     await _validar_referencias(session, cambios.get("trunk_id"), cambios.get("voicebot_id"))
+    texto_antes = campaign.mensaje_abandono
     for field, value in cambios.items():
         setattr(campaign, field, value)
+    if "nivel_marcacion" in cambios or "metodo" in cambios:
+        # El predictivo arranca desde el nivel configurado.
+        campaign.nivel_actual = None
     await session.commit()
     await session.refresh(campaign)
+    await _audio_abandono(session, campaign, cambio="mensaje_abandono" in cambios and cambios["mensaje_abandono"] != texto_antes)
     return campaign
 
 
@@ -651,6 +674,15 @@ async def campaign_stats(campaign_id: int, session: AsyncSession = Depends(get_s
     stats.llamadas_hoy = tope_campanas.llamadas_hoy(campaign, hoy)
     stats.minutos_hoy = round(minutos, 1)
     stats.tope_alcanzado = tope_campanas.disponibles(campaign, hoy, minutos)[1]
+    from app.services import predictivo
+
+    if campaign.metodo in predictivo.METODOS:
+        stats.predictivo = {
+            **await predictivo.metricas_de_hoy(session, campaign.id),
+            "nivel": campaign.nivel_actual or campaign.nivel_marcacion,
+            "timbrando": len(predictivo.motor.de_campana(campaign.id, "timbrando")),
+            "en_espera": len(predictivo.motor.de_campana(campaign.id, "espera")),
+        }
     return stats
 
 

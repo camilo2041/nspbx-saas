@@ -272,6 +272,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         agente_id=agente_id,
         lead_id=lead_id,
         disposicion_id=disposicion_id,
+        abandonada=True if variables.get("nspbx_abandonada") == "true" else None,
     )
     session.add(call)
     try:

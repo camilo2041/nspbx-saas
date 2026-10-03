@@ -283,6 +283,30 @@ export default function DetalleCampana() {
           />
         </View>
 
+        {stats?.predictivo ? (
+          <Seccion titulo={`Marcador de hoy${stats.predictivo.nivel != null ? ` · ${stats.predictivo.nivel} por agente libre` : ""}`} sinTarjeta>
+            <View style={{ gap: 10 }}>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Metrica etiqueta="Intentos" valor={stats.predictivo.intentos} icono="enLlamada" tono="info" />
+                <Metrica etiqueta="Contestadas" valor={stats.predictivo.contestadas} icono="ok" tono="ok" />
+              </View>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Metrica etiqueta="Con agente" valor={stats.predictivo.asignadas} icono="usuarios" tono="marca" />
+                <Metrica
+                  etiqueta="Abandono"
+                  valor={stats.predictivo.abandono_pct == null ? "—" : `${stats.predictivo.abandono_pct} %`}
+                  icono="perdida"
+                  tono={stats.predictivo.abandono_pct != null && stats.predictivo.abandono_pct > (campana.abandono_objetivo ?? 3) ? "peligro" : "ok"}
+                  detalle={`${stats.predictivo.abandonadas} hoy`}
+                />
+              </View>
+              <Text style={{ fontSize: 13, color: c.textoSecundario }}>
+                Ahora: {stats.predictivo.timbrando} timbrando · {stats.predictivo.en_espera} esperando agente
+              </Text>
+            </View>
+          </Seccion>
+        ) : null}
+
         {campana.metodo && campana.metodo !== "voizbot" ? <AgentesCampana campaignId={String(id)} /> : null}
 
         <ListasCampana campaignId={String(id)} version={stats?.total ?? 0} onCambio={() => est.recargar()} />
