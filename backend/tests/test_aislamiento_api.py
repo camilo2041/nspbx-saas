@@ -43,6 +43,7 @@ _RECURSO_POR_PARAMETRO = {
     "pausa_id": "codigo_pausa",
     "disposicion_id": "disposicion",
     "callback_id": "callback",
+    "token_id": "token_wallboard",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por
@@ -88,6 +89,10 @@ _CUERPOS = {
     ("POST", "/api/voicebots/{bot_id}/tts"): {"text": "Hola", "voice": "es-CO-SalomeNeural"},
     ("POST", "/api/voicebots/{bot_id}/flow/nodes/{node_id}/tts"): {"text": "Hola", "voice": "es-CO-SalomeNeural"},
     ("POST", "/api/voicebots/{bot_id}/probar"): {"mensaje": "hola"},
+    ("PUT", "/api/supervision/campanas/{campaign_id}/nivel"): {"abandono_objetivo": 3.0},
+    ("POST", "/api/supervision/agentes/{user_id}/monitorear"): {"modo": "escuchar"},
+    ("POST", "/api/supervision/agentes/{user_id}/pausa"): {"codigo_pausa_id": None},
+    ("POST", "/api/supervision/agentes/{user_id}/sacar"): {"cortar_llamada": False},
 }
 
 # PUT que, contra un recurso PROPIO, tienen que funcionar. Es el control

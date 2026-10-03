@@ -1,5 +1,6 @@
 from app.models.models import (
     MetricaCampana,
+    TokenWallboard,
     SesionAgente,
     EstadoAgente,
     Disposicion,
@@ -41,6 +42,7 @@ from app.models.models import (
 
 __all__ = [
     "MetricaCampana",
+    "TokenWallboard",
     "SesionAgente",
     "EstadoAgente",
     "Disposicion",

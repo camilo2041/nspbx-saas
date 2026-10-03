@@ -157,6 +157,21 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/security/auditoria` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/security/bans` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/security/claves-debiles` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/supervision/agentes` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/supervision/agentes/{user_id}/monitorear` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| POST | `/api/supervision/agentes/{user_id}/pausa` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| POST | `/api/supervision/agentes/{user_id}/sacar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| GET | `/api/supervision/campanas` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/supervision/campanas/{campaign_id}/nivel` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| POST | `/api/supervision/campanas/{campaign_id}/pausar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| POST | `/api/supervision/campanas/{campaign_id}/reanudar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| GET | `/api/supervision/monitoreo` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| POST | `/api/supervision/monitoreo/colgar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| POST | `/api/supervision/monitoreo/modo` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| GET | `/api/supervision/resumen` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/supervision/wallboard/tokens` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/supervision/wallboard/tokens` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| DELETE | `/api/supervision/wallboard/tokens/{token_id}` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
 | GET | `/api/system/detect-ip` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/system/diagnostics` | `ajustes:gestionar` · global | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/system/maintenance` | `ajustes:gestionar` · global | ✗ | ✗ | ✗ | ✗ |
@@ -213,6 +228,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | POST | `/api/voicebots/{bot_id}/tts` | `voizbots:gestionar`, `voizbots:ver` | ✓ | ✓ | ✗ | ✗ |
 | GET | `/api/voicebots/{bot_id}/versiones` | `voizbots:ver` | ✓ | ✓ | ✓ | ✗ |
 | POST | `/api/voicebots/{bot_id}/versiones/{version_id}/restaurar` | `voizbots:gestionar`, `voizbots:ver` | ✓ | ✓ | ✗ | ✗ |
+| GET | `/api/wallboard` | sesión (TV sin usuario) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/webcall/config` | sesión (widget de llamada web) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/webcall/session` | sesión (widget de llamada web) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/webcall/session/{username}/end` | sesión (widget de llamada web) | ✓ | ✓ | ✓ | ✓ |

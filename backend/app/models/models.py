@@ -1345,3 +1345,21 @@ class MetricaCampana(Base):
     contestadas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     asignadas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     abandonadas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class TokenWallboard(Base):
+    """Acceso de solo lectura al wallboard para una pantalla sin sesión de
+    usuario (la TV de la sala de operaciones). Se guarda solo el hash: el
+    token se muestra una vez al crearlo. Vence y se puede revocar."""
+
+    __tablename__ = "tokens_wallboard"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    nombre: Mapped[str] = mapped_column(String(80))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    creado_por: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vence: Mapped[datetime] = mapped_column(DateTime)
+    revocado_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ultimo_uso_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

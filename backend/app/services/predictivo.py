@@ -465,6 +465,11 @@ class Motor:
             validacion.exigir(validacion.NOMBRE_RE, llamada.uuid, "uuid")
             # El agente queda en el canal (lo leen el CDR y services/agentes.py
             # al colgar) y el cliente pasa a su sala.
+            # Si al agente le están susurrando, el supervisor se mutea antes de
+            # que entre el cliente (ver services/supervision.py).
+            from app.services.supervision import monitoreo
+
+            await monitoreo.antes_de_cliente(vivo.tenant_id, vivo.user_id)
             await esl.api(f"uuid_setvar {llamada.uuid} nspbx_agente_id {vivo.user_id}")
             await esl.api(f"uuid_transfer {llamada.uuid} conference:{sala}@{agentes.PERFIL_CONFERENCIA} inline")
             ahora_dt = datetime.utcnow()

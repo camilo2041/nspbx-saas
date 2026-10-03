@@ -77,6 +77,11 @@ CRM_GESTIONAR = "crm:gestionar"
 # Trabajar como agente en la consola (fase 3): entrar a campañas asignadas,
 # marcar, disponer. Lo que ve del cliente es solo el lead que atiende.
 AGENTE_OPERAR = "agente:operar"
+# Supervisión (fase 5). Ver: agentes y campañas en vivo, wallboard. Intervenir:
+# escuchar, susurrar e intervenir llamadas, forzar pausa o salida de un
+# agente y cambiar el nivel de marcación en caliente.
+SUPERVISION_VER = "supervision:ver"
+SUPERVISION_INTERVENIR = "supervision:intervenir"
 
 PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
     ADMIN: frozenset(
@@ -96,6 +101,8 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CRM_VER,
             CRM_GESTIONAR,
             AGENTE_OPERAR,
+            SUPERVISION_VER,
+            SUPERVISION_INTERVENIR,
         }
     ),
     SUPERVISOR: frozenset(
@@ -112,6 +119,8 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CRM_VER,
             CRM_GESTIONAR,
             AGENTE_OPERAR,
+            SUPERVISION_VER,
+            SUPERVISION_INTERVENIR,
         }
     ),
     COORDINADOR: frozenset(
@@ -125,6 +134,7 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CRM_VER,
             CRM_GESTIONAR,
             AGENTE_OPERAR,
+            SUPERVISION_VER,
         }
     ),
     ASESOR: frozenset(
@@ -241,6 +251,8 @@ ETIQUETAS_PERMISOS = {
     CRM_VER: "Ver contactos (CRM) y escribir notas",
     CRM_GESTIONAR: "Gestionar contactos: importar, campos y no llamar",
     AGENTE_OPERAR: "Trabajar como agente (consola de agente)",
+    SUPERVISION_VER: "Ver agentes y campañas en vivo y el wallboard",
+    SUPERVISION_INTERVENIR: "Escuchar, susurrar e intervenir llamadas; forzar pausa o salida de agentes",
 }
 
 TODOS_LOS_PERMISOS = tuple(ETIQUETAS_PERMISOS)

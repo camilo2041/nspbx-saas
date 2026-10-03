@@ -31,6 +31,7 @@ _SIN_PERMISO = {
     "/api/v1/": "API pública: la autentica una clave de API con sus propios permisos (test_api_v1.py)",
     "/api/assistant/chat": "asistente: solo consulta, y responde con los datos que el rol puede ver",
     "/api/csp-report": "avisos de CSP del navegador, sin sesión",
+    "/api/wallboard": "TV sin usuario: token de solo lectura que vence y se revoca (test_supervision.py)",
 }
 
 _RUTAS = rutas_con_guardia()

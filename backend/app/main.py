@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -355,6 +355,7 @@ _TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
     "estados_agente", "agentes_vivo", "callbacks",
     # Predictivo (revisión 0014)
     "metricas_campana",
+    "tokens_wallboard",
 ]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
@@ -778,6 +779,14 @@ app.include_router(
     contact_center_api.router,
     dependencies=[Depends(requiere(permissions.CAMPANAS_GESTIONAR)), Depends(licencia_operativa())],
 )
+# Supervisor (fase 5): ver para entrar; cada acción exige además
+# supervision:intervenir (app/api/supervision.py). El wallboard sin usuario
+# entra con su propio token (lista de rutas abiertas en app/core/auth.py).
+app.include_router(
+    supervision_api.router,
+    dependencies=[Depends(requiere(permissions.SUPERVISION_VER)), Depends(licencia_operativa())],
+)
+app.include_router(supervision_api.publico)
 app.include_router(
     ai_usage.router,
     dependencies=[Depends(requiere(permissions.CONSUMO_IA_VER)), *_VOICEBOT],

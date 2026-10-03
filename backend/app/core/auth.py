@@ -69,6 +69,9 @@ _ABIERTAS = (
     "/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/api/auth/mfa/verificar",
     # Lo manda el navegador, sin token (ver app/api/csp.py).
     "/api/csp-report",
+    # Wallboard de una TV sin usuario: token de solo lectura en la cabecera
+    # X-Wallboard-Token, que vence y se revoca (ver app/api/supervision.py).
+    "/api/wallboard",
 )
 
 # Lo único que puede hacer una sesión de un rol que exige MFA y todavía no

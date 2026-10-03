@@ -227,6 +227,12 @@ async def _a_tiempo_real(cabeceras: str) -> None:
         await predictivo.motor.recibir(ev)
     except Exception:
         logger.exception("Evento de canal no procesado por el predictivo")
+    from app.services.supervision import monitoreo
+
+    try:
+        await monitoreo.recibir(ev)
+    except Exception:
+        logger.exception("Evento de canal no procesado por el monitoreo")
 
 
 async def asegurar_eventos() -> None:

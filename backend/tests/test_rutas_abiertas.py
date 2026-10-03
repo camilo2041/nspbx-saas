@@ -23,6 +23,8 @@ _ABIERTAS = {
     "/api/auth/mfa/verificar",
     # Avisos de CSP del navegador: sin token, tope por IP (app/api/csp.py).
     "/api/csp-report",
+    # Wallboard sin usuario: token de solo lectura propio (test_supervision.py).
+    "/api/wallboard",
 }
 _ABIERTAS_PREFIJO = (
     # Agente de IA: secreto compartido en cabecera (X-Agent-Secret).
