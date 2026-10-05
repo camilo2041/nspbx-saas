@@ -169,7 +169,7 @@ async def test_numero_de_cola_no_puede_ser_el_de_una_extension(cliente, mundo):
 
 async def test_extension_no_puede_tomar_el_numero_de_una_cola(cliente, mundo):
     cab = mundo.alfa.cabeceras()
-    r = await cliente.post("/api/extensions", json={"number": "5000", "password": "Clave-Segura-9182"}, headers=cab)
+    r = await cliente.post("/api/extensions", json={"number": "5000", "password": "Clave-Segura-9182"}, headers=cab)  # gitleaks:allow (clave de prueba)
     assert r.status_code == 409 and "soporte" in r.json()["detail"]
     r = await cliente.put(f"/api/extensions/{mundo.alfa.ids['extension']}", json={"number": "5000"}, headers=cab)
     assert r.status_code == 409
