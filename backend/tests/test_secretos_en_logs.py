@@ -42,6 +42,13 @@ def test_el_log_de_acceso_no_lleva_secretos(ruta):
     assert "firma-del-token" not in linea
     assert "ab" * 32 not in linea
     assert "***" in linea
+    # Y el formateador real de uvicorn lo sigue pudiendo escribir (desarma
+    # `args` como tupla: con args=None fallaba con «cannot unpack»).
+    from uvicorn.logging import AccessFormatter
+
+    salida = AccessFormatter('%(client_addr)s - "%(request_line)s" %(status_code)s', use_colors=False).format(r)
+    assert "GET" in salida and "200" in salida and "***" in salida
+    assert FS_SECRET not in salida and "firma-del-token" not in salida
 
 
 def test_el_filtro_esta_instalado_en_uvicorn():
