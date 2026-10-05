@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["co.com.gsco.conexion.ConexionPermanenteModule"]
+  }
+}

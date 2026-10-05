@@ -1,0 +1,15 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'co.com.gsco'
+version = '1.0.0'
+
+android {
+  namespace "co.com.gsco.conexion"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}

@@ -74,6 +74,25 @@ Para producción, `eas build --profile production --platform ios|android` y `eas
 
 En la pantalla de login, el primer campo pide la URL del panel de tu empresa (la misma que usás en el navegador, ej. `midominio.pbx.ejemplo.com`) — de ahí la app deduce tanto la API como el subdominio que identifica a tu empresa (ver `docs/arquitectura-multitenant.md`). Después, usuario y contraseña, igual que en el panel web.
 
+## Android sin Firebase: conexión permanente
+
+Sin `google-services.json` la app igual puede recibir llamadas con la pantalla
+apagada: mantiene la conexión con la central todo el tiempo (módulo propio en
+`modules/conexion-permanente`).
+
+- Viene **encendida** por defecto en Android. Se cambia en Diagnóstico →
+  «Recibir llamadas con la pantalla apagada»: Apagada, Normal o Máxima.
+- Mientras está activa se ve una notificación fija «Central conectada · Ext. N».
+- Cada usuario tiene que **quitar la restricción de batería** (botón en
+  Diagnóstico). En Xiaomi, Huawei, Oppo, Vivo y Samsung también el ahorro propio
+  de la marca y el «Inicio automático».
+- «Máxima» deja el procesador despierto siempre: solo para teléfonos que con
+  «Normal» pierden llamadas. Gasta bastante más batería.
+- Límites: tras reiniciar el teléfono, o si el sistema detiene la app, hay que
+  abrirla una vez. Con Firebase configurado, el push cubre también esos casos
+  (las dos cosas conviven).
+- Requiere compilar de nuevo (es código nativo): `eas build -p android`.
+
 ## Límite conocido
 
 Mantener la conexión SIP viva indefinidamente con la app en segundo plano no es algo que iOS/Android permitan de forma confiable solo con JavaScript — por eso existe todo el mecanismo de push de voz: el sistema operativo despierta la app justo cuando entra una llamada, no todo el tiempo. Con buena señal y las credenciales de arriba bien puestas, el timbrado en segundo plano funciona, pero no es tan instantáneo ni 100% infalible como el de una app de telefonía nativa del operador — la latencia del push (típicamente menos de un segundo, a veces más) se suma al tiempo de reconexión SIP antes de que timbre.

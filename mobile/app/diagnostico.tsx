@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Linking, PermissionsAndroid, Platform, Text, View } from "react-native";
+import { AppState, Linking, PermissionsAndroid, Platform, Text, View } from "react-native";
 
+import * as conexion from "@/modules/conexion-permanente";
 import { ApiError, peticion } from "@/src/api/client";
 import { Aviso, Pantalla } from "@/src/gestion";
 import { exito } from "@/src/haptico";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
 import { probarTimbre } from "@/src/timbre";
 import { radios, useColores } from "@/src/tema";
-import { Boton, CajaIcono, Tarjeta } from "@/src/ui";
+import { Boton, CajaIcono, Segmentado, Tarjeta } from "@/src/ui";
+import type { ModoConexion } from "@/src/softphone/conexionPermanente";
 import type { NombreIcono } from "@/src/Icono";
 
 type Estado = "ok" | "aviso" | "mal";
@@ -41,7 +43,8 @@ async function permisoAndroid(permiso: string): Promise<boolean> {
  */
 export default function Diagnostico() {
   const col = useColores();
-  const { connState, connError, entorno, pushListo, connect } = useSoftphone();
+  const { connState, connError, entorno, pushListo, connect, conexionPermanente } = useSoftphone();
+  const [bateriaLibre, setBateriaLibre] = useState(true);
   const [notif, setNotif] = useState<boolean | null>(null);
   const [mic, setMic] = useState<boolean | null>(null);
   const [probando, setProbando] = useState(false);
@@ -52,11 +55,19 @@ export default function Diagnostico() {
     const versionNotif = Platform.OS === "android" && Number(Platform.Version) >= 33;
     setNotif(versionNotif ? await permisoAndroid("android.permission.POST_NOTIFICATIONS") : true);
     setMic(await permisoAndroid("android.permission.RECORD_AUDIO"));
+    setBateriaLibre(conexion.sinRestriccionBateria());
   }, []);
 
   useEffect(() => {
     revisar();
+    // Al volver del diálogo de batería del sistema.
+    const sub = AppState.addEventListener("change", (e) => {
+      if (e === "active") revisar();
+    });
+    return () => sub.remove();
   }, [revisar]);
+
+  const permanente = conexionPermanente.disponible && conexionPermanente.modo !== "apagada";
 
   const registrado = connState === "registered";
   const chequeos: Chequeo[] = [
@@ -78,13 +89,29 @@ export default function Diagnostico() {
         ? "La central sabe dónde encontrarte: las llamadas llegan a este teléfono."
         : connError || "Mientras no diga «Conectado», ninguna llamada puede entrar. Revisa tu internet o toca «Reconectar».",
     },
+    ...(permanente
+      ? [
+          {
+            clave: "permanente",
+            estado: (conexionPermanente.activa && bateriaLibre ? "ok" : "aviso") as Estado,
+            titulo: conexionPermanente.activa ? "Conexión permanente: activa" : "Conexión permanente: esperando conexión",
+            detalle: !bateriaLibre
+              ? "Falta sacar la app del ahorro de batería (abajo): sin eso, con la pantalla apagada Android le corta internet y las llamadas dejan de entrar."
+              : conexionPermanente.activa
+                ? "La app sigue conectada con la pantalla apagada o en segundo plano (verás la notificación fija «Central conectada»)."
+                : "Se activa sola en cuanto la extensión quede conectada a la central.",
+          },
+        ]
+      : []),
     {
       clave: "push",
-      estado: pushListo ? "ok" : "mal",
+      estado: pushListo ? "ok" : permanente ? "aviso" : "mal",
       titulo: pushListo ? "Avisos para despertar la app: activos" : "Avisos para despertar la app: NO configurados",
       detalle: pushListo
         ? "Con el teléfono bloqueado o la app cerrada, la llamada despierta la app."
-        : "Sin esto, las llamadas SOLO entran con la app abierta en pantalla. Con la app en segundo plano o el teléfono bloqueado no llega nada. Requiere configurar Firebase (Android) o Apple (iPhone) en la app y en el servidor: pídeselo a quien administra la central.",
+        : permanente
+          ? "No configurados: si la app se detiene del todo («Forzar detención», reiniciar el teléfono o el ahorro de algunas marcas), no entra nada hasta que la vuelvas a abrir."
+          : "Sin esto, las llamadas SOLO entran con la app abierta en pantalla. Con la app en segundo plano o el teléfono bloqueado no llega nada. Requiere configurar Firebase (Android) o Apple (iPhone) en la app y en el servidor: pídeselo a quien administra la central.",
     },
     {
       clave: "notificaciones",
@@ -148,6 +175,40 @@ export default function Diagnostico() {
           </View>
         </Tarjeta>
       ))}
+
+      {conexionPermanente.disponible ? (
+        <Tarjeta style={{ gap: 10 }}>
+          <Text style={{ fontSize: 15, fontWeight: "700", color: col.texto }}>Recibir llamadas con la pantalla apagada</Text>
+          <Text style={{ fontSize: 13, color: col.textoSecundario, lineHeight: 19 }}>
+            Mantiene la app conectada a la central todo el tiempo, con una notificación fija. No necesita Firebase.
+            «Máxima» no deja dormir al procesador: úsala solo si con «Normal» se pierden llamadas (gasta bastante más batería).
+          </Text>
+          <Segmentado<ModoConexion>
+            opciones={[
+              { valor: "apagada", etiqueta: "Apagada" },
+              { valor: "normal", etiqueta: "Normal" },
+              { valor: "maxima", etiqueta: "Máxima" },
+            ]}
+            valor={conexionPermanente.modo}
+            onChange={(m) => conexionPermanente.cambiarModo(m)}
+          />
+          {permanente && !bateriaLibre ? (
+            <>
+              <Aviso tono="aviso" texto="Paso obligatorio: permite que la app funcione sin restricciones de batería." />
+              <Boton titulo="Quitar restricción de batería" icono="ajustes" onPress={() => conexion.pedirSinRestriccionBateria()} />
+            </>
+          ) : null}
+          {permanente ? (
+            <>
+              <Text style={{ fontSize: 12.5, color: col.textoSecundario, lineHeight: 18 }}>
+                En Xiaomi, Huawei, Oppo, Vivo y Samsung hay además un ahorro propio de la marca: en los ajustes de la app, pon la batería en «Sin
+                restricciones» y activa el «Inicio automático» si aparece. En algunas marcas cerrar la app deslizándola la detiene; y tras reiniciar el teléfono hay que abrirla una vez.
+              </Text>
+              <Boton titulo="Ajustes de la app" icono="ajustes" variante="suave" onPress={() => conexion.abrirAjustesApp()} />
+            </>
+          ) : null}
+        </Tarjeta>
+      ) : null}
 
       <Tarjeta style={{ gap: 10 }}>
         <Text style={{ fontSize: 15, fontWeight: "700", color: col.texto }}>Sonido y ahorro de batería</Text>

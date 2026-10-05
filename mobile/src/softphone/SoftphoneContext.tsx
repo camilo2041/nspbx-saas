@@ -45,6 +45,8 @@ import { detenerTimbre, iniciarTimbre } from "@/src/timbre";
 import type { MiEntorno } from "@/src/api/types";
 import { useAuth } from "@/src/auth/AuthContext";
 import { instalarPolyfillWebRTC } from "@/src/softphone/webrtcPolyfill";
+import * as conexion from "@/modules/conexion-permanente";
+import { guardarModo, leerModo, type ModoConexion } from "@/src/softphone/conexionPermanente";
 
 instalarPolyfillWebRTC();
 
@@ -79,6 +81,14 @@ interface SoftphoneCtx {
   activarDnd: (activar: boolean) => Promise<void>;
   /** ¿El teléfono tiene un token de push para despertar la app con la llamada? */
   pushListo: boolean;
+  /** Conexión permanente con la central (Android, sin push). */
+  conexionPermanente: {
+    disponible: boolean;
+    modo: ModoConexion;
+    cambiarModo: (modo: ModoConexion) => Promise<void>;
+    /** El servicio está corriendo ahora. */
+    activa: boolean;
+  };
 }
 
 const Ctx = createContext<SoftphoneCtx | null>(null);
@@ -213,6 +223,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const voip = useVoIPPushToken();
+
+  const [modoConexion, setModoConexion] = useState<ModoConexion>("apagada");
+  const modoConexionRef = useRef<ModoConexion>("apagada");
+  modoConexionRef.current = modoConexion;
+  const [conexionActiva, setConexionActiva] = useState(false);
+  useEffect(() => {
+    leerModo().then(setModoConexion);
+  }, []);
 
   // Cuándo se trajo el entorno (credenciales de TURN incluidas) y el objeto de
   // opciones que tiene el UserAgent: sip.js lo lee en cada llamada, así que
@@ -529,7 +547,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
       userAgentRef.current = ua;
 
-      const registerer = new Registerer(ua);
+      // Con la conexión permanente el registro dura 20 min: en reposo el
+      // teléfono solo despierta con el latido (~9 min), y el refresco normal
+      // de sip.js (un temporizador de JS) no corre mientras duerme.
+      const registerer = new Registerer(ua, modoConexionRef.current !== "apagada" && conexion.disponible ? { expires: 1200 } : {});
       registererRef.current = registerer;
       registerer.stateChange.addListener((state) => {
         if (!esVigente()) return;
@@ -609,6 +630,71 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
     });
     return () => sub.remove();
+  }, []);
+
+  // ---- Conexión permanente (Android) ----------------------------------
+  // El servicio arranca cuando la extensión queda registrada con la app en
+  // pantalla (Android 12+ no deja arrancarlo desde atrás) y mantiene viva la
+  // app con la pantalla apagada. Al cerrar sesión o apagarlo, se detiene.
+  const extensionNumero = entorno?.extension?.number;
+  useEffect(() => {
+    if (!conexion.disponible) return;
+    if (modoConexion === "apagada" || !usuario || !extensionNumero) {
+      conexion.detener();
+      setConexionActiva(false);
+      return;
+    }
+    const titulo = `Central conectada · Ext. ${extensionNumero}`;
+    if (connState === "registered") {
+      if (AppState.currentState === "active") {
+        // También con el servicio ya activo: aplica un cambio de modo.
+        setConexionActiva(conexion.iniciar(titulo, "Lista para recibir llamadas", modoConexion === "maxima"));
+      } else {
+        conexion.actualizar(titulo, "Lista para recibir llamadas");
+      }
+    } else if (conexion.activa()) {
+      conexion.actualizar(`Ext. ${extensionNumero} · reconectando…`, "Sin conexión con la central: reintentando");
+    }
+  }, [connState, modoConexion, usuario, extensionNumero]);
+
+  // Si no se pudo arrancar (la app no estaba en pantalla), al volver.
+  useEffect(() => {
+    if (!conexion.disponible) return;
+    const sub = AppState.addEventListener("change", (estado) => {
+      if (estado !== "active" || modoConexionRef.current === "apagada" || conexion.activa()) return;
+      const ext = entornoRef.current?.extension?.number;
+      if (ext && connStateRef.current === "registered") {
+        setConexionActiva(conexion.iniciar(`Central conectada · Ext. ${ext}`, "Lista para recibir llamadas", modoConexionRef.current === "maxima"));
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Latido (~9 min, también en reposo): renueva el registro o reconecta.
+  useEffect(() => {
+    const sub = conexion.alLatido(() => {
+      if (apagadoRef.current || !entornoRef.current) return;
+      if (connStateRef.current === "registered" && registererRef.current) {
+        registererRef.current.register().catch(() => {
+          intentosRef.current = 0;
+          connectRef.current();
+        });
+      } else if (connStateRef.current !== "connecting") {
+        intentosRef.current = 0;
+        connectRef.current();
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  const cambiarModoConexion = useCallback(async (modo: ModoConexion) => {
+    await guardarModo(modo);
+    setModoConexion(modo);
+    // El registro nuevo toma la duración que corresponde al modo.
+    if (connStateRef.current === "registered" && !hayLlamadaActiva()) {
+      intentosRef.current = 0;
+      connectRef.current();
+    }
   }, []);
 
   // ---- Eventos de CallKit/Telecom ------------------------------------
@@ -868,6 +954,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         sendDtmf,
         activarDnd,
         pushListo: !!voip,
+        conexionPermanente: {
+          disponible: conexion.disponible,
+          modo: modoConexion,
+          cambiarModo: cambiarModoConexion,
+          activa: conexionActiva,
+        },
       }}
     >
       {children}
