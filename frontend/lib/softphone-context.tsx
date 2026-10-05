@@ -92,6 +92,7 @@ let tokenSesionAgente: string | null = null;
 
 export function esperarSesionAgente(token: string | null) {
   tokenSesionAgente = token;
+  revisarPendientes();
 }
 
 // Igual para el monitoreo del supervisor (escuchar, susurrar, intervenir;
@@ -101,6 +102,43 @@ let tokenMonitoreo: string | null = null;
 
 export function esperarMonitoreo(token: string | null) {
   tokenMonitoreo = token;
+  revisarPendientes();
+}
+
+// La central llama al softphone con el token NUEVO apenas el agente entra (o
+// pide reconectar el audio), y esa llamada suele llegar antes que la
+// respuesta HTTP que le enseña el token a la consola. Antes se rechazaba
+// enseguida y el agente quedaba «Sin audio» para siempre. Ahora espera unos
+// segundos a que la consola conozca el token; si no coincide, se rechaza.
+const ESPERA_TOKEN_MS = 8000;
+interface Pendiente {
+  token: string;
+  decidir: (aceptar: boolean, esAgente: boolean) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+let pendientes: Pendiente[] = [];
+
+function revisarPendientes() {
+  pendientes = pendientes.filter((p) => {
+    const esAgente = !!tokenSesionAgente && p.token === tokenSesionAgente;
+    const esMonitoreo = !!tokenMonitoreo && p.token === tokenMonitoreo;
+    if (!esAgente && !esMonitoreo) return true;
+    clearTimeout(p.timer);
+    p.decidir(true, esAgente);
+    return false;
+  });
+}
+
+function esperarToken(token: string, decidir: Pendiente["decidir"]) {
+  const p: Pendiente = {
+    token,
+    decidir,
+    timer: setTimeout(() => {
+      pendientes = pendientes.filter((x) => x !== p);
+      decidir(false, false);
+    }, ESPERA_TOKEN_MS),
+  };
+  pendientes.push(p);
 }
 
 export function useSoftphone() {
@@ -402,16 +440,20 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
           onInvite(invitation: Invitation) {
             const token = invitation.request.getHeader("X-NSPBX-Agente");
             if (token) {
+              const decidir = (aceptar: boolean, esAgente: boolean) => {
+                if (!aceptar) {
+                  invitation.reject().catch(() => {});
+                  return;
+                }
+                bindSession(invitation, esAgente ? "Sesión de agente" : "Monitoreo", false);
+                invitation
+                  .accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } })
+                  .catch(() => {});
+              };
               const esAgente = !!tokenSesionAgente && token === tokenSesionAgente;
               const esMonitoreo = !!tokenMonitoreo && token === tokenMonitoreo;
-              if (!esAgente && !esMonitoreo) {
-                invitation.reject().catch(() => {});
-                return;
-              }
-              bindSession(invitation, esAgente ? "Sesión de agente" : "Monitoreo", false);
-              invitation
-                .accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } })
-                .catch(() => {});
+              if (esAgente || esMonitoreo) decidir(true, esAgente);
+              else esperarToken(token, decidir);
               return;
             }
             bindSession(invitation, invitation.remoteIdentity.uri.user ?? "desconocido", true);

@@ -559,3 +559,14 @@ async def test_asignar_agentes_y_catalogos(cliente, papa, mundo):
     r = await cliente.get("/api/contact-center/disposiciones", headers=cab)
     assert r.status_code == 200
     assert (await cliente.get("/api/contact-center/pausas", headers=mundo.alfa.cabeceras(permissions.ASESOR))).status_code == 403
+
+
+async def test_sin_softphone_conectado_lo_dice_en_vez_de_quedar_sin_audio(papa, fs, monkeypatch):  # noqa: F811
+    async def api(cmd, **_kw):
+        fs.api.append(cmd)
+        return "error/user_not_registered" if cmd.startswith("sofia_contact ") else "+OK"
+
+    monkeypatch.setattr(esl, "api", api)
+    with pytest.raises(agentes.ErrorAgente, match="no está conectada"):
+        await _entrar(papa, fs, 0)
+    assert not fs.bgapi  # no se originó nada
