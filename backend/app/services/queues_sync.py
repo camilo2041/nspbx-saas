@@ -157,6 +157,11 @@ async def _current_tier_agents(qkey: str, tenant_id: int | None = None) -> set[s
     return agents
 
 
+async def _estado_agente(ext: str, tenant_id: int) -> str:
+    dnd = await _run(f"db select/dnd/{esl.clave_dnd(ext, tenant_id)}", tenant_id)
+    return esl.ESTADO_AGENTE_DND[dnd.strip() == "on"]
+
+
 async def _asegurar_agentes(queue, dominio: str) -> None:
     """Crea en mod_callcenter los agentes y tiers de la cola que falten.
 
@@ -178,7 +183,9 @@ async def _asegurar_agentes(queue, dominio: str) -> None:
             ("wrap_up_time", str(queue.wrap_up_time)),
             ("reject_delay_time", "2"),
             ("busy_delay_time", "10"),
-            ("status", "Available"),
+            # Con "no molestar" queda en pausa: guardar la cola no debe
+            # volver a hacerle timbrar a quien lo activó.
+            ("status", await _estado_agente(ext, tid)),
         ):
             await _run(f"callcenter_config agent set {campo} {akey} {valor}", tid)
         if akey not in en_cola:

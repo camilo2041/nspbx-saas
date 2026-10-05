@@ -24,10 +24,18 @@ class CallcenterFalso:
         self.agentes: dict[str, dict] = {a: {} for a in agentes}
         self.tiers: set[tuple[str, str]] = set(tiers)
         self.comandos: list[str] = []
+        self.dnd: set[str] = set()  # claves de la base interna (db select/dnd/...)
 
     async def api(self, cmd, tenant_id=None, nodo=None):
         self.comandos.append(cmd)
         p = cmd.split()
+        if p[0] == "db":
+            accion, _, clave = p[1].split("/")[:3]
+            if accion == "insert":
+                self.dnd.add(clave)
+            elif accion == "delete":
+                self.dnd.discard(clave)
+            return "on" if clave in self.dnd else ""
         assert p[0] == "callcenter_config", cmd
         if p[1:3] == ["queue", "reload"]:
             return "+OK" if p[3] in self.colas else "-ERR Invalid Queue not found!"
@@ -48,7 +56,7 @@ class CallcenterFalso:
         if p[1:3] == ["agent", "set"]:
             if p[4] not in self.agentes:
                 return "-ERR Invalid Agent!"
-            self.agentes[p[4]][p[3]] = p[5]
+            self.agentes[p[4]][p[3]] = " ".join(p[5:]).strip("'")
             return "+OK"
         if p[1:3] == ["tier", "add"]:
             # El real exige que la cola esté cargada y el agente exista.
@@ -168,3 +176,39 @@ async def test_extension_no_puede_tomar_el_numero_de_una_cola(cliente, mundo):
     # El mismo número en OTRA empresa sí se puede (cada una tiene su plan de marcado).
     r = await cliente.get("/api/queues", headers=mundo.beta.cabeceras())
     assert any(q["extension"] == "5000" for q in r.json())
+
+
+# --- No molestar en colas ----------------------------------------------------
+
+from app.services.config_generator import _append_dnd_feature_codes, _append_dnd_hook  # noqa: E402
+
+
+async def test_con_no_molestar_la_cola_no_le_timbra(cc):
+    """mod_callcenter le marca directo al agente (sin pasar por el dialplan
+    donde está el corte de DND): el DND tiene que pausarlo en la cola."""
+    await queues_sync.sync_queue(_cola(["101", "102"]), DOMINIO)
+    await esl.dnd_set("102", 7, DOMINIO, True)
+    assert cc.reciben_llamadas(COLA) == {f"101@{DOMINIO}"}
+    # Guardar la cola de nuevo no lo vuelve a poner disponible.
+    await queues_sync.sync_queue(_cola(["101", "102"]), DOMINIO)
+    assert cc.reciben_llamadas(COLA) == {f"101@{DOMINIO}"}
+    await esl.dnd_set("102", 7, DOMINIO, False)
+    assert cc.reciben_llamadas(COLA) == {f"101@{DOMINIO}", f"102@{DOMINIO}"}
+
+
+async def test_no_molestar_no_se_mezcla_entre_empresas(cc):
+    await esl.dnd_set("102", 7, DOMINIO, True)
+    assert await esl.dnd_status("102", 7)
+    assert not await esl.dnd_status("102", 8)
+
+
+def test_codigos_de_no_molestar_pausan_al_agente():
+    ctx = ET.Element("context", attrib={"name": "ctx_alfa"})
+    _append_dnd_feature_codes(ctx, DOMINIO, 7)
+    _append_dnd_hook(ctx, [SimpleNamespace(number="101")], 7)
+    datos = [a.get("data") for a in ctx.iter("action")]
+    assert "insert/dnd/${caller_id_number}_t7/on" in datos
+    assert any(f"agent set status ${{caller_id_number}}@{DOMINIO} 'On Break'" in (d or "") for d in datos)
+    assert any(f"agent set status ${{caller_id_number}}@{DOMINIO} Available" in (d or "") for d in datos)
+    campos = [c.get("field") for c in ctx.iter("condition")]
+    assert "${db(select/dnd/${destination_number}_t7)}" in campos
