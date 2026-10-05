@@ -86,11 +86,74 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T;
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const detail =
-      typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? body);
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, mensajeDeError(body));
   }
   return body as T;
+}
+
+// Nombres de campo que devuelve la validación del backend (422), en palabras.
+const CAMPOS: Record<string, string> = {
+  number: "Número",
+  password: "Contraseña",
+  username: "Usuario",
+  full_name: "Nombre",
+  email: "Correo",
+  caller_id_name: "Nombre (Caller ID)",
+  name: "Nombre",
+  extension: "Extensión",
+  phone: "Teléfono",
+  role: "Rol",
+};
+
+interface ErrorValidacion {
+  type?: string;
+  loc?: (string | number)[];
+  msg?: string;
+  ctx?: Record<string, unknown>;
+}
+
+function textoValidacion(e: ErrorValidacion): string {
+  const ctx = e.ctx ?? {};
+  switch (e.type) {
+    case "missing":
+      return "es obligatorio";
+    case "string_too_short":
+      return `debe tener al menos ${ctx.min_length} caracteres`;
+    case "string_too_long":
+      return `puede tener como máximo ${ctx.max_length} caracteres`;
+    case "string_pattern_mismatch":
+      return "tiene un formato no válido";
+    case "greater_than_equal":
+      return `debe ser ${ctx.ge} o más`;
+    case "less_than_equal":
+      return `debe ser ${ctx.le} o menos`;
+    case "too_short":
+      return `necesita al menos ${ctx.min_length} elemento(s)`;
+    default:
+      // Los validadores propios ya escriben en español: «Value error, …».
+      return (e.msg ?? "no es válido").replace(/^Value error, /, "");
+  }
+}
+
+/**
+ * El texto para mostrar de una respuesta de error. Los 422 de validación
+ * traen una lista ([{loc, msg, type}]): antes se mostraba ese JSON tal cual
+ * y no se entendía qué campo estaba mal.
+ */
+export function mensajeDeError(body: { detail?: unknown } | null | undefined): string {
+  const detail = body?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail.length) {
+    return (detail as ErrorValidacion[])
+      .map((e) => {
+        const campo = [...(e.loc ?? [])].reverse().find((x) => typeof x === "string" && x !== "body") as string | undefined;
+        const nombre = campo ? (CAMPOS[campo] ?? campo) : "";
+        const texto = textoValidacion(e);
+        return nombre ? `${nombre}: ${texto}` : texto.charAt(0).toUpperCase() + texto.slice(1);
+      })
+      .join(". ");
+  }
+  return JSON.stringify(detail ?? body);
 }
 
 const jsonHeaders = { "Content-Type": "application/json" };
