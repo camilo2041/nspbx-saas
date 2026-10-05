@@ -65,18 +65,22 @@ class ConexionPermanenteModule : Module() {
 
     /** Pide al usuario sacar la app del ahorro de batería (diálogo del sistema). */
     Function("pedirSinRestriccionBateria") {
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return@Function
-      val directo = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-        .setData(Uri.parse("package:${contexto.packageName}"))
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      try {
-        contexto.startActivity(directo)
-      } catch (_: Exception) {
-        // Algunas marcas no tienen ese diálogo: se abre la lista general.
-        contexto.startActivity(
-          Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+      // Sin `return@Function` a secas: Expo espera `() -> Any?` y un return
+      // vacío es Unit (no compila).
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val directo = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+          .setData(Uri.parse("package:${contexto.packageName}"))
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+          contexto.startActivity(directo)
+        } catch (_: Exception) {
+          // Algunas marcas no tienen ese diálogo: se abre la lista general.
+          contexto.startActivity(
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+          )
+        }
       }
+      null
     }
 
     /** Ajustes de la app (para el ahorro de batería propio de cada marca). */
