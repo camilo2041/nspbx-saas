@@ -16,9 +16,11 @@ import {
   cargarSesionGuardada,
   cerrarSesion as cerrarSesionApi,
   iniciarSesion,
+  MfaPendiente,
   onSesionExpirada,
   peticion,
   servidorConfigurado,
+  verificarMfa,
   verificarSoloContrasena,
 } from "@/src/api/client";
 import type { SesionOut, UsuarioOut } from "@/src/api/types";
@@ -44,8 +46,14 @@ interface AuthCtx {
   puede: (permiso: string) => boolean;
   /** Paquetes que tiene contratados la empresa ("pbx", "voicebot"). */
   tieneModulo: (modulo: string) => boolean;
-  login: (username: string, password: string) => Promise<void>;
+  /** true si entró; false si la cuenta pide el código de verificación (ver `mfaPendiente`). */
+  login: (username: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
+
+  // Verificación en dos pasos: contraseña bien, falta el código.
+  mfaPendiente: { username: string } | null;
+  confirmarMfa: (codigo: string) => Promise<void>;
+  cancelarMfa: () => void;
 
   // Acceso con huella
   bioDisponible: boolean;
@@ -81,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [bloqueada, setBloqueada] = useState(false);
   const [nombreBio, setNombreBio] = useState("");
   const [avisoAcceso, setAvisoAcceso] = useState("");
+  const [mfa, setMfa] = useState<{ username: string; token: string } | null>(null);
 
   const usuarioRef = useRef<UsuarioOut | null>(null);
   usuarioRef.current = usuario;
@@ -169,10 +178,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const servidor = await servidorConfigurado();
-    const sesion = await iniciarSesion(servidor, username, password);
-    aplicarSesion(sesion);
+    try {
+      aplicarSesion(await iniciarSesion(servidor, username, password));
+    } catch (e) {
+      if (!(e instanceof MfaPendiente)) throw e;
+      setMfa({ username, token: e.mfaToken });
+      return false;
+    }
+    setMfa(null);
     recordarUsuario(username).catch(() => {});
+    return true;
   }, []);
+
+  const confirmarMfa = useCallback(
+    async (codigo: string) => {
+      if (!mfa) throw new Error("El paso de verificación venció. Vuelve a entrar.");
+      const servidor = await servidorConfigurado();
+      aplicarSesion(await verificarMfa(servidor, mfa.token, codigo.trim()));
+      recordarUsuario(mfa.username).catch(() => {});
+      setMfa(null);
+    },
+    [mfa]
+  );
+
+  const cancelarMfa = useCallback(() => setMfa(null), []);
 
   const desbloquear = useCallback(async (): Promise<string | null> => {
     // Sesión vigente: basta con confirmar quién tiene el teléfono.
@@ -201,6 +230,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setBloqueada(false);
       return null;
     } catch (e) {
+      if (e instanceof MfaPendiente) {
+        // La contraseña guardada sirvió, pero la cuenta pide el código: se
+        // sale del bloqueo al login, que muestra directo el paso del código.
+        setMfa({ username: lectura.cred.username, token: e.mfaToken });
+        setBloqueada(false);
+        return null;
+      }
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         // La contraseña cambió en el panel: la guardada ya no sirve.
         await borrarBiometria();
@@ -282,6 +318,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       tieneModulo,
       login,
       logout,
+      mfaPendiente: mfa ? { username: mfa.username } : null,
+      confirmarMfa,
+      cancelarMfa,
       bioDisponible,
       bioActiva,
       bloqueada,
@@ -301,6 +340,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       tieneModulo,
       login,
       logout,
+      mfa,
+      confirmarMfa,
+      cancelarMfa,
       bioDisponible,
       bioActiva,
       bloqueada,
