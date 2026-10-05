@@ -631,7 +631,14 @@ def _append_queue_routes(context: ET.Element, queues: list, dominio: str) -> Non
         extension = ET.SubElement(context, "extension", attrib={"name": f"queue_{queue.name}", "continue": "false"})
         condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": f"^{re.escape(str(queue.extension))}$"})
         ET.SubElement(condition, "action", attrib={"application": "answer"})
-        ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=false"})
+        # true: si un agente contestó, al terminar la conversación se cuelga
+        # la pata de quien llamó. Con false (como estaba), mod_callcenter
+        # devuelve al cliente al dialplan cuando el agente cuelga primero
+        # (switch_ivr_bridge: CS_EXECUTE si no hay hangup_after_bridge) y la
+        # acción siguiente, el desborde, lo TRANSFERÍA después de haberlo
+        # atendido. Sin agente que conteste no hubo bridge y sigue igual al
+        # desborde.
+        ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
         ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})
         if queue.failover_extension and validacion.DESTINO_RE.fullmatch(queue.failover_extension):
             ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML {context.get('name')}"})

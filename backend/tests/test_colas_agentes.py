@@ -116,3 +116,55 @@ async def test_al_arrancar_el_backend_tambien_se_crean(cc, monkeypatch):
 async def test_una_extension_invalida_no_llega_a_freeswitch(cc):
     await queues_sync.sync_queue(_cola(["101", "102 status x"]), DOMINIO)
     assert not any("102 status" in c for c in cc.comandos)
+
+
+# --- Dialplan de la cola y números internos ---------------------------------
+
+from xml.etree import ElementTree as ET  # noqa: E402
+
+from app.services.config_generator import _append_queue_routes  # noqa: E402
+
+
+def _acciones_de_cola(failover):
+    ctx = ET.Element("context", attrib={"name": "ctx_alfa"})
+    _append_queue_routes(ctx, [_cola(["101"], extension="5000", failover_extension=failover)], DOMINIO)
+    return [(a.get("application"), a.get("data")) for a in ctx.iter("action")]
+
+
+def test_quien_ya_fue_atendido_no_se_pasa_al_desborde():
+    """Si el agente cuelga primero, mod_callcenter devuelve al cliente al
+    dialplan salvo que hangup_after_bridge sea true; la acción siguiente es el
+    desborde, así que con false el cliente atendido terminaba transferido."""
+    acciones = _acciones_de_cola("200")
+    i_cc = acciones.index(("callcenter", f"ventas@{DOMINIO}"))
+    previas = dict(a for a in acciones[:i_cc] if a[0] == "set" and "=" in (a[1] or "")).values()
+    assert "hangup_after_bridge=true" in previas
+    assert "hangup_after_bridge=false" not in previas
+    # Sin agente que conteste (no hubo bridge) el desborde sigue después.
+    assert acciones[i_cc + 1] == ("transfer", "200 XML ctx_alfa")
+
+
+async def test_numero_de_cola_no_puede_ser_el_de_una_extension(cliente, mundo):
+    cab = mundo.alfa.cabeceras()
+    cuerpo = {"name": "ventas", "extension": "1000", "agents": ["1000"]}
+    r = await cliente.post("/api/queues", json=cuerpo, headers=cab)
+    assert r.status_code == 409 and "extensión 1000" in r.json()["detail"]
+    # Ni el de otra cola (soporte es 5000), ni editar una cola para chocar.
+    r = await cliente.post("/api/queues", json={**cuerpo, "extension": "5000"}, headers=cab)
+    assert r.status_code in (400, 409)
+    r = await cliente.put(f"/api/queues/{mundo.alfa.ids['queue']}", json={"extension": "1000"}, headers=cab)
+    assert r.status_code == 409
+    # El desborde no puede ser la propia cola.
+    r = await cliente.put(f"/api/queues/{mundo.alfa.ids['queue']}", json={"failover_extension": "5000"}, headers=cab)
+    assert r.status_code == 400
+
+
+async def test_extension_no_puede_tomar_el_numero_de_una_cola(cliente, mundo):
+    cab = mundo.alfa.cabeceras()
+    r = await cliente.post("/api/extensions", json={"number": "5000", "password": "Clave-Segura-9182"}, headers=cab)
+    assert r.status_code == 409 and "soporte" in r.json()["detail"]
+    r = await cliente.put(f"/api/extensions/{mundo.alfa.ids['extension']}", json={"number": "5000"}, headers=cab)
+    assert r.status_code == 409
+    # El mismo número en OTRA empresa sí se puede (cada una tiene su plan de marcado).
+    r = await cliente.get("/api/queues", headers=mundo.beta.cabeceras())
+    assert any(q["extension"] == "5000" for q in r.json())
