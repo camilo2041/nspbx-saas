@@ -1,9 +1,13 @@
-# Jail de fail2ban para FreeSWITCH. Instalación en el servidor (ver README.md):
+# Jail de fail2ban para FreeSWITCH. Instalación en el servidor (ver README.md),
+# desde la raíz del repositorio:
 #
-#   sudo cp deploy/fail2ban/filter.d/nspbx-freeswitch.conf /etc/fail2ban/filter.d/
-#   sudo cp deploy/fail2ban/jail.d/nspbx-freeswitch.local  /etc/fail2ban/jail.d/
-#   sudo systemctl restart fail2ban
+#   sudo bash deploy/fail2ban/instalar.sh
 #   sudo fail2ban-client status nspbx-freeswitch
+#
+# El instalador pone también el vigía (deploy/fail2ban/vigia/): fail2ban
+# expande el comodín de logpath solo al cargar el jail, y al recrearse el
+# contenedor de FreeSWITCH su log cambia de archivo; el vigía recarga los
+# jails en ese momento. Sin él, tras cada actualización dejaba de bloquear.
 #
 # Lee el log JSON que Docker guarda de los contenedores. Si usas otro
 # logging driver (journald, etc.) cambia `backend`/`logpath` según corresponda.

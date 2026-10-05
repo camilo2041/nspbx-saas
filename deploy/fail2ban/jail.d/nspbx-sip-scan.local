@@ -1,8 +1,6 @@
-# Jail del escaneo de fraude telefónico. Instalación igual que el otro:
+# Jail del escaneo de fraude telefónico. Instalación igual que el otro
+# (sudo bash deploy/fail2ban/instalar.sh, que trae también el vigía):
 #
-#   sudo cp deploy/fail2ban/filter.d/nspbx-sip-scan.conf /etc/fail2ban/filter.d/
-#   sudo cp deploy/fail2ban/jail.d/nspbx-sip-scan.local  /etc/fail2ban/jail.d/
-#   sudo systemctl restart fail2ban
 #   sudo fail2ban-client status nspbx-sip-scan
 
 [nspbx-sip-scan]

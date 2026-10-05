@@ -116,9 +116,22 @@ class FiltroSecretos(logging.Filter):
             mensaje = record.getMessage()
         except Exception:
             return True
-        limpio = ocultar_secretos_en_texto(mensaje)
-        if limpio != mensaje:
-            record.msg, record.args = limpio, None
+        if ocultar_secretos_en_texto(mensaje) == mensaje:
+            return True
+        # Se limpia cada argumento sin quitarlos: el formateador de acceso de
+        # uvicorn desarma `args` como tupla (cliente, método, ruta, versión,
+        # código), y con `args = None` fallaba («cannot unpack») y perdía la
+        # línea.
+        if isinstance(record.args, tuple):
+            record.args = tuple(ocultar_secretos_en_texto(a) if isinstance(a, str) else a for a in record.args)
+            if isinstance(record.msg, str):
+                record.msg = ocultar_secretos_en_texto(record.msg)
+            try:
+                if ocultar_secretos_en_texto(record.getMessage()) == record.getMessage():
+                    return True
+            except Exception:
+                pass
+        record.msg, record.args = ocultar_secretos_en_texto(mensaje), None
         return True
 
 

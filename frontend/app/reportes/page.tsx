@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Badge,
@@ -78,8 +78,14 @@ export default function ReportesPage() {
   const [maxSemana, setMaxSemana] = useState("1");
   const [soloCobranza, setSoloCobranza] = useState(true);
   const [campanas, setCampanas] = useState<CampaignWithStats[]>([]);
+  // Cada respuesta va con la consulta que la pidió y solo se dibuja si es la
+  // vigente. Antes, al cambiar de pestaña se dibujaba un instante la vista
+  // nueva con los datos de la anterior (otra forma: Cumplimiento sin
+  // `abandono`, Disposiciones sin `callbacks`) y la página se caía; igual con
+  // una respuesta lenta que llegaba después de cambiar.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [datos, setDatos] = useState<any>(null);
+  const [resultado, setResultado] = useState<{ clave: string; datos: any } | null>(null);
+  const vigenteRef = useRef("");
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState("");
 
@@ -104,23 +110,27 @@ export default function ReportesPage() {
     [desde, hasta, campana, vista, agrupar, maxSemana, soloCobranza]
   );
 
+  const clave = vista === "programados" ? "" : consulta();
+  const datos = resultado && resultado.clave === clave ? resultado.datos : null;
+
   const cargar = useCallback(async () => {
     if (vista === "programados") return;
+    const pedida = consulta();
+    vigenteRef.current = pedida;
     setCargando(true);
     setError("");
     try {
-      setDatos(await api.get(consulta()));
+      const r = await api.get(pedida);
+      if (vigenteRef.current === pedida) setResultado({ clave: pedida, datos: r });
     } catch (e) {
-      setDatos(null);
-      setError(e instanceof Error ? e.message : "No se pudo generar el reporte");
+      if (vigenteRef.current === pedida) setError(e instanceof Error ? e.message : "No se pudo generar el reporte");
     } finally {
-      setCargando(false);
+      if (vigenteRef.current === pedida) setCargando(false);
     }
   }, [consulta, vista]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDatos(null);
     cargar();
   }, [cargar]);
 

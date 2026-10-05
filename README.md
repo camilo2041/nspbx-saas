@@ -166,7 +166,10 @@ se guardan en la tabla `system_settings` y se aplican de inmediato al cliente ES
   El puerto de control ESL (8021) nunca se publica.
 - **Fuerza bruta SIP.** FreeSWITCH registra los intentos fallidos
   (`log-auth-failures`); para bloquear las IPs hay que instalar fail2ban en el
-  servidor con los archivos de `deploy/fail2ban/` (instrucciones dentro del jail).
+  servidor: `sudo bash deploy/fail2ban/instalar.sh` (filtros, jails, permiso
+  para la pantalla Seguridad y el vigía que recarga los jails cuando se
+  recrea el contenedor de FreeSWITCH; sin él, tras cada actualización
+  fail2ban dejaba de bloquear sin avisar).
 - **Respaldos**: el backend vuelca Postgres cada día en `backups/`. Para
   sacarlo del servidor (con grabaciones y audios de bots, cifrado AES-256):
   `bash scripts/backup-offsite.sh` (configuración y cron en su cabecera).
