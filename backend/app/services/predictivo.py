@@ -27,8 +27,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import cast, select
+from sqlalchemy.dialects.postgresql import JSONB, insert
 
 from app.core import validacion
 from app.core.clock import now_local
@@ -225,6 +225,8 @@ class Llamada:
     creada: float
     contestada: float | None = None
     limite: float | None = None
+    # Una tarea la está contando/asignando (ver Motor.recibir): nadie más la toca.
+    ocupada: bool = False
 
 
 async def _sumar(session, campana: Campaign, **contadores: int) -> None:
@@ -268,6 +270,9 @@ class Motor:
         # Empresa de cada campaña que pasó por el motor (para la foto por empresa).
         self.tenants: dict[int, int] = {}
         self._ultima_foto = 0.0
+        # Contestadas que se están asignando en paralelo (uuid → tarea).
+        self._tareas: dict[str, asyncio.Task] = {}
+        self._paralelo: asyncio.Semaphore | None = None
         self._tarea: asyncio.Task | None = None
 
     def ventana(self, campaign_id: int) -> Ventana:
@@ -371,9 +376,13 @@ class Motor:
             return 0
 
         lanzadas = 0
+        contexto = None
         for lead in await hopper.tomar(session, campana, cuantas):
             try:
-                call_uuid, tramos, valores = await agentes.preparar_llamada(session, campana, lead, agente_id=None)
+                # Una vez por tanda: política de salientes, franja y troncales
+                # son de la campaña, no del número (ver agentes.ContextoLlamada).
+                contexto = contexto or await agentes.contexto_llamada(session, campana, dnc_verificado=True)
+                call_uuid, tramos, valores = await agentes.preparar_llamada(session, campana, lead, agente_id=None, contexto=contexto)
             except agentes.ErrorAgente as exc:
                 lead.status = "no_llamar" if "no llamar" in exc.mensaje else "failed"
                 lead.last_error = exc.mensaje[:500]
@@ -402,7 +411,18 @@ class Motor:
 
     # --- Eventos de FreeSWITCH -------------------------------------------------------
 
-    async def recibir(self, ev: dict[str, str]) -> None:
+    async def esperar(self, uuid: str) -> None:
+        """Si esa llamada se está asignando, espera a que termine. La fila de
+        eventos lo llama antes de procesar cualquier otro evento del mismo
+        canal: el orden por llamada se mantiene aunque se asignen en paralelo."""
+        tarea = self._tareas.get(uuid)
+        if tarea is not None:
+            await asyncio.wait({tarea})
+
+    async def recibir(self, ev: dict[str, str], en_segundo_plano: bool = False) -> None:
+        """`en_segundo_plano`: la contestada se asigna en una tarea aparte (así
+        la usa la fila de eventos de ESL: con decenas contestando a la vez, no
+        espera una asignación para empezar la siguiente; docs/escala.md)."""
         if not ev.get("variable_nspbx_pred"):
             return
         llamada = self.llamadas.get(ev.get("Unique-ID") or "")
@@ -413,26 +433,57 @@ class Motor:
         if nombre == "CHANNEL_ANSWER" and llamada.estado == "timbrando":
             llamada.estado = "espera"
             llamada.contestada = ahora
+            llamada.ocupada = True
+            if not en_segundo_plano:
+                await self._contestar(llamada, ahora)
+                return
+            if self._paralelo is None:
+                self._paralelo = asyncio.Semaphore(8)
+            tarea = asyncio.create_task(self._contestar(llamada, ahora))
+            self._tareas[llamada.uuid] = tarea
+            tarea.add_done_callback(lambda _t, u=llamada.uuid: self._tareas.pop(u, None))
+            return
+        if nombre == "CHANNEL_HANGUP_COMPLETE":
+            await self.esperar(llamada.uuid)
+            await self._colgo(llamada, ev, ahora)
+
+    async def _contestar(self, llamada: Llamada, ahora: float) -> None:
+        sem = self._paralelo
+        if sem is not None:
+            await sem.acquire()
+        try:
+            # Una sola transacción para contarla y pasarla a un agente: con
+            # decenas contestando a la vez, cada milisegundo es espera del
+            # cliente (docs/escala.md).
             async with sesion_de_empresa(llamada.tenant_id) as session:
                 campana = await session.get(Campaign, llamada.campaign_id)
                 llamada.limite = ahora + max(1, campana.temporizador_abandono if campana else 2)
                 self.ventana(llamada.campaign_id).resueltas.append(ahora)
                 self.ventana(llamada.campaign_id).contestadas.append(ahora)
                 self.ventana(llamada.campaign_id).rings.append((ahora, ahora - llamada.creada))
+                asignada = await self._asignar_en(session, llamada, campana, sumar=False)
                 if campana is not None:
-                    await _sumar(session, campana, contestadas=1)
+                    await _sumar(session, campana, contestadas=1, asignadas=1 if asignada else 0)
                 await session.commit()
-            await self._asignar(llamada)
-        elif nombre == "CHANNEL_HANGUP_COMPLETE":
-            self.llamadas.pop(llamada.uuid, None)
-            if llamada.estado == "timbrando":
-                self.ventana(llamada.campaign_id).resueltas.append(ahora)
-                await self._no_contesto(llamada, ev.get("Hangup-Cause") or "")
-            elif llamada.estado == "espera":
-                # El cliente colgó antes de que llegara un agente: también es abandono.
-                await self._abandono(llamada, colgar=False)
-            elif llamada.estado == "asignada" and llamada.contestada is not None:
-                self.ventana(llamada.campaign_id).conversaciones.append((ahora, ahora - llamada.contestada))
+            if asignada:
+                llamada.estado = "asignada"
+        except Exception:
+            logger.exception("No se pudo procesar la contestada %s", llamada.uuid)
+        finally:
+            llamada.ocupada = False
+            if sem is not None:
+                sem.release()
+
+    async def _colgo(self, llamada: Llamada, ev: dict[str, str], ahora: float) -> None:
+        self.llamadas.pop(llamada.uuid, None)
+        if llamada.estado == "timbrando":
+            self.ventana(llamada.campaign_id).resueltas.append(ahora)
+            await self._no_contesto(llamada, ev.get("Hangup-Cause") or "")
+        elif llamada.estado == "espera":
+            # El cliente colgó antes de que llegara un agente: también es abandono.
+            await self._abandono(llamada, colgar=False)
+        elif llamada.estado == "asignada" and llamada.contestada is not None:
+            self.ventana(llamada.campaign_id).conversaciones.append((ahora, ahora - llamada.contestada))
 
     async def _no_contesto(self, llamada: Llamada, causa: str) -> None:
         async with sesion_de_empresa(llamada.tenant_id) as session:
@@ -449,7 +500,7 @@ class Motor:
 
     async def atender_esperas(self) -> None:
         ahora = self.reloj()
-        for llamada in [ll for ll in self.llamadas.values() if ll.estado == "espera"]:
+        for llamada in [ll for ll in self.llamadas.values() if ll.estado == "espera" and not ll.ocupada]:
             if await self._asignar(llamada):
                 continue
             if llamada.limite is not None and ahora >= llamada.limite:
@@ -457,44 +508,53 @@ class Motor:
                 await self._abandono(llamada, colgar=True)
 
     async def _asignar(self, llamada: Llamada) -> bool:
-        """Al agente LISTO de la campaña que lleva más tiempo esperando."""
         async with sesion_de_empresa(llamada.tenant_id) as session:
-            candidatos = (
-                await session.execute(
-                    select(AgenteVivo)
-                    .where(AgenteVivo.estado == agentes.LISTO, AgenteVivo.audio.is_(True))
-                    .order_by(AgenteVivo.desde)
-                    .with_for_update(skip_locked=True)
-                )
-            ).scalars().all()
-            vivo = next((v for v in candidatos if llamada.campaign_id in (v.campanas or [])), None)
-            if vivo is None:
-                return False
-            lead = await session.get(CampaignNumber, llamada.lead_id)
-            sala = agentes.conferencia(vivo.tenant_id, vivo.user_id)
-            validacion.exigir(validacion.NOMBRE_RE, llamada.uuid, "uuid")
-            # El agente queda en el canal (lo leen el CDR y services/agentes.py
-            # al colgar) y el cliente pasa a su sala.
-            # Si al agente le están susurrando, el supervisor se mutea antes de
-            # que entre el cliente (ver services/supervision.py).
-            from app.services.supervision import monitoreo
-
-            await monitoreo.antes_de_cliente(vivo.tenant_id, vivo.user_id)
-            await esl.api(f"uuid_setvar {llamada.uuid} nspbx_agente_id {vivo.user_id}")
-            await esl.api(f"uuid_transfer {llamada.uuid} conference:{sala}@{agentes.PERFIL_CONFERENCIA} inline")
-            ahora_dt = datetime.utcnow()
-            self.ventana(llamada.campaign_id).esperas_agente.append((self.reloj(), (ahora_dt - vivo.desde).total_seconds()))
-            await agentes._transicion(
-                session, vivo, agentes.EN_LLAMADA, ahora_dt, campaign_id=llamada.campaign_id, lead_id=llamada.lead_id,
-                call_uuid=llamada.uuid, telefono=lead.phone if lead else None, contestada_at=ahora_dt,
-                volver_a_pausa_id=None, codigo_pausa_id=None,
-            )
-            await integraciones.emitir_seguro(session, vivo.tenant_id, "llamada.contestada", integraciones.datos_llamada(vivo))
-            campana = await session.get(Campaign, llamada.campaign_id)
-            if campana is not None:
-                await _sumar(session, campana, asignadas=1)
+            asignada = await self._asignar_en(session, llamada, await session.get(Campaign, llamada.campaign_id))
             await session.commit()
-        llamada.estado = "asignada"
+        if asignada:
+            llamada.estado = "asignada"
+        return asignada
+
+    async def _asignar_en(self, session, llamada: Llamada, campana: Campaign | None, sumar: bool = True) -> bool:
+        """Al agente LISTO de la campaña que lleva más tiempo esperando. Bloquea
+        solo a ese (SKIP LOCKED: otra asignación simultánea toma el siguiente)."""
+        vivo = (
+            await session.execute(
+                select(AgenteVivo)
+                .where(
+                    AgenteVivo.estado == agentes.LISTO,
+                    AgenteVivo.audio.is_(True),
+                    cast(AgenteVivo.campanas, JSONB).contains([llamada.campaign_id]),
+                )
+                .order_by(AgenteVivo.desde)
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            )
+        ).scalar_one_or_none()
+        if vivo is None:
+            return False
+        lead = await session.get(CampaignNumber, llamada.lead_id)
+        sala = agentes.conferencia(vivo.tenant_id, vivo.user_id)
+        validacion.exigir(validacion.NOMBRE_RE, llamada.uuid, "uuid")
+        # Si al agente le están susurrando, el supervisor se mutea antes de
+        # que entre el cliente (ver services/supervision.py).
+        from app.services.supervision import monitoreo
+
+        await monitoreo.antes_de_cliente(vivo.tenant_id, vivo.user_id, session=session)
+        # El agente queda en el canal (lo leen el CDR y services/agentes.py
+        # al colgar) y el cliente pasa a su sala.
+        await esl.api(f"uuid_setvar {llamada.uuid} nspbx_agente_id {vivo.user_id}")
+        await esl.api(f"uuid_transfer {llamada.uuid} conference:{sala}@{agentes.PERFIL_CONFERENCIA} inline")
+        ahora_dt = datetime.utcnow()
+        self.ventana(llamada.campaign_id).esperas_agente.append((self.reloj(), (ahora_dt - vivo.desde).total_seconds()))
+        await agentes._transicion(
+            session, vivo, agentes.EN_LLAMADA, ahora_dt, campaign_id=llamada.campaign_id, lead_id=llamada.lead_id,
+            call_uuid=llamada.uuid, telefono=lead.phone if lead else None, contestada_at=ahora_dt,
+            volver_a_pausa_id=None, codigo_pausa_id=None,
+        )
+        await integraciones.emitir_seguro(session, vivo.tenant_id, "llamada.contestada", integraciones.datos_llamada(vivo))
+        if sumar and campana is not None:
+            await _sumar(session, campana, asignadas=1)
         return True
 
     async def _abandono(self, llamada: Llamada, colgar: bool) -> None:

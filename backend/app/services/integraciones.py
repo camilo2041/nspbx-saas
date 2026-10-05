@@ -87,22 +87,64 @@ def _json(datos) -> str:
     return json.dumps(datos, ensure_ascii=False, default=lambda v: v.isoformat() if isinstance(v, datetime) else str(v))
 
 
+# Webhooks activos de cada empresa: (id, eventos). Se consultan en cada
+# llamada contestada y cada disposición; con decenas por segundo, ir a la base
+# cada vez se notaba (docs/escala.md). Vale CACHE_S y se invalida al cambiar
+# un webhook, en esta réplica y, por el bus, en las demás.
+CACHE_S = 5.0
+_cache: dict[int, tuple[float, list[tuple[int, list]]]] = {}
+
+
+def invalidar_cache(tenant_id: int | None = None, avisar: bool = True) -> None:
+    if tenant_id is None:
+        _cache.clear()
+    else:
+        _cache.pop(tenant_id, None)
+    if avisar:
+        from app.services.bus import bus
+
+        bus.emitir_pronto("webhooks", {"tenant": tenant_id})
+
+
+async def _activos(session, tenant_id: int) -> list[tuple[int, list]]:
+    guardado = _cache.get(tenant_id)
+    if guardado and time.monotonic() - guardado[0] < CACHE_S:
+        return guardado[1]
+    filas = (
+        await session.execute(select(Webhook.id, Webhook.eventos).where(Webhook.tenant_id == tenant_id, Webhook.activo.is_(True)))
+    ).all()
+    activos = [(i, list(e or [])) for i, e in filas]
+    _cache[tenant_id] = (time.monotonic(), activos)
+    return activos
+
+
 async def emitir(session, tenant_id: int, evento: str, datos: dict) -> int:
     """Encola el evento para cada webhook activo suscrito. No hace red: la
     entrega va aparte. Devuelve cuántas entregas encoló."""
     if evento not in EVENTOS and evento != EVENTO_PRUEBA:
         raise ValueError(evento)
-    ganchos = (await session.execute(select(Webhook).where(Webhook.tenant_id == tenant_id, Webhook.activo.is_(True)))).scalars().all()
+    ganchos = [(i, e) for i, e in await _activos(session, tenant_id) if evento == EVENTO_PRUEBA or evento in e]
+    if not ganchos:
+        return 0
     ahora = datetime.utcnow()
     cuerpo = _json({"evento": evento, "empresa_id": tenant_id, "creado": ahora.isoformat() + "Z", "datos": datos})
-    n = 0
-    for w in ganchos:
-        if evento != EVENTO_PRUEBA and evento not in (w.eventos or []):
-            continue
-        session.add(EntregaWebhook(tenant_id=tenant_id, webhook_id=w.id, evento=evento, payload=cuerpo, estado="pendiente",
+    for webhook_id, _ in ganchos:
+        session.add(EntregaWebhook(tenant_id=tenant_id, webhook_id=webhook_id, evento=evento, payload=cuerpo, estado="pendiente",
                                    proximo_intento_at=ahora))
-        n += 1
-    return n
+    return len(ganchos)
+
+
+def _desde_otra_replica(datos) -> None:
+    invalidar_cache((datos or {}).get("tenant"), avisar=False)
+
+
+def _registrar_en_bus() -> None:
+    from app.services.bus import bus
+
+    bus.registrar("webhooks", _desde_otra_replica)
+
+
+_registrar_en_bus()
 
 
 async def emitir_seguro(session, tenant_id: int, evento: str, datos: dict) -> None:

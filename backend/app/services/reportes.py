@@ -24,7 +24,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import case, cast, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.clock import business_tz
 from app.models import (
@@ -77,12 +78,6 @@ def a_local(dt: datetime) -> datetime:
     return dt.replace(tzinfo=_UTC).astimezone(business_tz()).replace(tzinfo=None)
 
 
-def _solape(ini: datetime, fin: datetime | None, r: Rango, ahora: datetime) -> float:
-    a = max(ini, r.ini)
-    b = min(fin or ahora, r.fin, ahora)
-    return max(0.0, (b - a).total_seconds())
-
-
 def _pct(parte: float, total: float) -> float | None:
     return round(100.0 * parte / total, 1) if total else None
 
@@ -99,62 +94,83 @@ async def _nombres(session, ids) -> dict[int, str]:
 
 
 # --- Agentes ------------------------------------------------------------------------------
+# Las sumas las hace la base (GROUP BY): con 200 agentes y una semana son
+# medio millón de tramos, y cargarlos en Python tardaba 25 s (docs/escala.md).
+
+
+def _segundos_en_rango(col_ini, col_fin, ini: datetime, fin: datetime):
+    """Segundos del tramo [col_ini, col_fin) dentro de [ini, fin); un tramo
+    abierto (fin NULL) cuenta hasta `fin` (que nunca pasa de ahora)."""
+    return func.extract("epoch", func.least(func.coalesce(col_fin, fin), fin) - func.greatest(col_ini, ini))
 
 
 async def agentes(session, r: Rango, campaign_id: int | None = None, user_id: int | None = None) -> dict:
     ahora = datetime.utcnow()
-    q_ses = select(SesionAgente).where(SesionAgente.inicio < r.fin, (SesionAgente.fin.is_(None)) | (SesionAgente.fin > r.ini))
+    fin = min(r.fin, ahora)
+    filtro_ses = [SesionAgente.inicio < fin, or_(SesionAgente.fin.is_(None), SesionAgente.fin > r.ini)]
     if user_id:
-        q_ses = q_ses.where(SesionAgente.user_id == user_id)
-    sesiones = [s for s in (await session.execute(q_ses)).scalars() if not campaign_id or campaign_id in (s.campanas or [])]
-    ids_sesion = [s.id for s in sesiones]
-    tramos = (
-        (await session.execute(select(EstadoAgente).where(EstadoAgente.sesion_id.in_(ids_sesion), EstadoAgente.inicio < r.fin)))
-        .scalars()
-        .all()
-        if ids_sesion
-        else []
+        filtro_ses.append(SesionAgente.user_id == user_id)
+    if campaign_id:
+        filtro_ses.append(cast(SesionAgente.campanas, JSONB).contains([campaign_id]))
+    sesiones = select(SesionAgente.id).where(*filtro_ses)
+    filtro_tramo = [
+        EstadoAgente.sesion_id.in_(sesiones),
+        EstadoAgente.inicio < fin,
+        or_(EstadoAgente.fin.is_(None), EstadoAgente.fin > r.ini),
+    ]
+    dur = _segundos_en_rango(EstadoAgente.inicio, EstadoAgente.fin, r.ini, fin)
+
+    login = (
+        await session.execute(
+            select(SesionAgente.user_id, func.count(), func.sum(_segundos_en_rango(SesionAgente.inicio, SesionAgente.fin, r.ini, fin)))
+            .where(*filtro_ses)
+            .group_by(SesionAgente.user_id)
+        )
+    ).all()
+    por_estado = (
+        await session.execute(select(EstadoAgente.user_id, EstadoAgente.estado, func.sum(dur)).where(*filtro_tramo).group_by(EstadoAgente.user_id, EstadoAgente.estado))
+    ).all()
+    por_pausa = (
+        await session.execute(
+            select(EstadoAgente.user_id, EstadoAgente.codigo_pausa_id, func.count(), func.sum(dur))
+            .where(*filtro_tramo, EstadoAgente.estado == "PAUSA")
+            .group_by(EstadoAgente.user_id, EstadoAgente.codigo_pausa_id)
+        )
+    ).all()
+    # Llamadas: las que EMPEZARON en el rango (una por uuid).
+    llamadas = dict(
+        (
+            await session.execute(
+                select(EstadoAgente.user_id, func.count(func.distinct(func.coalesce(EstadoAgente.call_uuid, func.concat("tramo-", EstadoAgente.id)))))
+                .where(EstadoAgente.sesion_id.in_(sesiones), EstadoAgente.estado == "EN_LLAMADA",
+                       EstadoAgente.inicio >= r.ini, EstadoAgente.inicio < r.fin)
+                .group_by(EstadoAgente.user_id)
+            )
+        ).all()
     )
     pausas = {p.id: p for p in (await session.execute(select(CodigoPausa))).scalars()}
-    nombres = await _nombres(session, [s.user_id for s in sesiones])
+    uids = {u for u, *_ in login} | {u for u, *_ in por_estado}
+    nombres = await _nombres(session, uids)
 
-    por: dict[int, dict] = {}
-
-    def fila(uid: int) -> dict:
-        if uid not in por:
-            por[uid] = {"user_id": uid, "nombre": nombres.get(uid, f"#{uid}"), "sesiones": 0, "login_s": 0.0,
-                        **{f"{e.lower()}_s": 0.0 for e in ESTADOS}, "llamadas": 0, "_pausas": defaultdict(lambda: [0, 0.0]),
-                        "_llamadas": set()}
-        return por[uid]
-
-    for s in sesiones:
-        f = fila(s.user_id)
-        f["sesiones"] += 1
-        f["login_s"] += _solape(s.inicio, s.fin, r, ahora)
-    for t in tramos:
-        dur = _solape(t.inicio, t.fin, r, ahora)
-        if dur <= 0 and not (t.estado == "EN_LLAMADA" and r.ini <= t.inicio < r.fin):
-            continue
-        f = fila(t.user_id)
-        clave = f"{t.estado.lower()}_s"
-        if clave in f:
-            f[clave] += dur
-        if t.estado == "PAUSA":
-            p = f["_pausas"][t.codigo_pausa_id]
-            p[0] += 1
-            p[1] += dur
-        if t.estado == "EN_LLAMADA" and r.ini <= t.inicio < r.fin:
-            f["_llamadas"].add(t.call_uuid or f"tramo-{t.id}")
+    por: dict[int, dict] = {
+        uid: {"user_id": uid, "nombre": nombres.get(uid, f"#{uid}"), "sesiones": 0, "login_s": 0.0,
+              **{f"{e.lower()}_s": 0.0 for e in ESTADOS}, "llamadas": llamadas.get(uid, 0), "pausas": []}
+        for uid in uids
+    }
+    for uid, n, total in login:
+        por[uid]["sesiones"] = n
+        por[uid]["login_s"] = float(total or 0)
+    for uid, estado, total in por_estado:
+        clave = f"{estado.lower()}_s"
+        if clave in por[uid]:
+            por[uid][clave] = float(total or 0)
+    for uid, cid, n, total in sorted(por_pausa, key=lambda x: -float(x[3] or 0)):
+        total = float(total or 0)
+        por[uid]["pausas"].append({"codigo_pausa_id": cid, "nombre": pausas[cid].nombre if cid in pausas else "Sin código",
+                                   "veces": n, "total_s": round(total), "promedio_s": _promedio(total, n)})
 
     filas = []
     for f in por.values():
-        f["llamadas"] = len(f.pop("_llamadas"))
-        detalle = f.pop("_pausas")
-        f["pausas"] = [
-            {"codigo_pausa_id": cid, "nombre": pausas[cid].nombre if cid in pausas else "Sin código", "veces": n,
-             "total_s": round(total), "promedio_s": _promedio(total, n)}
-            for cid, (n, total) in sorted(detalle.items(), key=lambda x: -x[1][1])
-        ]
         trabajo = f["en_llamada_s"] + f["dispo_s"]
         f["aht_s"] = _promedio(trabajo, f["llamadas"])
         # Ocupación: del tiempo disponible (sin pausas), cuánto estuvo con
@@ -179,62 +195,57 @@ async def agentes(session, r: Rango, campaign_id: int | None = None, user_id: in
 # --- Campañas ---------------------------------------------------------------------------------
 
 
-def _llamadas_en(r: Rango, campaign_id: int | None = None):
-    q = select(CallLog).where(CallLog.campaign_id.is_not(None), CallLog.started_at >= r.ini, CallLog.started_at < r.fin)
+def _en_rango(r: Rango, campaign_id: int | None = None) -> list:
+    filtro = [CallLog.campaign_id.is_not(None), CallLog.started_at >= r.ini, CallLog.started_at < r.fin]
     if campaign_id:
-        q = q.where(CallLog.campaign_id == campaign_id)
-    return q
+        filtro.append(CallLog.campaign_id == campaign_id)
+    return filtro
+
+
+def _cuenta(cond):
+    return func.coalesce(func.sum(case((cond, 1), else_=0)), 0)
 
 
 async def campanas(session, r: Rango, campaign_id: int | None = None) -> dict:
-    llamadas = (await session.execute(_llamadas_en(r, campaign_id))).scalars().all()
-    disps = {d.id: d for d in (await session.execute(select(Disposicion))).scalars()}
+    contestada = CallLog.status == "answered"
+    filas_sql = (
+        await session.execute(
+            select(
+                CallLog.campaign_id,
+                func.count(),
+                _cuenta(contestada),
+                _cuenta(CallLog.abandonada.is_(True)),
+                _cuenta(CallLog.status == "busy"),
+                _cuenta(CallLog.status == "no_answer"),
+                func.coalesce(func.sum(case((contestada, CallLog.billsec), else_=0)), 0),
+                func.avg(CallLog.ring_ms),
+                _cuenta(Disposicion.contacto_humano.is_(True)),
+                _cuenta(Disposicion.categoria == "venta"),
+                _cuenta(Disposicion.categoria == "promesa"),
+                _cuenta(Disposicion.id.is_not(None)),
+            )
+            .outerjoin(Disposicion, Disposicion.id == CallLog.disposicion_id)
+            .where(*_en_rango(r, campaign_id))
+            .group_by(CallLog.campaign_id)
+        )
+    ).all()
     nombres = dict((await session.execute(select(Campaign.id, Campaign.name))).all())
     metodos = dict((await session.execute(select(Campaign.id, Campaign.metodo))).all())
-    por: dict[int, dict] = {}
-    for c in llamadas:
-        f = por.setdefault(c.campaign_id, {
-            "campaign_id": c.campaign_id, "nombre": nombres.get(c.campaign_id, f"#{c.campaign_id}"),
-            "metodo": metodos.get(c.campaign_id), "intentos": 0, "contestadas": 0, "abandonadas": 0, "ocupado": 0,
-            "no_contesta": 0, "fallidas": 0, "hablado_s": 0, "_ring": [], "contactos": 0, "ventas": 0, "promesas": 0,
-            "dispuestas": 0,
-        })
-        f["intentos"] += 1
-        if c.status == "answered":
-            f["contestadas"] += 1
-            f["hablado_s"] += c.billsec or 0
-        elif c.status == "busy":
-            f["ocupado"] += 1
-        elif c.status == "no_answer":
-            f["no_contesta"] += 1
-        else:
-            f["fallidas"] += 1
-        if c.abandonada:
-            f["abandonadas"] += 1
-        if c.ring_ms is not None:
-            f["_ring"].append(c.ring_ms)
-        d = disps.get(c.disposicion_id) if c.disposicion_id else None
-        if d is not None:
-            f["dispuestas"] += 1
-            if d.contacto_humano:
-                f["contactos"] += 1
-            if d.categoria == "venta":
-                f["ventas"] += 1
-            elif d.categoria == "promesa":
-                f["promesas"] += 1
     filas = []
-    for f in por.values():
-        ring = f.pop("_ring")
-        humanas = f["contestadas"] - f["abandonadas"]
-        f.update(
-            contacto_pct=_pct(f["contestadas"], f["intentos"]),
-            abandono_pct=_pct(f["abandonadas"], f["contestadas"]),
-            ring_promedio_s=round(sum(ring) / len(ring) / 1000, 1) if ring else None,
-            aht_s=_promedio(f["hablado_s"], humanas),
+    for cid, n, cont, aband, ocup, noc, hablado, ring, contactos, ventas, promesas, dispuestas in filas_sql:
+        humanas = cont - aband
+        filas.append({
+            "campaign_id": cid, "nombre": nombres.get(cid, f"#{cid}"), "metodo": metodos.get(cid),
+            "intentos": n, "contestadas": cont, "abandonadas": aband, "ocupado": ocup, "no_contesta": noc,
+            "fallidas": n - cont - ocup - noc, "hablado_s": int(hablado), "contactos": contactos, "ventas": ventas,
+            "promesas": promesas, "dispuestas": dispuestas,
+            "contacto_pct": _pct(cont, n),
+            "abandono_pct": _pct(aband, cont),
+            "ring_promedio_s": round(float(ring) / 1000, 1) if ring is not None else None,
+            "aht_s": _promedio(float(hablado), humanas),
             # Conversión: ventas y promesas sobre las conversaciones con una persona.
-            conversion_pct=_pct(f["ventas"] + f["promesas"], f["contactos"]),
-        )
-        filas.append(f)
+            "conversion_pct": _pct(ventas + promesas, contactos),
+        })
     filas.sort(key=lambda f: f["nombre"].lower())
     total = {k: sum(f[k] for f in filas) for k in ("intentos", "contestadas", "abandonadas", "ocupado", "no_contesta", "fallidas", "contactos", "ventas", "promesas")}
     total.update(contacto_pct=_pct(total["contestadas"], total["intentos"]), abandono_pct=_pct(total["abandonadas"], total["contestadas"]),
@@ -250,28 +261,30 @@ AGRUPAR = ("campana", "agente", "lista")
 async def disposiciones(session, r: Rango, agrupar: str = "campana", campaign_id: int | None = None) -> dict:
     if agrupar not in AGRUPAR:
         raise RangoInvalido("Agrupación inválida")
-    q = _llamadas_en(r, campaign_id).where(CallLog.disposicion_id.is_not(None))
-    llamadas = (await session.execute(q)).scalars().all()
-    disps = {d.id: d for d in (await session.execute(select(Disposicion))).scalars()}
+    q = select(CallLog.disposicion_id, func.count())
     if agrupar == "campana":
+        grupo = CallLog.campaign_id
         nombres = dict((await session.execute(select(Campaign.id, Campaign.name))).all())
-        grupo = {c.id: c.campaign_id for c in llamadas}
     elif agrupar == "agente":
-        nombres = await _nombres(session, [c.agente_id for c in llamadas])
-        grupo = {c.id: c.agente_id for c in llamadas}
+        grupo = CallLog.agente_id
+        nombres = None
     else:
-        leads = [c.lead_id for c in llamadas if c.lead_id]
-        lista_de = dict((await session.execute(select(CampaignNumber.id, CampaignNumber.lista_id).where(CampaignNumber.id.in_(leads or [0])))).all())
+        grupo = CampaignNumber.lista_id
+        q = q.outerjoin(CampaignNumber, CampaignNumber.id == CallLog.lead_id)
         nombres = dict((await session.execute(select(Lista.id, Lista.nombre))).all())
-        grupo = {c.id: lista_de.get(c.lead_id) for c in llamadas}
-    cuenta: dict[tuple, int] = defaultdict(int)
+    cuenta = (
+        await session.execute(
+            q.add_columns(grupo).where(*_en_rango(r, campaign_id), CallLog.disposicion_id.is_not(None)).group_by(grupo, CallLog.disposicion_id)
+        )
+    ).all()
+    if nombres is None:
+        nombres = await _nombres(session, [g for _, _, g in cuenta])
+    disps = {d.id: d for d in (await session.execute(select(Disposicion))).scalars()}
     por_grupo: dict = defaultdict(int)
-    for c in llamadas:
-        g = grupo[c.id]
-        cuenta[(g, c.disposicion_id)] += 1
-        por_grupo[g] += 1
+    for _, n, g in cuenta:
+        por_grupo[g] += n
     filas = []
-    for (g, did), n in sorted(cuenta.items(), key=lambda x: (str(nombres.get(x[0][0], "")), -x[1])):
+    for did, n, g in sorted(cuenta, key=lambda x: (str(nombres.get(x[2], "")), -x[1])):
         d = disps.get(did)
         filas.append({
             "grupo_id": g, "grupo": nombres.get(g, "Sin asignar" if g is None else f"#{g}"),
@@ -280,16 +293,17 @@ async def disposiciones(session, r: Rango, agrupar: str = "campana", campaign_id
         })
     # Callbacks del rango: cuántos se cumplieron y cuántos quedaron vencidos.
     ahora = datetime.utcnow()
-    cbs = (await session.execute(select(Callback).where(Callback.cuando >= r.ini, Callback.cuando < r.fin))).scalars().all()
+    q_cb = select(Callback.estado, func.count(), _cuenta(Callback.cuando < ahora)).where(Callback.cuando >= r.ini, Callback.cuando < r.fin)
     if campaign_id:
-        cbs = [c for c in cbs if c.campaign_id == campaign_id]
+        q_cb = q_cb.where(Callback.campaign_id == campaign_id)
+    cbs = {e: (n, vencidos) for e, n, vencidos in (await session.execute(q_cb.group_by(Callback.estado))).all()}
     callbacks = {
-        "total": len(cbs),
-        "hechos": sum(1 for c in cbs if c.estado == "hecho"),
-        "vencidos": sum(1 for c in cbs if c.estado == "pendiente" and c.cuando < ahora),
-        "cancelados": sum(1 for c in cbs if c.estado == "cancelado"),
+        "total": sum(n for n, _ in cbs.values()),
+        "hechos": cbs.get("hecho", (0, 0))[0],
+        "vencidos": cbs.get("pendiente", (0, 0))[1],
+        "cancelados": cbs.get("cancelado", (0, 0))[0],
     }
-    return {"filas": filas, "total": len(llamadas), "callbacks": callbacks}
+    return {"filas": filas, "total": sum(por_grupo.values()), "callbacks": callbacks}
 
 
 # --- Cumplimiento --------------------------------------------------------------------------------
@@ -314,39 +328,51 @@ async def cumplimiento(session, r: Rango, max_contactos_semana: int = 1, solo_co
             "cumple": pct is None or pct <= objetivo,
         })
 
-    # 2. Llamadas de campaña fuera del horario permitido (debería ser 0).
+    # 2. Llamadas de campaña fuera del horario permitido (debería ser 0). Solo
+    # las columnas necesarias, y la franja se calcula una vez por día e intención.
     ajustes = (await session.execute(select(SystemSettings).limit(1))).scalar_one_or_none()
-    llamadas = (await session.execute(_llamadas_en(r).where(CallLog.direction == "outbound"))).scalars().all()
+    salientes_q = (
+        await session.execute(
+            select(CallLog.campaign_id, CallLog.started_at, CallLog.callee_number, CallLog.agente_id)
+            .where(*_en_rango(r), CallLog.direction == "outbound")
+            .order_by(CallLog.started_at)
+        )
+    ).all()
+    franjas: dict[tuple, tuple | None] = {}
     fuera = []
-    for c in llamadas:
-        camp = campanas_.get(c.campaign_id)
-        local = a_local(c.started_at)
-        if not horario_marcacion.puede_marcar(ajustes, camp.ai_intent if camp else None, local):
+    for cid, inicio, tel, agente in salientes_q:
+        camp = campanas_.get(cid)
+        intencion = camp.ai_intent if camp else None
+        local = a_local(inicio)
+        clave = (intencion, local.date())
+        if clave not in franjas:
+            franjas[clave] = horario_marcacion.franja(ajustes, intencion, local.date())
+        f = franjas[clave]
+        if f is None or not (f[0] <= local.time() < f[1]):
             fuera.append({"fecha": local.isoformat(timespec="seconds"), "campana": camp.name if camp else None,
-                          "telefono": c.callee_number, "agente_id": c.agente_id})
+                          "telefono": tel, "agente_id": agente})
 
-    # 3. Contactos por persona por semana (Ley 2300 en cobranza). Cuenta las
-    # llamadas CONTESTADAS a un mismo número en la misma semana (lunes a domingo, hora local).
-    por_semana: dict[tuple, list] = defaultdict(lambda: [0, 0, set()])
-    for c in llamadas:
-        camp = campanas_.get(c.campaign_id)
-        if solo_cobranza and (not camp or camp.ai_intent != "cobranza"):
-            continue
-        clave = crm.clave_telefono(c.callee_number)
-        if not clave:
-            continue
-        anio, semana, _ = a_local(c.started_at).isocalendar()
-        fila = por_semana[(clave, anio, semana)]
-        fila[0] += 1
-        if c.status == "answered":
-            fila[1] += 1
-        if camp:
-            fila[2].add(camp.name)
-    excesos = [
-        {"telefono": tel, "semana": f"{anio}-S{semana:02d}", "intentos": n, "contestadas": cont, "campanas": sorted(nom)}
-        for (tel, anio, semana), (n, cont, nom) in por_semana.items()
-        if cont > max_contactos_semana
-    ]
+    # 3. Contactos por persona por semana (Ley 2300 en cobranza): llamadas
+    # CONTESTADAS a un mismo número en la misma semana (lunes a domingo, hora
+    # local). Lo agrupa la base.
+    zona = str(business_tz())
+    semana = func.date_trunc("week", func.timezone(zona, func.timezone("UTC", CallLog.started_at)))
+    clave_tel = crm.clave_sql(CallLog.callee_number)
+    contestadas = _cuenta(CallLog.status == "answered")
+    q = (
+        select(clave_tel, semana, func.count(), contestadas, func.array_agg(func.distinct(Campaign.name)))
+        .join(Campaign, Campaign.id == CallLog.campaign_id)
+        .where(*_en_rango(r), CallLog.direction == "outbound", clave_tel != "")
+        .group_by(clave_tel, semana)
+        .having(contestadas > max_contactos_semana)
+    )
+    if solo_cobranza:
+        q = q.where(Campaign.ai_intent == "cobranza")
+    excesos = []
+    for tel, lunes, n, cont, nombres_camp in (await session.execute(q)).all():
+        anio, sem, _ = lunes.date().isocalendar()
+        excesos.append({"telefono": tel, "semana": f"{anio}-S{sem:02d}", "intentos": n, "contestadas": cont,
+                        "campanas": sorted(x for x in (nombres_camp or []) if x)})
     excesos.sort(key=lambda x: (-x["contestadas"], x["semana"]))
     return {
         "abandono": abandono,

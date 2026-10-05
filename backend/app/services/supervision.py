@@ -445,12 +445,16 @@ class Monitoreo:
         if actual is not None:
             await self._aplicar_seguro(actual)
 
-    async def antes_de_cliente(self, tenant_id: int, agente_id: int) -> asyncio.Task | None:
+    async def antes_de_cliente(self, tenant_id: int, agente_id: int, session=None) -> asyncio.Task | None:
         """Un cliente va a entrar a la sala de un agente al que se le está
         susurrando: se mutea al supervisor ANTES de que entre y se le vuelve a
-        abrir cuando el cliente ya quedó sin oírlo."""
-        async with _sesion(tenant_id) as session:
+        abrir cuando el cliente ya quedó sin oírlo. Con `session`, usa la de
+        quien llama (el predictivo: una transacción por asignación)."""
+        if session is not None:
             monitor = await self.de_agente(session, agente_id)
+        else:
+            async with _sesion(tenant_id) as propia:
+                monitor = await self.de_agente(propia, agente_id)
         if monitor is None or not monitor.contestado or monitor.modo != "susurrar":
             return None
         try:

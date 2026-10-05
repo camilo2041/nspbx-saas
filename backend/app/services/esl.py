@@ -213,11 +213,13 @@ async def _event_loop(reader: asyncio.StreamReader):
 
 
 async def _a_tiempo_real(cabeceras: str) -> None:
+    from app.services import agentes, predictivo
     from app.services.tiempo_real import leer_evento, tiempo_real
 
-    from app.services import agentes
-
     ev = leer_evento(cabeceras)
+    # Si ese canal se está asignando en paralelo (predictivo), su siguiente
+    # evento espera: el orden por llamada se mantiene (docs/escala.md).
+    await predictivo.motor.esperar(ev.get("Unique-ID") or "")
     try:
         await tiempo_real.recibir(ev)
     except Exception:
@@ -228,10 +230,8 @@ async def _a_tiempo_real(cabeceras: str) -> None:
         await agentes.recibir(ev)
     except Exception:
         logger.exception("Evento de canal no procesado por el motor de agentes")
-    from app.services import predictivo
-
     try:
-        await predictivo.motor.recibir(ev)
+        await predictivo.motor.recibir(ev, en_segundo_plano=True)
     except Exception:
         logger.exception("Evento de canal no procesado por el predictivo")
     from app.services.supervision import monitoreo

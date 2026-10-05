@@ -108,11 +108,23 @@ async def test_campanas(papa, jornada):  # noqa: F811
 
 
 async def test_disposiciones_por_agente_y_callbacks(papa, jornada):  # noqa: F811
+    from app.models import Callback, CampaignNumber
+
+    async with sesion_de_empresa(papa["tenant"]) as s:
+        lead = CampaignNumber(tenant_id=papa["tenant"], campaign_id=jornada["camp"], phone="3004445566")
+        s.add(lead)
+        await s.flush()
+        s.add_all([
+            Callback(tenant_id=papa["tenant"], lead_id=lead.id, campaign_id=jornada["camp"], cuando=utc(10), estado="hecho"),
+            Callback(tenant_id=papa["tenant"], lead_id=lead.id, campaign_id=jornada["camp"], cuando=utc(11), estado="pendiente"),
+            Callback(tenant_id=papa["tenant"], lead_id=lead.id, campaign_id=jornada["camp"], cuando=utc(12), estado="cancelado"),
+        ])
+        await s.commit()
     d = await _r(papa, "disposiciones", agrupar="agente")
     assert d["total"] == 2
     assert {(x["grupo"], x["codigo"], x["cantidad"], x["pct"]) for x in d["filas"]} == {
         ("Agente 0", "VENTA", 1, 50.0), ("Agente 0", "NO_INTERESADO", 1, 50.0)}
-    assert d["callbacks"]["total"] == 0
+    assert d["callbacks"] == {"total": 3, "hechos": 1, "vencidos": 1, "cancelados": 1}
 
 
 async def test_cumplimiento(papa, jornada):  # noqa: F811

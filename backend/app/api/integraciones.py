@@ -118,6 +118,7 @@ async def crear(payload: WebhookIn, session: AsyncSession = Depends(get_session)
                 secreto=secreto, activo=True)
     session.add(w)
     await session.commit()
+    integraciones.invalidar_cache(w.tenant_id)
     return {**_out(w), "secreto": secreto}
 
 
@@ -129,14 +130,17 @@ async def editar(webhook_id: int, payload: WebhookUpdate, session: AsyncSession 
     if payload.activo:
         w.fallos_seguidos = 0
     await session.commit()
+    integraciones.invalidar_cache(w.tenant_id)
     return _out(w)
 
 
 @router.delete("/webhooks/{webhook_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def borrar(webhook_id: int, session: AsyncSession = Depends(get_session)):
     w = await _webhook(session, webhook_id)
+    tenant_id = w.tenant_id
     await session.delete(w)
     await session.commit()
+    integraciones.invalidar_cache(tenant_id)
 
 
 @router.post("/webhooks/{webhook_id}/rotar-secreto")

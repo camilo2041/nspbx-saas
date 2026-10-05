@@ -22,6 +22,7 @@ Todo corre en sesiones atadas a la empresa (RLS + filtro de la aplicación).
 """
 
 import asyncio
+from dataclasses import dataclass
 import logging
 import os
 import secrets
@@ -448,21 +449,24 @@ async def marcar(session, vivo: AgenteVivo, campaign_id: int, telefono: str | No
     return call_uuid
 
 
-async def preparar_llamada(session, campana: Campaign, lead: CampaignNumber, agente_id: int | None) -> tuple[str, list[str], dict]:
-    """Comprueba que se puede llamar (política de salientes, no llamar,
-    franja de marcación, troncal) y arma la pata del cliente: uuid, tramos
-    por troncal y variables del canal. La usan la marcación del agente y el
-    predictivo (services/predictivo.py): las mismas reglas para todos."""
-    politica = await salientes.politica_de(session, campana.tenant_id)
-    motivo = salientes.motivo_bloqueo(lead.phone, politica)
-    if motivo:
-        raise ErrorAgente(motivo)
-    if await crm.en_no_llamar(session, lead.phone):
-        raise ErrorAgente("Ese número está en la lista de no llamar")
+@dataclass
+class ContextoLlamada:
+    """Lo que es de la empresa y la campaña, no del número: se calcula una vez
+    por tanda (el predictivo lanza decenas por vuelta; recalcular la política
+    de salientes por cada número era la mitad del tiempo de la vuelta)."""
+
+    politica: object
+    troncal: Trunk
+    tramos_de: list[Trunk]
+    slug: str
+    # El hopper ya descartó los de no llamar en la misma transacción.
+    dnc_verificado: bool = False
+
+
+async def contexto_llamada(session, campana: Campaign, dnc_verificado: bool = False) -> ContextoLlamada:
     ajustes = (await session.execute(select(SystemSettings).limit(1))).scalar_one_or_none()
     if not horario_marcacion.puede_marcar(ajustes, campana.ai_intent, now_local()):
         raise ErrorAgente("Fuera de la franja de marcación de la campaña")
-
     troncal = await session.get(Trunk, campana.trunk_id) if campana.trunk_id else None
     if troncal is None or troncal.tenant_id != campana.tenant_id or not troncal.enabled:
         raise ErrorAgente("La campaña no tiene una troncal habilitada")
@@ -470,8 +474,30 @@ async def preparar_llamada(session, campana: Campaign, lead: CampaignNumber, age
 
     troncales = (await session.execute(select(Trunk).where(Trunk.tenant_id == campana.tenant_id))).scalars().all()
     empresa = await session.get(Tenant, campana.tenant_id)
+    return ContextoLlamada(
+        politica=await salientes.politica_de(session, campana.tenant_id),
+        troncal=troncal,
+        tramos_de=orden_troncales(troncales, principal_id=troncal.id),
+        slug=empresa.slug,
+        dnc_verificado=dnc_verificado,
+    )
+
+
+async def preparar_llamada(session, campana: Campaign, lead: CampaignNumber, agente_id: int | None,
+                           contexto: ContextoLlamada | None = None) -> tuple[str, list[str], dict]:
+    """Comprueba que se puede llamar (política de salientes, no llamar,
+    franja de marcación, troncal) y arma la pata del cliente: uuid, tramos
+    por troncal y variables del canal. La usan la marcación del agente y el
+    predictivo (services/predictivo.py): las mismas reglas para todos."""
+    contexto = contexto or await contexto_llamada(session, campana)
+    motivo = salientes.motivo_bloqueo(lead.phone, contexto.politica)
+    if motivo:
+        raise ErrorAgente(motivo)
+    if not contexto.dnc_verificado and await crm.en_no_llamar(session, lead.phone):
+        raise ErrorAgente("Ese número está en la lista de no llamar")
+    troncal = contexto.troncal
     validacion.exigir(validacion.TELEFONO_RE, lead.phone, "Teléfono")
-    tramos = [f"sofia/gateway/{empresa.slug}_{t.name}/{lead.phone}" for t in orden_troncales(troncales, principal_id=troncal.id)]
+    tramos = [f"sofia/gateway/{contexto.slug}_{t.name}/{lead.phone}" for t in contexto.tramos_de]
 
     call_uuid = str(uuidlib.uuid4())
     valores = {

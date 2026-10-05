@@ -582,6 +582,9 @@ async def migrar() -> None:
     from app import migraciones
 
     async with engine.begin() as conn:
+        # Con varias réplicas arrancando a la vez, una migra y las demás
+        # esperan (el candado se suelta solo al terminar la transacción).
+        await conn.execute(text("SELECT pg_advisory_xact_lock(7324002)"))
         # Revisiones de Alembic hasta la última (app/migraciones/versiones).
         await conn.run_sync(migraciones.actualizar)
         for stmt in _PARCHES_CONVERGENCIA:
@@ -650,6 +653,14 @@ async def lifespan(app: FastAPI):
             # le pisaría las llamadas en curso.
             await s.execute(update(CampaignNumber).where(CampaignNumber.status == "dialing").values(status="pending"))
             await s.commit()
+        # Llamadas del predictivo de un líder anterior (timbrando o con el
+        # cliente esperando agente): nadie las va a asignar y el cliente
+        # quedaría en silencio. Se cuelgan; sus números ya volvieron a
+        # pendientes arriba. En un arranque normal no hay ninguna.
+        try:
+            await esl.api("hupall NORMAL_CLEARING nspbx_pred 1")
+        except Exception as exc:
+            logger.warning("No se pudieron colgar llamadas huérfanas del predictivo: %s", exc)
         # La conexión de eventos que tuviera como seguidora era solo de
         # BACKGROUND_JOB: se reabre con los de canal.
         await esl.cerrar_eventos()
