@@ -483,6 +483,26 @@ async def contexto_llamada(session, campana: Campaign, dnc_verificado: bool = Fa
     )
 
 
+async def revisar_campana(session, campana: Campaign) -> tuple[str | None, ContextoLlamada | None]:
+    """Lo que impide marcar en TODA la campaña (licencia, troncal, franja,
+    salientes cortadas), antes de tomar números. Antes esto se descubría al
+    preparar cada llamada y el número quedaba «fallido»: sin troncal, una
+    campaña quemaba su base entera sin marcar a nadie. Devuelve (motivo,
+    None) o (None, contexto para reusar en la tanda)."""
+    from app.services import licensing
+
+    st = licensing.estado(await licensing.obtener(session, campana.tenant_id))
+    if st != "ok":
+        return f"La licencia de la empresa está {st}", None
+    try:
+        contexto = await contexto_llamada(session, campana, dnc_verificado=True)
+    except ErrorAgente as exc:
+        return exc.mensaje, None
+    if contexto.politica.bloqueo:
+        return contexto.politica.bloqueo, None
+    return None, contexto
+
+
 async def preparar_llamada(session, campana: Campaign, lead: CampaignNumber, agente_id: int | None,
                            contexto: ContextoLlamada | None = None) -> tuple[str, list[str], dict]:
     """Comprueba que se puede llamar (política de salientes, no llamar,
@@ -836,6 +856,10 @@ class Motor:
                     if campana is None or campana.metodo != "progresivo" or campana.status != "running":
                         continue
                     if not horario_marcacion.puede_marcar(ajustes, campana.ai_intent, now_local()):
+                        continue
+                    motivo, _ = await revisar_campana(session, campana)
+                    if motivo:
+                        # La campaña espera sin tomar números (ver revisar_campana).
                         continue
                     tomados = await hopper.tomar(session, campana, 1, agente_id=vivo.user_id)
                     if not tomados:

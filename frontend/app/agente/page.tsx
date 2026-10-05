@@ -158,7 +158,7 @@ export default function ConsolaAgente() {
           <Card>
             <EmptyState
               title="No tienes campañas asignadas"
-              hint="Un supervisor te asigna en Campañas → la campaña → Agentes. Solo las campañas manuales, de vista previa o progresivas usan agentes."
+              hint="Un supervisor te asigna en Campañas → «Ver» en la campaña → Agentes. Las campañas de voizbot no usan agentes."
             />
           </Card>
         ) : (
@@ -178,6 +178,12 @@ export default function ConsolaAgente() {
                   </span>
                 </div>
               ))}
+              {estado.campanas.some((c) => elegidas.includes(c.id) && c.status !== "running" && c.metodo !== "manual") && (
+                <Note tone="warn">
+                  Elegiste una campaña detenida: puedes entrar, pero no te pasará llamadas hasta que un supervisor la inicie en
+                  Campañas.
+                </Note>
+              )}
               {!entorno?.extension ? (
                 <Note tone="warn">No tienes extensión asignada: pídele a un administrador que te asigne una.</Note>
               ) : !softphoneListo ? (
@@ -224,6 +230,18 @@ export default function ConsolaAgente() {
       {error && (
         <div className="mb-4">
           <ErrorBanner message={error} onClose={() => setError("")} />
+        </div>
+      )}
+
+      {misCampanas.some((c) => c.status !== "running" && c.metodo !== "manual") && (
+        <div className="mb-4">
+          <Note tone="warn">
+            {misCampanas
+              .filter((c) => c.status !== "running" && c.metodo !== "manual")
+              .map((c) => c.nombre)
+              .join(", ")}{" "}
+            está detenida: no te pasará llamadas hasta que un supervisor la inicie en Campañas.
+          </Note>
         </div>
       )}
 
