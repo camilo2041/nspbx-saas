@@ -304,3 +304,58 @@ async def test_si_no_se_puede_generar_el_mensaje_igual_se_guarda(cliente, mundo,
     r = await cliente.post("/api/campaigns", headers=mundo.alfa.cabeceras(), json={"name": "pred-sin-red", "metodo": "proporcional"})
     assert r.status_code == 201 and r.json()["audio_abandono"] is None
     await cliente.delete(f"/api/campaigns/{r.json()['id']}", headers=mundo.alfa.cabeceras())
+
+
+# --- Lo que impide marcar a toda la campaña, y el diagnóstico -------------------------------
+
+
+async def test_sin_troncal_espera_sin_quemar_los_numeros(papa, fs, campana):  # noqa: F811
+    """Antes cada número tomado quedaba «fallido» por falta de troncal: la
+    campaña quemaba la base entera sin llamar a nadie."""
+    async with async_session() as s:
+        await s.execute(update(Campaign).where(Campaign.id == campana).values(trunk_id=None))
+        await s.commit()
+    motor, _ = await _motor(papa, fs, campana, 0, 1)
+    assert await _lanzar(motor, papa, campana) == 0
+    assert "troncal" in motor.motivos[campana]
+    assert not _originados(fs, campana)
+    async with sesion_de_empresa(papa["tenant"]) as s:
+        estados = set((await s.execute(select(CampaignNumber.status).where(CampaignNumber.campaign_id == campana))).scalars())
+    assert estados == {"pending"}
+
+
+async def test_el_diagnostico_dice_que_falta_y_luego_que_esta_listo(papa, fs, campana):  # noqa: F811
+    from app.services import diagnostico_campana
+
+    async def revisar():
+        async with sesion_de_empresa(papa["tenant"]) as s:
+            return await diagnostico_campana.revisar(s, await s.get(Campaign, campana))
+
+    d = await revisar()
+    falta = {i["clave"] for i in d["items"] if not i["ok"]}
+    assert not d["listo"] and "conectados" in falta and "agente" in d["resumen"]
+    await _motor(papa, fs, campana, 0)  # entra y queda listo
+    d = await revisar()
+    assert d["listo"], d
+    assert d["agentes"] == {"conectados": 1, "con_audio": 1, "listos": 1}
+
+    async with async_session() as s:
+        await s.execute(update(Campaign).where(Campaign.id == campana).values(trunk_id=None))
+        await s.commit()
+    d = await revisar()
+    assert not d["listo"] and "troncal" in d["resumen"]
+
+
+async def test_iniciar_sin_troncal_avisa_en_vez_de_quedar_en_curso(cliente, mundo, monkeypatch):
+    async def sin_audio(campana, empresa):
+        return None
+
+    monkeypatch.setattr(predictivo, "generar_audio_abandono", sin_audio)
+    cab = mundo.alfa.cabeceras()
+    camp = (await cliente.post("/api/campaigns", json={"name": "sin-troncal", "metodo": "predictivo"}, headers=cab)).json()
+    r = await cliente.post(f"/api/campaigns/{camp['id']}/numbers", json={"numbers": [{"phone": "3001112233"}]}, headers=cab)
+    assert r.status_code == 201, r.text
+    r = await cliente.post(f"/api/campaigns/{camp['id']}/start", headers=cab)
+    assert r.status_code == 400 and "troncal" in r.json()["detail"]
+    d = (await cliente.get(f"/api/campaigns/{camp['id']}/diagnostico", headers=cab)).json()
+    assert not d["listo"] and {"troncal", "iniciada", "asignados"} <= {i["clave"] for i in d["items"] if not i["ok"]}

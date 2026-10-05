@@ -269,6 +269,9 @@ class Motor:
         self._ultimo_ajuste: dict[int, float] = {}
         # Empresa de cada campaña que pasó por el motor (para la foto por empresa).
         self.tenants: dict[int, int] = {}
+        # Por qué una campaña en curso no está marcando (licencia, troncal…),
+        # para el diagnóstico de la campaña.
+        self.motivos: dict[int, str] = {}
         self._ultima_foto = 0.0
         # Contestadas que se están asignando en paralelo (uuid → tarea).
         self._tareas: dict[str, asyncio.Task] = {}
@@ -375,13 +378,18 @@ class Motor:
         if cuantas <= 0:
             return 0
 
+        # Licencia, troncal, franja y salientes son de la campaña, no del
+        # número: si fallan, espera sin tomar números (antes cada número
+        # tomado quedaba «fallido» y la base se quemaba sin marcar).
+        motivo, contexto = await agentes.revisar_campana(session, campana)
+        if motivo:
+            self.motivos[campaign_id] = motivo
+            return 0
+        self.motivos.pop(campaign_id, None)
+
         lanzadas = 0
-        contexto = None
         for lead in await hopper.tomar(session, campana, cuantas):
             try:
-                # Una vez por tanda: política de salientes, franja y troncales
-                # son de la campaña, no del número (ver agentes.ContextoLlamada).
-                contexto = contexto or await agentes.contexto_llamada(session, campana, dnc_verificado=True)
                 call_uuid, tramos, valores = await agentes.preparar_llamada(session, campana, lead, agente_id=None, contexto=contexto)
             except agentes.ErrorAgente as exc:
                 lead.status = "no_llamar" if "no llamar" in exc.mensaje else "failed"

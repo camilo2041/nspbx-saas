@@ -71,6 +71,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/campaigns/{campaign_id}/agentes` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | PUT | `/api/campaigns/{campaign_id}/agentes` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | POST | `/api/campaigns/{campaign_id}/crm-secreto` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/campaigns/{campaign_id}/diagnostico` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/campaigns/{campaign_id}/listas` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | PUT | `/api/campaigns/{campaign_id}/listas/{lista_id}` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
 | DELETE | `/api/campaigns/{campaign_id}/numbers` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |

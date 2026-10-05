@@ -702,6 +702,17 @@ async def campaign_stats(campaign_id: int, session: AsyncSession = Depends(get_s
     return stats
 
 
+@router.get("/{campaign_id}/diagnostico")
+async def diagnostico(campaign_id: int, session: AsyncSession = Depends(get_session)):
+    """Qué le falta a la campaña para llamar (ver services/diagnostico_campana.py)."""
+    from app.services import diagnostico_campana
+
+    campaign = await traer_propio(session, Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    return await diagnostico_campana.revisar(session, campaign)
+
+
 @router.post("/{campaign_id}/start")
 async def start_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
     campaign = await traer_propio(session, Campaign, campaign_id)
@@ -714,6 +725,12 @@ async def start_campaign(campaign_id: int, session: AsyncSession = Depends(get_s
     )
     if not res.first():
         raise HTTPException(status_code=400, detail="No hay números pendientes")
+    # Sin troncal la campaña quedaba «en curso» sin llamar a nadie.
+    troncal = await session.get(Trunk, campaign.trunk_id) if campaign.trunk_id else None
+    if troncal is None or not troncal.enabled:
+        raise HTTPException(
+            status_code=400, detail="La campaña no tiene una troncal habilitada: edítala y elige por cuál salen las llamadas"
+        )
     campaign.status = "running"
     campaign.started_at = datetime.utcnow()
     campaign.finished_at = None
