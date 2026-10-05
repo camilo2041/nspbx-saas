@@ -233,7 +233,47 @@ export async function verificarCredenciales(
   });
   const cuerpo = await resp.json().catch(() => null);
   if (!resp.ok) throw new ApiError(mensajeDe(cuerpo, "No se pudo iniciar sesión"), resp.status);
-  return cuerpo as SesionOut;
+  return sesionDe(cuerpo, resp.status);
+}
+
+/**
+ * La contraseña estaba bien pero la cuenta tiene verificación en dos pasos:
+ * todavía no hay sesión. `mfaToken` se canjea con el código en `verificarMfa`.
+ */
+export class MfaPendiente extends Error {
+  constructor(readonly mfaToken: string) {
+    super("Escribe el código de tu app de autenticación.");
+    this.name = "MfaPendiente";
+  }
+}
+
+// Antes se daba por hecho que la respuesta era la sesión: con verificación en
+// dos pasos llega {mfa_requerido, mfa_token}, sin token, y guardarlo en
+// SecureStore reventaba con "Values must be strings".
+function sesionDe(cuerpo: unknown, status: number): SesionOut {
+  const c = cuerpo as Partial<SesionOut> & { mfa_requerido?: boolean; mfa_token?: string };
+  if (c?.mfa_requerido && typeof c.mfa_token === "string") throw new MfaPendiente(c.mfa_token);
+  if (typeof c?.token !== "string" || !c.usuario) throw new ApiError("El servidor respondió algo inesperado al iniciar sesión.", status);
+  return c as SesionOut;
+}
+
+/** Segundo paso del login: el código de 6 dígitos (o uno de recuperación). */
+export async function verificarMfa(servidor: ServidorConfigurado, mfaToken: string, codigo: string): Promise<SesionOut> {
+  const resp = await conTiempo(`${servidor.apiBase}/api/auth/mfa/verificar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mfa_token: mfaToken,
+      codigo,
+      plataforma: Platform.OS === "ios" ? "ios" : "android",
+      dispositivo: nombreDelEquipo(),
+    }),
+  });
+  const cuerpo = await resp.json().catch(() => null);
+  if (!resp.ok) throw new ApiError(mensajeDe(cuerpo, "No se pudo verificar el código"), resp.status);
+  const sesion = sesionDe(cuerpo, resp.status);
+  await guardarSesion(sesion);
+  return sesion;
 }
 
 async function revocarRefresh(refresh: string | null): Promise<void> {
@@ -250,7 +290,14 @@ async function revocarRefresh(refresh: string | null): Promise<void> {
 }
 
 export async function verificarSoloContrasena(servidor: ServidorConfigurado, username: string, password: string): Promise<void> {
-  const sesion = await verificarCredenciales(servidor, username, password, true);
+  let sesion: SesionOut;
+  try {
+    sesion = await verificarCredenciales(servidor, username, password, true);
+  } catch (e) {
+    // Pide el código: la contraseña ya quedó comprobada y no se creó sesión.
+    if (e instanceof MfaPendiente) return;
+    throw e;
+  }
   // Un servidor viejo igual entrega un refresh token: se revoca.
   await revocarRefresh(sesion.refresh_token);
 }

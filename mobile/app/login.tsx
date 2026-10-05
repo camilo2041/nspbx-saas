@@ -19,11 +19,13 @@ function mensajeAmigable(e: unknown): string {
 export default function LoginScreen() {
   const estilos = useEstilos();
   const c = useColores();
-  const { usuario, login, bioDisponible, bioActiva, activarBiometria, avisoAcceso, limpiarAvisoAcceso } = useAuth();
+  const { usuario, login, mfaPendiente, confirmarMfa, cancelarMfa, bioDisponible, bioActiva, activarBiometria, avisoAcceso, limpiarAvisoAcceso } =
+    useAuth();
   const [recordar, setRecordar] = useState(true);
   const [aviso, setAviso] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [codigo, setCodigo] = useState("");
   const [error, setError] = useState("");
   const [cargando, setCargando] = useState(false);
 
@@ -35,28 +37,96 @@ export default function LoginScreen() {
 
   const listo = username.trim() && password;
 
+  // Guardar la contraseña con huella: si el sistema lo rechaza (por ejemplo
+  // no se confirmó la huella) no se bloquea el ingreso, solo se avisa. Sin
+  // contraseña escrita (se llegó al código desde la huella) no hay nada que guardar.
+  const terminar = async (nombre: string) => {
+    if (recordar && bioDisponible && !bioActiva && password) {
+      try {
+        await activarBiometria(nombre, password);
+      } catch {
+        setAviso("No se activó la huella. Puedes hacerlo luego en Menú → Mi cuenta.");
+      }
+    }
+    router.replace("/(app)");
+  };
+
   const entrar = async () => {
     setError("");
     limpiarAvisoAcceso();
     setCargando(true);
     try {
-      await login(username.trim(), password);
-      // Guardar la contraseña con huella: si el sistema lo rechaza (por ejemplo
-      // no se confirmó la huella) no se bloquea el ingreso, solo se avisa.
-      if (recordar && bioDisponible && !bioActiva) {
-        try {
-          await activarBiometria(username.trim(), password);
-        } catch {
-          setAviso("No se activó la huella. Puedes hacerlo luego en Menú → Mi cuenta.");
-        }
-      }
-      router.replace("/(app)");
+      if (await login(username.trim(), password)) await terminar(username.trim());
+      else setCodigo("");
     } catch (e) {
       setError(mensajeAmigable(e));
     } finally {
       setCargando(false);
     }
   };
+
+  // Segundo paso, si la cuenta tiene verificación en dos pasos.
+  const verificar = async () => {
+    if (!mfaPendiente) return;
+    setError("");
+    setCargando(true);
+    try {
+      await confirmarMfa(codigo);
+      await terminar(mfaPendiente.username);
+    } catch (e) {
+      setError(mensajeAmigable(e));
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const volver = () => {
+    cancelarMfa();
+    setCodigo("");
+    setError("");
+  };
+
+  const cajaError = error ? (
+    <View style={estilos.error}>
+      <Icono nombre="alerta" tam={18} color={c.peligroTexto} />
+      <Text style={estilos.errorTexto}>{error}</Text>
+    </View>
+  ) : null;
+
+  if (mfaPendiente) {
+    return (
+      <KeyboardAvoidingView style={estilos.contenedor} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={estilos.contenido} keyboardShouldPersistTaps="handled">
+          <View style={estilos.cabecera}>
+            <Logo tam={64} />
+            <Text style={estilos.titulo}>Verificación en dos pasos</Text>
+            <Text style={estilos.subtitulo}>{mfaPendiente.username}</Text>
+          </View>
+
+          <Tarjeta style={{ gap: 16, padding: 20 }}>
+            <Campo
+              etiqueta="Código"
+              icono="candado"
+              placeholder="123456"
+              ayuda="El de 6 dígitos de tu app de autenticación, o un código de recuperación."
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+              textContentType="oneTimeCode"
+              autoComplete="one-time-code"
+              maxLength={20}
+              value={codigo}
+              onChangeText={setCodigo}
+              onSubmitEditing={codigo.trim().length >= 6 ? verificar : undefined}
+            />
+            {cajaError}
+            <Boton titulo="Verificar" onPress={verificar} cargando={cargando} deshabilitado={codigo.trim().length < 6} />
+            <Boton titulo="Volver" variante="texto" onPress={volver} />
+          </Tarjeta>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
 
   return (
     <KeyboardAvoidingView style={estilos.contenedor} behavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -107,12 +177,7 @@ export default function LoginScreen() {
           {avisoAcceso ? <Text style={estilos.aviso}>{avisoAcceso}</Text> : null}
           {aviso ? <Text style={estilos.aviso}>{aviso}</Text> : null}
 
-          {error ? (
-            <View style={estilos.error}>
-              <Icono nombre="alerta" tam={18} color={c.peligroTexto} />
-              <Text style={estilos.errorTexto}>{error}</Text>
-            </View>
-          ) : null}
+          {cajaError}
 
           <Boton titulo="Entrar" onPress={entrar} cargando={cargando} deshabilitado={!listo} />
         </Tarjeta>
