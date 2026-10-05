@@ -1,6 +1,6 @@
 /**
  * Componentes base de la app, con el mismo lenguaje visual del panel web:
- * tarjetas con borde fino, naranja de marca para la acción principal, tonos
+ * tarjetas con borde fino, azul de marca (NSIT) para la acción principal, tonos
  * semánticos (ok, aviso, peligro, info) con su fondo suave.
  *
  * Todo toma los colores del tema activo (claro u oscuro).

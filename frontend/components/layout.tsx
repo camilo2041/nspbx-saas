@@ -493,7 +493,7 @@ function Marco({ children }: { children: ReactNode }) {
         } ${mobileOpen ? "translate-x-0 shadow-[var(--shadow-3)]" : "-translate-x-full"}`}
       >
         <div className="flex h-16 items-center gap-2.5 px-4">
-          <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 text-sm font-bold text-white shadow-[var(--shadow-brand)]">
+          <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-marca text-sm font-bold text-white shadow-[var(--shadow-brand)]">
             N
           </div>
           {!collapsed && (

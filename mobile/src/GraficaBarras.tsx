@@ -6,7 +6,7 @@
  * anclado a la base, 2 px de aire entre segmentos, rejilla discreta, leyenda
  * siempre que hay más de una serie, y el valor exacto al tocar una barra
  * (no un número encima de cada una). Los colores de serie son los del panel
- * (naranja de marca y azul de info), validados para daltonismo en claro y en
+ * (naranja y azul de la marca NSIT), validados para daltonismo en claro y en
  * oscuro.
  */
 import { useState } from "react";
