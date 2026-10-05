@@ -39,6 +39,16 @@ def _agent_key(extension: str, dominio: str) -> str:
     return f"{extension}@{dominio}"
 
 
+def _contacto(queue, ext: str, dominio: str) -> str:
+    return f"[leg_timeout={queue.agent_ring_timeout}]user/{ext}@{dominio}"
+
+
+def _agentes_validos(queue) -> list[str]:
+    """Las extensiones de la cola que pueden ir en un comando de ESL (el
+    esquema ya las valida; esto es la última barrera)."""
+    return [e for e in parse_agents(queue.agents) if validacion.EXTENSION_RE.fullmatch(e)]
+
+
 def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
     """Genera callcenter.conf.xml completo (settings + queues + agents +
     tiers) a partir de las colas en la base de datos. mod_callcenter solo
@@ -97,11 +107,11 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
         for name, value in params.items():
             ET.SubElement(queue_el, "param", attrib={"name": name, "value": value})
 
-        for ext in parse_agents(queue.agents):
+        for ext in _agentes_validos(queue):
             akey = _agent_key(ext, dominios[queue.tenant_id])
             if akey not in seen_agents:
                 seen_agents.add(akey)
-                contact = f"[leg_timeout={queue.agent_ring_timeout}]user/{ext}@{dominios[queue.tenant_id]}"
+                contact = _contacto(queue, ext, dominios[queue.tenant_id])
                 ET.SubElement(
                     agents_el,
                     "agent",
@@ -137,8 +147,8 @@ async def _run(cmd: str, tenant_id: int | None = None) -> str:
         return ""
 
 
-async def _current_tier_agents(qkey: str) -> set[str]:
-    raw = await _run(f"callcenter_config queue list tiers {qkey}")
+async def _current_tier_agents(qkey: str, tenant_id: int | None = None) -> set[str]:
+    raw = await _run(f"callcenter_config queue list tiers {qkey}", tenant_id)
     agents = set()
     for line in raw.strip().splitlines()[1:]:  # 1ra línea es el header
         parts = line.split("|")
@@ -147,24 +157,54 @@ async def _current_tier_agents(qkey: str) -> set[str]:
     return agents
 
 
+async def _asegurar_agentes(queue, dominio: str) -> None:
+    """Crea en mod_callcenter los agentes y tiers de la cola que falten.
+
+    `queue load/reload` solo relee los parámetros de la COLA: los agentes y
+    tiers del XML se leen únicamente cuando arranca el módulo. Sin esto, una
+    extensión agregada a la cola después de arrancar FreeSWITCH no existía
+    para él y las llamadas seguían entrando solo a las de antes."""
+    qkey = _queue_key(queue.name, dominio)
+    tid = queue.tenant_id
+    en_cola = await _current_tier_agents(qkey, tid)
+    for ext in _agentes_validos(queue):
+        akey = _agent_key(ext, dominio)
+        # Si ya existe responde -ERR y no pasa nada; los parámetros se
+        # actualizan igual abajo (lo que se editó en el panel).
+        await _run(f"callcenter_config agent add {akey} callback", tid)
+        for campo, valor in (
+            ("contact", _contacto(queue, ext, dominio)),
+            ("max_no_answer", str(queue.max_no_answer)),
+            ("wrap_up_time", str(queue.wrap_up_time)),
+            ("reject_delay_time", "2"),
+            ("busy_delay_time", "10"),
+            ("status", "Available"),
+        ):
+            await _run(f"callcenter_config agent set {campo} {akey} {valor}", tid)
+        if akey not in en_cola:
+            await _run(f"callcenter_config tier add {qkey} {akey} 1 1", tid)
+
+
 async def sync_queue(queue, dominio: str) -> None:
     """Aplica los cambios de UNA cola sin tocar las demás: borra los tiers
-    que ya no correspondan y recarga (o carga por primera vez) solo esa
-    cola en mod_callcenter."""
+    que ya no correspondan, recarga (o carga por primera vez) solo esa cola
+    en mod_callcenter y crea los agentes y tiers que falten."""
     qkey = _queue_key(queue.name, dominio)
-    new_agents = {_agent_key(e, dominio) for e in parse_agents(queue.agents)} if queue.enabled else set()
+    tid = queue.tenant_id
+    new_agents = {_agent_key(e, dominio) for e in _agentes_validos(queue)} if queue.enabled else set()
 
-    current_agents = await _current_tier_agents(qkey)
+    current_agents = await _current_tier_agents(qkey, tid)
     for stale in current_agents - new_agents:
-        await _run(f"callcenter_config tier del {qkey} {stale}")
+        await _run(f"callcenter_config tier del {qkey} {stale}", tid)
 
     if not queue.enabled:
-        await _run(f"callcenter_config queue unload {qkey}")
+        await _run(f"callcenter_config queue unload {qkey}", tid)
         return
 
-    result = await _run(f"callcenter_config queue reload {qkey}")
+    result = await _run(f"callcenter_config queue reload {qkey}", tid)
     if "-ERR" in result:
-        await _run(f"callcenter_config queue load {qkey}")
+        await _run(f"callcenter_config queue load {qkey}", tid)
+    await _asegurar_agentes(queue, dominio)
 
 
 async def remove_queue(name: str, dominio: str) -> None:
@@ -190,3 +230,6 @@ async def apply_queues(queues: list, dominios: dict[int, str]) -> None:
             result = await _run(f"callcenter_config queue reload {qkey}", queue.tenant_id)
             if "-ERR" in result:
                 await _run(f"callcenter_config queue load {qkey}", queue.tenant_id)
+            # Si FreeSWITCH no se reinició, sus agentes son los de su
+            # arranque: se crean los que falten.
+            await _asegurar_agentes(queue, dominios[queue.tenant_id])
