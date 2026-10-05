@@ -409,6 +409,9 @@ class SystemSettingsOut(BaseModel):
     # False cuando la instalación tiene varias empresas: el panel oculta los
     # ajustes globales (Event Socket, disco, respaldos) que no son de una empresa.
     puede_infraestructura: bool = True
+    # Identificador de la empresa para el snippet de la burbuja web
+    # (`data-empresa`, ver app/api/webcall.py). Solo lectura.
+    webcall_empresa: str = ""
 
     webcall_enabled: bool = False
     webcall_queue_id: Optional[int] = None

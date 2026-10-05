@@ -5,7 +5,7 @@ from app.core import alcance, cifrado
 from app.core.auth import usuario_actual
 from app.core.database import get_session, traer_propio
 from app.core.runtime_settings import runtime_settings
-from app.models import Queue, SystemSettings, User
+from app.models import Queue, SystemSettings, Tenant, User
 from app.schemas import SystemSettingsOut, SystemSettingsUpdate
 from app.services import esl, salientes
 from app.services.ajustes import get_or_create_settings
@@ -69,8 +69,10 @@ _SECRETOS = (
 )
 
 
-def _salida(row: SystemSettings, puede_infra: bool) -> SystemSettingsOut:
+async def _salida(session: AsyncSession, row: SystemSettings, puede_infra: bool) -> SystemSettingsOut:
     out = SystemSettingsOut.model_validate(row)
+    empresa = await session.get(Tenant, row.tenant_id) if row.tenant_id else None
+    out.webcall_empresa = empresa.slug if empresa else ""
     for campo in _SECRETOS:
         setattr(out, campo, cifrado.enmascarar(getattr(out, campo)))
     out.puede_infraestructura = puede_infra
@@ -94,7 +96,7 @@ def _salida(row: SystemSettings, puede_infra: bool) -> SystemSettingsOut:
 @router.get("/settings", response_model=SystemSettingsOut)
 async def get_settings(session: AsyncSession = Depends(get_session)):
     row = await get_or_create_settings(session)
-    return _salida(row, await alcance.instalacion_unica(session))
+    return await _salida(session, row, await alcance.instalacion_unica(session))
 
 
 @router.put("/settings", response_model=SystemSettingsOut)
@@ -148,7 +150,7 @@ async def update_settings(
             await esl.reloadxml()
         except Exception:
             pass
-    return _salida(row, puede_infra)
+    return await _salida(session, row, puede_infra)
 
 
 @router.post("/salientes/colgar")

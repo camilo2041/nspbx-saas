@@ -70,7 +70,8 @@ export function WebcallEmbed({
   };
 
   const origin = typeof window !== "undefined" ? window.location.origin : "https://TU-PBX";
-  const snippet = `<script src="${origin}/webcall.js" data-host="${origin}" async></script>`;
+  const empresa = value.webcall_empresa ? ` data-empresa="${value.webcall_empresa}"` : "";
+  const snippet = `<script src="${origin}/webcall.js" data-host="${origin}"${empresa} async></script>`;
 
   const copiar = () => {
     navigator.clipboard?.writeText(snippet).then(() => {

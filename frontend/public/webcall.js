@@ -2,9 +2,13 @@
  * NSPBX — widget embebible "hablar con un agente".
  *
  * Uso en cualquier sitio web:
- *   <script src="https://TU-PBX/webcall.js" data-host="https://TU-PBX" async></script>
+ *   <script src="https://TU-PBX/webcall.js" data-host="https://TU-PBX" data-empresa="SU-EMPRESA" async></script>
+ *
+ * El snippet exacto (con su data-empresa) está en Ajustes del panel.
  *
  * Atributos opcionales del <script>:
+ *   data-empresa   identificador de la empresa dueña de la burbuja. Sin él
+ *                  es la empresa inicial de la plataforma (snippets viejos).
  *   data-host      URL base del PBX que sirve /webcall.js y la página /webcall
  *                  (por defecto: el origen de este script)
  *   data-api       URL base de la API /api/webcall/* (por defecto: data-host).
@@ -45,8 +49,10 @@
   var side = attr("data-position", "right") === "left" ? "left" : "right";
   var color = attr("data-color", "#2563eb");
   var label = attr("data-label", "Llamar a un agente");
+  var empresa = attr("data-empresa", "");
+  var qEmpresa = empresa ? "?empresa=" + encodeURIComponent(empresa) : "";
 
-  fetch(apiBase + "/api/webcall/config", { mode: "cors" })
+  fetch(apiBase + "/api/webcall/config" + qEmpresa, { mode: "cors" })
     .then(function (r) { return r.json(); })
     .then(function (cfg) {
       if (!cfg || !cfg.enabled) return;
@@ -93,8 +99,10 @@
     function toggle() {
       var opening = !panel.classList.contains("open");
       if (opening && !loaded) {
-        panel.src =
-          host + "/webcall" + (apiBase !== host ? "?api=" + encodeURIComponent(apiBase) : "");
+        var q = [];
+        if (apiBase !== host) q.push("api=" + encodeURIComponent(apiBase));
+        if (empresa) q.push("empresa=" + encodeURIComponent(empresa));
+        panel.src = host + "/webcall" + (q.length ? "?" + q.join("&") : "");
         loaded = true;
       }
       panel.classList.toggle("open", opening);

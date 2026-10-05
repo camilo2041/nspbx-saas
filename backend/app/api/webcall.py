@@ -8,15 +8,13 @@ Las defensas (en orden de evaluación en `crear_sesion`): activado →
 rate-limit por IP → horario de atención → Turnstile → tope global de
 llamadas web simultáneas.
 
-FIJO A tenant_id=1 POR AHORA. En el proyecto multiempresa (nspbx-saas)
-esto se generalizaría resolviendo la empresa desde un identificador que
-venga en la query string del embed (ej. `?empresa=<slug>` en
-`webcall.js`/`/webcall`), buscado contra `Tenant.slug` o
-`Tenant.subdomain`, y pasando ese `tenant_id` en vez del `1` fijo a
-`ajustes_de()` y a las consultas de este router. El contexto de dialplan
-ya está preparado para eso: se llama `webcall_<slug>` y no `webcall` a
-secas (ver `_append_webcall_context` en config_generator.py), así que
-activar el widget en una segunda empresa no chocaría con la primera.
+La empresa sale de `?empresa=<slug>` (el `data-empresa` del snippet de
+`webcall.js`, que lo pasa al iframe `/webcall`). Sin ese parámetro es la
+empresa 1: así siguen andando los snippets que se pegaron antes de que
+hubiera uno por empresa. Cada empresa tiene su propio contexto de dialplan
+`webcall_<slug>` (ver `_append_webcall_context` en config_generator.py) y
+la credencial temporal recuerda de qué empresa es (ver
+`fs_directory` en xml_endpoints.py).
 
 Usa `get_admin_session` (no la sesión normal con RLS) porque estos
 endpoints no tienen sesión de usuario ni tenant fijado por token — son la
@@ -25,8 +23,9 @@ central pública, análoga a `/fs/directory` y `/fs/dialplan`.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import limitador
@@ -39,9 +38,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/webcall", tags=["webcall"])
 
-# Empresa a la que está cableado el widget por ahora (ver docstring del
-# módulo). "Empresa inicial" en la siembra de multiempresa de app/main.py.
-_TENANT_ID = 1
+# Empresa de los snippets viejos, sin `data-empresa` ("Empresa inicial" en
+# la siembra de multiempresa de app/main.py).
+_TENANT_POR_DEFECTO = 1
+
+
+async def _empresa(
+    empresa: str | None = Query(None, max_length=40), session: AsyncSession = Depends(get_admin_session)
+) -> Tenant | None:
+    """La empresa dueña del widget, o None si no existe o está desactivada
+    (para el visitante es lo mismo que tener el botón apagado)."""
+    if empresa:
+        consulta = select(Tenant).where(Tenant.slug == empresa.strip().lower())
+        tenant = (await session.execute(consulta)).scalar_one_or_none()
+    else:
+        tenant = await session.get(Tenant, _TENANT_POR_DEFECTO)
+    return tenant if tenant and tenant.enabled else None
 
 
 def _cliente_ip(request: Request) -> str:
@@ -62,10 +74,12 @@ def _textos(row: SystemSettings) -> dict:
 
 
 @router.get("/config")
-async def config(session: AsyncSession = Depends(get_admin_session)):
+async def config(
+    tenant: Tenant | None = Depends(_empresa), session: AsyncSession = Depends(get_admin_session)
+):
     """Lo consume `webcall.js` para decidir si dibuja la burbuja y en qué
     estado. No revela nada sensible."""
-    row = await ajustes_de(session, tenant_id=_TENANT_ID)
+    row = await ajustes_de(session, tenant_id=tenant.id) if tenant else None
     if not row or not row.webcall_enabled:
         return {"enabled": False}
     return {
@@ -78,9 +92,12 @@ async def config(session: AsyncSession = Depends(get_admin_session)):
 
 @router.post("/session")
 async def crear_sesion(
-    payload: SesionRequest, request: Request, session: AsyncSession = Depends(get_admin_session)
+    payload: SesionRequest,
+    request: Request,
+    tenant: Tenant | None = Depends(_empresa),
+    session: AsyncSession = Depends(get_admin_session),
 ):
-    row = await ajustes_de(session, tenant_id=_TENANT_ID)
+    row = await ajustes_de(session, tenant_id=tenant.id) if tenant else None
     if not row or not row.webcall_enabled:
         raise HTTPException(status_code=404, detail="El botón de llamada no está activo.")
 
@@ -98,21 +115,17 @@ async def crear_sesion(
         )
 
     queue = await session.get(Queue, row.webcall_queue_id) if row.webcall_queue_id else None
-    if not queue or not queue.enabled:
+    if not queue or not queue.enabled or queue.tenant_id != tenant.id:
         raise HTTPException(status_code=503, detail="El servicio no está disponible en este momento.")
 
     tope = row.webcall_max_concurrent or 0
-    if tope and await webcall.registry.active_count() >= tope:
+    if tope and await webcall.registry.active_count(tenant.id) >= tope:
         raise HTTPException(
             status_code=503, detail="Todos nuestros agentes están ocupados. Intentá en unos minutos."
         )
 
-    tenant = await session.get(Tenant, _TENANT_ID)
-    if not tenant:
-        raise HTTPException(status_code=503, detail="El servicio no está disponible en este momento.")
-
-    guest = await webcall.registry.create(ip)
-    logger.info("Sesión web creada: %s (ip %s) -> cola %s", guest.username, ip, queue.name)
+    guest = await webcall.registry.create(ip, tenant.id)
+    logger.info("Sesión web creada: %s (ip %s) -> %s, cola %s", guest.username, ip, tenant.slug, queue.name)
     return {
         "username": guest.username,
         "password": guest.password,

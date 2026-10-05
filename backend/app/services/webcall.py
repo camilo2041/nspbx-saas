@@ -8,15 +8,10 @@ se limpia solo por expiración y se pierde en un reinicio del backend —
 aceptable, una llamada web dura minutos y este contenedor casi no
 reinicia; si pasara, el visitante vuelve a tocar el botón.
 
-Este registro es GLOBAL al proceso, no por empresa: hay un solo
-FreeSWITCH compartido para toda la plataforma (ver
-docs/arquitectura-multitenant.md), y por ahora el widget solo está
-cableado a tenant_id=1 (ver app/api/webcall.py). El día que se generalice
-a varias empresas con webcall activo, el aislamiento entre ellas lo va a
-dar el CONTEXTO de dialplan (`webcall_<slug>`, ver
-services/config_generator.py) — cada credencial nace ya sabiendo a qué
-contexto pertenece (user_context en el directorio), así que este registro
-no necesita saber de qué empresa es cada sesión para mantenerlas separadas.
+Cada sesión recuerda su empresa (`tenant_id`): de ahí salen el dominio y
+el contexto `webcall_<slug>` que le arma el directorio (ver
+services/xml_endpoints.py) y el tope de llamadas simultáneas, que es por
+empresa.
 
 El aislamiento anti-fraude NO está acá: lo da el contexto de dialplan
 `webcall_<slug>` (ver services/config_generator.py), que solo sabe llegar
@@ -54,6 +49,7 @@ class GuestSession:
     password: str
     created: float
     ip: str
+    tenant_id: int
     registered: bool = False
 
 
@@ -88,12 +84,12 @@ class WebcallRegistry:
             self._by_ip[ip] = recientes
             return len(recientes) < _RATE_MAX
 
-    async def active_count(self) -> int:
+    async def active_count(self, tenant_id: int) -> int:
         async with self._lock:
             self._prune_locked()
-            return len(self._sessions)
+            return sum(s.tenant_id == tenant_id for s in self._sessions.values())
 
-    async def create(self, ip: str) -> GuestSession:
+    async def create(self, ip: str, tenant_id: int) -> GuestSession:
         async with self._lock:
             self._prune_locked()
             username = "web" + "".join(secrets.choice("0123456789") for _ in range(9))
@@ -102,6 +98,7 @@ class WebcallRegistry:
                 password=secrets.token_urlsafe(18),
                 created=time.time(),
                 ip=ip,
+                tenant_id=tenant_id,
             )
             self._sessions[username] = s
             self._by_ip.setdefault(ip, []).append(time.time())

@@ -44,10 +44,7 @@ def _tenantes(
     for t in tenantes_rows:
         ajustes = ajustes_por_tenant.get(t.id)
         colas = colas_por_tenant.get(t.id, [])
-        # Widget de llamada web (ver app/api/webcall.py): por ahora solo
-        # tenant_id=1 lo usa, pero se resuelve genéricamente por si algún
-        # día se activa en otra empresa — no hay nada especial de tenant_id
-        # 1 en esta cuenta, solo que es la única fila con webcall_enabled.
+        # Widget de llamada web de la empresa (ver app/api/webcall.py).
         webcall_queue = None
         if ajustes and ajustes.webcall_enabled and ajustes.webcall_queue_id:
             webcall_queue = next((q for q in colas if q.id == ajustes.webcall_queue_id), None)
@@ -94,16 +91,16 @@ async def fs_directory(request: Request, session: AsyncSession = Depends(get_adm
     # con user_context=webcall_<slug> (aislado). Si no existe/venció, 404
     # = "usuario desconocido" para mod_xml_curl.
     #
-    # El widget está fijo a tenant_id=1 por ahora (ver docstring de
-    # app/api/webcall.py); el dominio del invitado sale de
-    # Tenant.sip_domain de esa empresa, no de un ajuste global.
+    # La sesión recuerda de qué empresa es: de ahí salen el dominio (el
+    # mismo Tenant.sip_domain que le devolvió POST /api/webcall/session) y
+    # su contexto aislado.
     pedido = request.query_params.get("user") or request.query_params.get("sip_auth_username")
     if pedido and webcall.GUEST_RE.match(pedido):
         guest = await webcall.registry.get(pedido)
         if not guest:
             return Response(status_code=404)
-        tenant = await session.get(Tenant, 1)
-        if not tenant:
+        tenant = await session.get(Tenant, guest.tenant_id)
+        if not tenant or not tenant.enabled:
             return Response(status_code=404)
         return Response(
             content=build_guest_directory_xml(
