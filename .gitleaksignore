@@ -30,3 +30,7 @@ d52396ba2cc8107379169f30dd6179812c2a9a2f:backend/tests/test_mfa.py:generic-api-k
 4bcd308ced0280dff983dffad627776ca6d6b540:backend/tests/test_salientes_horario.py:generic-api-key:41
 4bcd308ced0280dff983dffad627776ca6d6b540:backend/tests/test_salientes_horario.py:generic-api-key:42
 4bcd308ced0280dff983dffad627776ca6d6b540:backend/tests/test_salientes_horario.py:generic-api-key:43
+
+# Falso positivo: clave de prueba de una extensión en la prueba de choque de
+# numeración (la línea ya lleva gitleaks:allow en commits posteriores).
+1da542bdc96ca0e1c5a6b8adbd6de53a087778cd:backend/tests/test_colas_agentes.py:generic-api-key:164

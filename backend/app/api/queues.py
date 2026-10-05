@@ -10,6 +10,7 @@ from app.models import Queue, Tenant
 from app.schemas import QueueCreate, QueueUpdate
 from app.services import esl
 from app.services.ajustes import dominios_tenants
+from app.services.numeracion import numero_en_uso
 from app.services.queues_sync import parse_agents, remove_queue, sync_queue, write_callcenter_conf
 
 router = APIRouter(prefix="/api/queues", tags=["queues"])
@@ -66,6 +67,18 @@ async def _rewrite_conf_file(session: AsyncSession) -> None:
             pass
 
 
+async def _exigir_numeros_libres(
+    session: AsyncSession, numero: str | None, desborde: str | None, queue_id: int | None = None, numero_propio: str | None = None
+) -> None:
+    """El número de la cola no puede ser el de una extensión ni el de otra
+    cola (la extensión se evalúa antes en el dialplan y la cola quedaba
+    inalcanzable), y el desborde no puede ser la propia cola (bucle)."""
+    if numero and (uso := await numero_en_uso(session, numero, salvo_cola=queue_id)):
+        raise HTTPException(status_code=409, detail=f"El número {numero} ya lo usa {uso}")
+    if desborde and desborde == (numero_propio or numero):
+        raise HTTPException(status_code=400, detail="El desborde no puede ser la misma cola")
+
+
 @router.get("")
 async def list_queues(session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(Queue).order_by(Queue.id))
@@ -75,6 +88,7 @@ async def list_queues(session: AsyncSession = Depends(get_session)):
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_queue(payload: QueueCreate, session: AsyncSession = Depends(get_session)):
     data = payload.model_dump()
+    await _exigir_numeros_libres(session, data["extension"], data.get("failover_extension"))
     agents = data.pop("agents")
     queue = Queue(**data, agents=json.dumps(agents))
     session.add(queue)
@@ -104,6 +118,14 @@ async def update_queue(queue_id: int, payload: QueueUpdate, session: AsyncSessio
         raise HTTPException(status_code=404, detail="Cola no encontrada")
     old_name = queue.name
     data = payload.model_dump(exclude_unset=True)
+    nuevo_numero = data.get("extension")
+    await _exigir_numeros_libres(
+        session,
+        nuevo_numero if nuevo_numero and nuevo_numero != queue.extension else None,
+        data.get("failover_extension", queue.failover_extension) or None,
+        queue_id=queue.id,
+        numero_propio=nuevo_numero or queue.extension,
+    )
     if "agents" in data:
         data["agents"] = json.dumps(data["agents"])
     for field, value in data.items():

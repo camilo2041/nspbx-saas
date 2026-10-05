@@ -114,7 +114,7 @@ def _decir(condition: ET.Element, prompt_key: str, texto_respaldo: str) -> None:
         ET.SubElement(condition, "action", attrib={"application": "speak", "data": f"flite|kal|{texto_respaldo}"})
 
 
-def _append_dnd_feature_codes(context: ET.Element) -> None:
+def _append_dnd_feature_codes(context: ET.Element, dominio: str, tenant_id: int) -> None:
     """*78 activa "no molestar" para quien marca, *79 lo apaga.
 
     Es el código de función estándar que cualquier softphone o teléfono
@@ -130,19 +130,31 @@ def _append_dnd_feature_codes(context: ET.Element) -> None:
     activar = ET.SubElement(context, "extension", attrib={"name": "nspbx_dnd_on", "continue": "false"})
     c1 = ET.SubElement(activar, "condition", attrib={"field": "destination_number", "expression": r"^\*78$"})
     ET.SubElement(c1, "action", attrib={"application": "answer"})
-    ET.SubElement(c1, "action", attrib={"application": "db", "data": "insert/dnd/${caller_id_number}/on"})
+    # Clave con la empresa (ver esl.clave_dnd): la base de FreeSWITCH es una
+    # sola para todas, y con solo el número se pisaban entre empresas.
+    ET.SubElement(c1, "action", attrib={"application": "db", "data": f"insert/dnd/${{caller_id_number}}_t{int(tenant_id)}/on"})
+    # Y en pausa como agente de cola: mod_callcenter le marca directo, sin
+    # pasar por _append_dnd_hook (si no es agente, responde -ERR y nada más).
+    ET.SubElement(
+        c1, "action",
+        attrib={"application": "set", "data": f"nspbx_dnd_cola=${{callcenter_config(agent set status ${{caller_id_number}}@{dominio} 'On Break')}}"},
+    )
     _decir(c1, "dnd_on", "No molestar activado.")
     ET.SubElement(c1, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
 
     desactivar = ET.SubElement(context, "extension", attrib={"name": "nspbx_dnd_off", "continue": "false"})
     c2 = ET.SubElement(desactivar, "condition", attrib={"field": "destination_number", "expression": r"^\*79$"})
     ET.SubElement(c2, "action", attrib={"application": "answer"})
-    ET.SubElement(c2, "action", attrib={"application": "db", "data": "delete/dnd/${caller_id_number}/on"})
+    ET.SubElement(c2, "action", attrib={"application": "db", "data": f"delete/dnd/${{caller_id_number}}_t{int(tenant_id)}/on"})
+    ET.SubElement(
+        c2, "action",
+        attrib={"application": "set", "data": f"nspbx_dnd_cola=${{callcenter_config(agent set status ${{caller_id_number}}@{dominio} Available)}}"},
+    )
     _decir(c2, "dnd_off", "No molestar desactivado.")
     ET.SubElement(c2, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
 
 
-def _append_dnd_hook(context: ET.Element, extensions: list) -> None:
+def _append_dnd_hook(context: ET.Element, extensions: list, tenant_id: int) -> None:
     """Si la extensión destino tiene DND activo, corta acá con ocupado en
     vez de timbrar. Va ANTES de Local_Extension, con continue="false" —
     solo se llega a cortar si de verdad hay DND activo; si no, esta
@@ -162,7 +174,7 @@ def _append_dnd_hook(context: ET.Element, extensions: list) -> None:
 
     cortar = ET.SubElement(context, "extension", attrib={"name": "nspbx_dnd_cortar", "continue": "false"})
     c1 = ET.SubElement(cortar, "condition", attrib={"field": "destination_number", "expression": f"^({numbers})$"})
-    c2 = ET.SubElement(cortar, "condition", attrib={"field": "${db(select/dnd/${destination_number})}", "expression": "^on$"})
+    c2 = ET.SubElement(cortar, "condition", attrib={"field": f"${{db(select/dnd/${{destination_number}}_t{int(tenant_id)})}}", "expression": "^on$"})
     ET.SubElement(c2, "action", attrib={"application": "answer"})
     _decir(c2, "dnd_no_disponible", "La extensión no está disponible en este momento.")
     ET.SubElement(c2, "action", attrib={"application": "hangup", "data": "USER_BUSY"})
@@ -631,7 +643,14 @@ def _append_queue_routes(context: ET.Element, queues: list, dominio: str) -> Non
         extension = ET.SubElement(context, "extension", attrib={"name": f"queue_{queue.name}", "continue": "false"})
         condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": f"^{re.escape(str(queue.extension))}$"})
         ET.SubElement(condition, "action", attrib={"application": "answer"})
-        ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=false"})
+        # true: si un agente contestó, al terminar la conversación se cuelga
+        # la pata de quien llamó. Con false (como estaba), mod_callcenter
+        # devuelve al cliente al dialplan cuando el agente cuelga primero
+        # (switch_ivr_bridge: CS_EXECUTE si no hay hangup_after_bridge) y la
+        # acción siguiente, el desborde, lo TRANSFERÍA después de haberlo
+        # atendido. Sin agente que conteste no hubo bridge y sigue igual al
+        # desborde.
+        ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
         ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})
         if queue.failover_extension and validacion.DESTINO_RE.fullmatch(queue.failover_extension):
             ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML {context.get('name')}"})
@@ -858,8 +877,8 @@ def build_dialplan_xml(
         _append_call_limits_hook(context, t["max_call_minutes"])
         if t["record_all"]:
             _append_recording_hook(context, t["tenant_id"])
-        _append_dnd_feature_codes(context)
-        _append_dnd_hook(context, extensions)
+        _append_dnd_feature_codes(context, dominio, t["tenant_id"])
+        _append_dnd_hook(context, extensions, t["tenant_id"])
         _append_mobile_push_hook(context, extensions, t.get("push_extensions") or set(), slugs.get(t["tenant_id"], ""))
         _append_push_bridge_routes(context, t.get("push_extensions") or set(), extensions, dominio)
         _append_local_extension_route(context, extensions, dominio)

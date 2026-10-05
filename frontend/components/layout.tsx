@@ -388,6 +388,15 @@ const ETIQUETA_ROL: Record<string, string> = {
 };
 
 export default function SidebarLayout({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  // /webcall es la burbuja «hablar con un agente» que va en un <iframe> en el
+  // sitio de un cliente, para un visitante anónimo: no lleva NADA del panel.
+  // Antes cargaba la sesión y el softphone del panel dentro del iframe; si en
+  // ese navegador había una sesión abierta del panel, el softphone registraba
+  // esa extensión y la burbuja «se llamaba a sí misma» (el aviso de llamada
+  // entrante aparecía dentro de ella), y si la sesión estaba vencida, el 401
+  // mandaba la burbuja a /login (pedía usuario y contraseña).
+  if (pathname === "/webcall") return <>{children}</>;
   return (
     <AuthProvider>
       <SoftphoneProvider>

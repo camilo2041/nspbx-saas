@@ -318,6 +318,8 @@ export interface SystemSettings {
   ari_password: string | null;
   ari_app: string;
   webcall_enabled: boolean;
+  /** Para el `data-empresa` del snippet (solo lectura). */
+  webcall_empresa?: string;
   webcall_queue_id: number | null;
   webcall_max_concurrent: number;
   webcall_turnstile_site_key: string | null;

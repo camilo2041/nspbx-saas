@@ -27,8 +27,18 @@ function apiBase(): string {
   return API_URL;
 }
 
+/**
+ * `?empresa=<slug>` que webcall.js le pasa al iframe (su `data-empresa`):
+ * de qué empresa es la burbuja. Vacío = la empresa inicial.
+ */
+export function consultaEmpresa(): string {
+  if (typeof window === "undefined") return "";
+  const e = new URLSearchParams(window.location.search).get("empresa");
+  return e ? `?empresa=${encodeURIComponent(e)}` : "";
+}
+
 async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${apiBase()}${path}`, {
+  const res = await fetch(`${apiBase()}${path}${consultaEmpresa()}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

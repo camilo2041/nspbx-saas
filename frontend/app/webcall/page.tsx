@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { API_URL } from "@/lib/api";
-import { useWebcallPhone } from "@/lib/webcall-phone";
+import { consultaEmpresa, useWebcallPhone } from "@/lib/webcall-phone";
 
 // Respeta un ?api= inyectado por webcall.js cuando el panel y el backend
 // están en orígenes distintos (desarrollo local: :3005 y :8001).
@@ -66,7 +66,7 @@ export default function WebcallPage() {
   const { phase, error, muted, seconds, audioRef, start, hangup, toggleMute, reset } = useWebcallPhone();
 
   useEffect(() => {
-    fetch(`${apiBase()}/api/webcall/config`)
+    fetch(`${apiBase()}/api/webcall/config${consultaEmpresa()}`)
       .then((r) => r.json())
       .then(setConfig)
       .catch((e) => setLoadError(e instanceof Error ? e.message : "No se pudo cargar"));

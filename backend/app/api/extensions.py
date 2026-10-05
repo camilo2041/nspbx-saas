@@ -10,6 +10,7 @@ from app.services import licensing
 from app.services.config_generator import orden_troncales
 from app.services import salientes
 from app.services.esl import originate_bridge, reloadxml
+from app.services.numeracion import numero_en_uso
 
 router = APIRouter(prefix="/api/extensions", tags=["extensions"])
 
@@ -44,6 +45,8 @@ async def create_extension(payload: ExtensionCreate, session: AsyncSession = Dep
                 detail="Alcanzaste el límite de extensiones de tu plan. Mejora la licencia para agregar más.",
             )
     datos = payload.model_dump()
+    if uso := await numero_en_uso(session, datos["number"]):
+        raise HTTPException(status_code=409, detail=f"El número {datos['number']} ya lo usa {uso}")
     datos["password"] = _clave_valida(datos.get("password"), datos["number"])
     ext = Extension(**datos)
     session.add(ext)
@@ -84,9 +87,16 @@ async def update_extension(
     # tiene que sacar ya a quien la esté usando, no cuando venza su registro.
     cortar = (cambios.get("enabled") is False and ext.enabled) or "password" in cambios
     numero_anterior = ext.number
+    if cambios.get("number") and cambios["number"] != ext.number:
+        if uso := await numero_en_uso(session, cambios["number"], salvo_extension=ext.id):
+            raise HTTPException(status_code=409, detail=f"El número {cambios['number']} ya lo usa {uso}")
     for field, value in cambios.items():
         setattr(ext, field, value)
-    await session.commit()
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="Número de extensión duplicado")
     await session.refresh(ext)
     if cortar:
         await _cortar(session, ext.tenant_id, numero_anterior)

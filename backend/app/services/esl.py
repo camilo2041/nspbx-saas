@@ -478,26 +478,44 @@ async def gateway_status(name: str) -> dict:
     return out
 
 
-async def dnd_status(extension: str) -> bool:
+def clave_dnd(extension: str, tenant_id: int) -> str:
+    """Clave del "no molestar" en la base interna de FreeSWITCH. Lleva la
+    empresa: esa base es UNA para toda la plataforma, y con solo el número
+    la extensión 1000 de una empresa y la 1000 de otra compartían el estado
+    (prender DND en una lo prendía en la otra)."""
+    validacion.exigir(validacion.EXTENSION_RE, extension, "Extensión")
+    return f"{extension}_t{int(tenant_id)}"
+
+
+ESTADO_AGENTE_DND = {True: "'On Break'", False: "Available"}
+
+
+async def dnd_status(extension: str, tenant_id: int) -> bool:
     """Lee el "no molestar" de una extensión desde la base interna de
     FreeSWITCH — el mismo lugar que consulta el dialplan en cada llamada
     (ver app/services/config_generator.py:_append_dnd_hook), así que esto
     siempre refleja el estado real, nunca uno guardado aparte que se
     pueda desincronizar."""
-    validacion.exigir(validacion.EXTENSION_RE, extension, "Extensión")
-    body = await api(f"db select/dnd/{extension}")
+    body = await api(f"db select/dnd/{clave_dnd(extension, tenant_id)}", tenant_id=tenant_id)
     return body.strip() == "on"
 
 
-async def dnd_set(extension: str, enabled: bool) -> None:
+async def dnd_set(extension: str, tenant_id: int, dominio: str, enabled: bool) -> None:
     """Prende o apaga el DND de una extensión. Es lo mismo que hace
     marcar *78/*79 desde un teléfono — un botón en la app es solo otra
-    forma de llegar al mismo estado."""
-    validacion.exigir(validacion.EXTENSION_RE, extension, "Extensión")
+    forma de llegar al mismo estado.
+
+    También pone al agente de cola de esa extensión en pausa ('On Break') o
+    disponible: mod_callcenter le marca directo al agente, sin pasar por el
+    dialplan, así que sin esto las colas le seguían timbrando con DND."""
+    clave = clave_dnd(extension, tenant_id)
+    validacion.exigir(validacion.HOST_RE, dominio, "Dominio")
     if enabled:
-        await api(f"db insert/dnd/{extension}/on")
+        await api(f"db insert/dnd/{clave}/on", tenant_id=tenant_id)
     else:
-        await api(f"db delete/dnd/{extension}/on")
+        await api(f"db delete/dnd/{clave}/on", tenant_id=tenant_id)
+    # Si la extensión no es agente de ninguna cola responde -ERR: no importa.
+    await api(f"callcenter_config agent set status {extension}@{dominio} {ESTADO_AGENTE_DND[enabled]}", tenant_id=tenant_id)
 
 
 async def reloadxml() -> str:

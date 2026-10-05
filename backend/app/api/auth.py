@@ -503,7 +503,7 @@ async def mi_entorno(
         # "no molestar apagado" en vez de romper toda la pantalla — el
         # botón de DND ya se encarga de avisar si falla al tocarlo.
         try:
-            dnd = await esl.dnd_status(usuario.extension.number)
+            dnd = await esl.dnd_status(usuario.extension.number, usuario.extension.tenant_id)
         except Exception:
             dnd = False
         extension = {
@@ -531,7 +531,9 @@ class DndRequest(BaseModel):
 
 
 @router.post("/dnd")
-async def poner_dnd(payload: DndRequest, usuario: User = Depends(usuario_actual)):
+async def poner_dnd(
+    payload: DndRequest, usuario: User = Depends(usuario_actual), session: AsyncSession = Depends(get_session)
+):
     """Prender o apagar "no molestar" desde el botón del softphone —
     mismo efecto que marcar *78/*79 desde cualquier teléfono, ver
     app/services/config_generator.py:_append_dnd_feature_codes.
@@ -542,7 +544,8 @@ async def poner_dnd(payload: DndRequest, usuario: User = Depends(usuario_actual)
     if not usuario.extension:
         raise HTTPException(status_code=400, detail="Tu usuario no tiene una extensión asignada")
     try:
-        await esl.dnd_set(usuario.extension.number, payload.enabled)
+        tenant = await session.get(Tenant, usuario.extension.tenant_id)
+        await esl.dnd_set(usuario.extension.number, usuario.extension.tenant_id, tenant.sip_domain, payload.enabled)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"FreeSWITCH no disponible: {exc}")
     return {"ok": True, "dnd": payload.enabled}
