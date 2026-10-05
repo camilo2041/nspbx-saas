@@ -781,6 +781,21 @@ export default function CampaignsPage() {
             </>
           )}
 
+          {form.metodo !== "voizbot" &&
+            (editing ? (
+              <div className="rounded-xl border border-line p-3">
+                <AgentesCampana campaignId={editing.id} />
+                <p className="text-xs text-muted">
+                  Se guardan al marcarlos. Las campañas no usan colas: la central le pasa cada llamada
+                  contestada al agente listo que más lleva esperando.
+                </p>
+              </div>
+            ) : (
+              <Note tone="muted">
+                Al crearla se abre la campaña para elegir los agentes que la trabajan y cargar los números.
+              </Note>
+            ))}
+
           <details className="group rounded-xl border border-line">
             <summary className="cursor-pointer select-none px-3 py-2.5 text-sm font-medium text-fg-soft">
               Opciones avanzadas <span className="text-xs font-normal text-muted">(reintentos, topes, grabación, CRM…)</span>
