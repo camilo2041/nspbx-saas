@@ -1,0 +1,17 @@
+# Recarga los jails de fail2ban de la central cuando se recrea el contenedor
+# de FreeSWITCH (ver nspbx-fail2ban-vigia.sh). Lo instala
+# deploy/fail2ban/instalar.sh.
+[Unit]
+Description=NSPBX: fail2ban sigue el log de FreeSWITCH al recrear el contenedor
+After=docker.service fail2ban.service
+Requires=docker.service
+Wants=fail2ban.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/nspbx-fail2ban-vigia.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
