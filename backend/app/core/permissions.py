@@ -68,6 +68,23 @@ LLAMADAS_VER_PROPIAS = "llamadas:ver_propias"
 CITAS_GESTIONAR = "citas:gestionar"
 CONSUMO_IA_VER = "consumo_ia:ver"
 SOFTPHONE_USAR = "softphone:usar"
+# CRM (docs/plan-contact-center.md, fase 2). Ver: contactos, su ficha y
+# escribir notas. Gestionar: crear, editar, importar, campos propios y la
+# lista de no llamar. El asesor lo recibe con la consola de agente (fase 3),
+# acotado a los leads que atiende.
+CRM_VER = "crm:ver"
+CRM_GESTIONAR = "crm:gestionar"
+# Trabajar como agente en la consola (fase 3): entrar a campañas asignadas,
+# marcar, disponer. Lo que ve del cliente es solo el lead que atiende.
+AGENTE_OPERAR = "agente:operar"
+# Supervisión (fase 5). Ver: agentes y campañas en vivo, wallboard. Intervenir:
+# escuchar, susurrar e intervenir llamadas, forzar pausa o salida de un
+# agente y cambiar el nivel de marcación en caliente.
+SUPERVISION_VER = "supervision:ver"
+SUPERVISION_INTERVENIR = "supervision:intervenir"
+# Reportes del contact center (fase 6): agentes, campañas, disposiciones y
+# cumplimiento, con exportación CSV y envío programado por correo.
+REPORTES_VER = "reportes:ver"
 
 PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
     ADMIN: frozenset(
@@ -84,6 +101,12 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CITAS_GESTIONAR,
             CONSUMO_IA_VER,
             SOFTPHONE_USAR,
+            CRM_VER,
+            CRM_GESTIONAR,
+            AGENTE_OPERAR,
+            REPORTES_VER,
+            SUPERVISION_VER,
+            SUPERVISION_INTERVENIR,
         }
     ),
     SUPERVISOR: frozenset(
@@ -97,6 +120,12 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             CITAS_GESTIONAR,
             CONSUMO_IA_VER,
             SOFTPHONE_USAR,
+            CRM_VER,
+            CRM_GESTIONAR,
+            AGENTE_OPERAR,
+            REPORTES_VER,
+            SUPERVISION_VER,
+            SUPERVISION_INTERVENIR,
         }
     ),
     COORDINADOR: frozenset(
@@ -107,6 +136,11 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             LLAMADAS_VER_PROPIAS,
             CITAS_GESTIONAR,
             CONSUMO_IA_VER,
+            CRM_VER,
+            CRM_GESTIONAR,
+            AGENTE_OPERAR,
+            REPORTES_VER,
+            SUPERVISION_VER,
         }
     ),
     ASESOR: frozenset(
@@ -114,6 +148,7 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
             LLAMADAS_VER_PROPIAS,
             CITAS_GESTIONAR,
             SOFTPHONE_USAR,
+            AGENTE_OPERAR,
         }
     ),
     # El rol de plataforma solo administra empresas. No ve datos de
@@ -133,9 +168,9 @@ PERMISOS_POR_ROL: dict[str, frozenset[str]] = {
 # permisos se evalúan en CADA petición: ir a la base en cada `requiere()`
 # multiplicaría las consultas por el número de endpoints protegidos.
 #
-# El caché se rellena al arrancar y se invalida al guardar. Asume UN
-# proceso de aplicación, que es como corre hoy (ver docker-compose); con
-# varios workers habría que mover la invalidación a Postgres (LISTEN/NOTIFY).
+# El caché se rellena al arrancar y se invalida al guardar; con varias
+# réplicas, la que guarda avisa a las demás por el bus (services/bus.py,
+# LISTEN/NOTIFY de Postgres) y cada una relee la tabla.
 _OVERRIDES: dict[tuple[int, str], dict[str, bool]] = {}
 
 # Permisos que una empresa NO puede tocar, pase lo que pase en la tabla.
@@ -219,6 +254,12 @@ ETIQUETAS_PERMISOS = {
     CITAS_GESTIONAR: "Gestionar citas",
     CONSUMO_IA_VER: "Ver consumo de IA",
     SOFTPHONE_USAR: "Usar el softphone",
+    CRM_VER: "Ver contactos (CRM) y escribir notas",
+    CRM_GESTIONAR: "Gestionar contactos: importar, campos y no llamar",
+    AGENTE_OPERAR: "Trabajar como agente (consola de agente)",
+    SUPERVISION_VER: "Ver agentes y campañas en vivo y el wallboard",
+    SUPERVISION_INTERVENIR: "Escuchar, susurrar e intervenir llamadas; forzar pausa o salida de agentes",
+    REPORTES_VER: "Ver y exportar reportes del contact center",
 }
 
 TODOS_LOS_PERMISOS = tuple(ETIQUETAS_PERMISOS)

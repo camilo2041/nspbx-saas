@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session
+from app.core.database import get_session, traer_propio
 from app.models import OutboundRoute, Trunk
 from app.schemas import OutboundRouteCreate, OutboundRouteOut, OutboundRouteUpdate
 from app.services.esl import reloadxml
@@ -61,7 +61,7 @@ async def create_route(payload: OutboundRouteCreate, session: AsyncSession = Dep
 
 @router.get("/{route_id}", response_model=OutboundRouteOut)
 async def get_route(route_id: int, session: AsyncSession = Depends(get_session)):
-    route = await session.get(OutboundRoute, route_id)
+    route = await traer_propio(session, OutboundRoute, route_id)
     if not route:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
     return route
@@ -69,7 +69,7 @@ async def get_route(route_id: int, session: AsyncSession = Depends(get_session))
 
 @router.put("/{route_id}", response_model=OutboundRouteOut)
 async def update_route(route_id: int, payload: OutboundRouteUpdate, session: AsyncSession = Depends(get_session)):
-    route = await session.get(OutboundRoute, route_id)
+    route = await traer_propio(session, OutboundRoute, route_id)
     if not route:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
     cambios = payload.model_dump(exclude_unset=True)
@@ -95,7 +95,7 @@ async def update_route(route_id: int, payload: OutboundRouteUpdate, session: Asy
 
 @router.delete("/{route_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_route(route_id: int, session: AsyncSession = Depends(get_session)):
-    route = await session.get(OutboundRoute, route_id)
+    route = await traer_propio(session, OutboundRoute, route_id)
     if not route:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
     await session.delete(route)

@@ -15,8 +15,8 @@ import {
   Pantalla,
 } from "@/src/gestion";
 import { exito, fallo } from "@/src/haptico";
-import { colores, radios } from "@/src/tema";
-import { Boton, Pildora } from "@/src/ui";
+import { radios, useColores } from "@/src/tema";
+import { Boton, CajaIcono, Pildora } from "@/src/ui";
 
 interface Troncal {
   id: number;
@@ -132,6 +132,7 @@ function aCuerpo(v: Record<string, unknown>) {
 }
 
 export default function Troncales() {
+  const c = useColores();
   const { datos, cargando, refrescando, error, sinConexion, recargar } = useDatos<Troncal[]>("/api/trunks");
   const [estados, setEstados] = useState<Record<number, EstadoTroncal | "error">>({});
   const [detalle, setDetalle] = useState<Troncal | null>(null);
@@ -236,13 +237,13 @@ export default function Troncales() {
   return (
     <>
       <Pantalla refrescando={refrescando} onRefrescar={recargar}>
-        <Boton titulo="+ Nueva troncal" onPress={() => setEditando("nueva")} />
+        <Boton titulo="Nueva troncal" icono="agregar" onPress={() => setEditando("nueva")} />
         {sinConexion ? <AvisoSinConexion /> : null}
         {error && !datos ? <Aviso texto={error} /> : null}
         {cargando && !datos ? <ListaEsqueleto filas={3} /> : null}
         {datos && datos.length === 0 ? (
           <EstadoVacio
-            icono="🔌"
+            icono="troncal"
             titulo="Aún no hay troncales"
             texto="Una troncal conecta tu central con el proveedor que te da los números y la salida a la red telefónica."
           />
@@ -255,9 +256,7 @@ export default function Troncales() {
               titulo={t.name}
               subtitulo={`${t.gateway_host}:${t.gateway_port} · ${t.transport.toUpperCase()}`}
               izquierda={
-                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: colores.marcaSuave, alignItems: "center", justifyContent: "center" }}>
-                  <Text style={{ fontSize: 20 }}>🔌</Text>
-                </View>
+                <CajaIcono icono="troncal" tono="marca" />
               }
               derecha={<Pildora texto={l.texto} tono={l.tono} />}
               onPress={() => {
@@ -272,14 +271,14 @@ export default function Troncales() {
       <Hoja visible={!!detalle && editando === null} titulo={detalle?.name ?? ""} onCerrar={() => setDetalle(null)}>
         {detalle && lecturaDetalle ? (
           <View style={{ padding: 20, paddingTop: 4, gap: 14 }}>
-            <View style={{ backgroundColor: colores.superficie2, borderRadius: radios.medio, padding: 14, gap: 8 }}>
+            <View style={{ backgroundColor: c.superficie2, borderRadius: radios.medio, padding: 14, gap: 8 }}>
               <Pildora texto={lecturaDetalle.texto} tono={lecturaDetalle.tono} />
-              <Text style={{ fontSize: 13, color: colores.textoSuave, lineHeight: 19 }}>{lecturaDetalle.detalle}</Text>
+              <Text style={{ fontSize: 13, color: c.textoSuave, lineHeight: 19 }}>{lecturaDetalle.detalle}</Text>
               {estadoDetalle && estadoDetalle !== "error" && estadoDetalle.ping_ms ? (
-                <Text style={{ fontSize: 12, color: colores.textoSecundario }}>Ping al proveedor: {estadoDetalle.ping_ms} ms</Text>
+                <Text style={{ fontSize: 12, color: c.textoSecundario }}>Ping al proveedor: {estadoDetalle.ping_ms} ms</Text>
               ) : null}
               {estadoDetalle && estadoDetalle !== "error" && estadoDetalle.contact_ip ? (
-                <Text style={{ fontSize: 12, color: colores.textoSecundario }}>IP que anuncia la central: {estadoDetalle.contact_ip}</Text>
+                <Text style={{ fontSize: 12, color: c.textoSecundario }}>IP que anuncia la central: {estadoDetalle.contact_ip}</Text>
               ) : null}
             </View>
             {ipPrivada ? (
@@ -288,14 +287,14 @@ export default function Troncales() {
                 texto="La central anuncia una IP privada al proveedor: se verá «registrada», pero las llamadas entrantes no podrán llegar. Revisa la IP pública en la configuración del servidor."
               />
             ) : null}
-            <Text style={{ fontSize: 12.5, color: colores.textoSecundario }}>
+            <Text style={{ fontSize: 12.5, color: c.textoSecundario }}>
               {detalle.gateway_host}:{detalle.gateway_port} · {detalle.transport.toUpperCase()}
               {detalle.username ? ` · usuario ${detalle.username}` : ""}
             </Text>
             {resultado ? <Aviso texto={resultado.texto} tono={resultado.ok ? "ok" : "peligro"} /> : null}
-            <Boton titulo="Verificar estado" onPress={() => verificar(detalle)} cargando={trabajando === "verificar"} />
-            <Boton titulo="Reescanear en la central" variante="suave" onPress={() => reescanear(detalle)} cargando={trabajando === "reescanear"} />
-            <Boton titulo="Editar" variante="suave" onPress={() => setEditando(detalle)} />
+            <Boton titulo="Verificar estado" icono="refrescar" onPress={() => verificar(detalle)} cargando={trabajando === "verificar"} />
+            <Boton titulo="Reescanear en la central" icono="servidor" variante="suave" onPress={() => reescanear(detalle)} cargando={trabajando === "reescanear"} />
+            <Boton titulo="Editar" icono="editar" variante="suave" onPress={() => setEditando(detalle)} />
           </View>
         ) : null}
       </Hoja>

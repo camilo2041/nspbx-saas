@@ -1,22 +1,25 @@
 import json
 from datetime import datetime
+from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.database import get_session, tenant_de_sesion
-from app.models import Appointment, Campaign, CampaignNumber, Debt, Trunk, VoiceBot
+from app.core.database import get_session, tenant_de_sesion, traer_propio
+from app.models import Appointment, Campaign, CampaignNumber, Debt, Lista, Trunk, VoiceBot
 from app.schemas import (
     CampaignCreate,
     CampaignNumberIn,
     CampaignNumberUpdate,
     CampaignOut,
     CampaignStats,
+    AgentesCampanaIn,
     CampaignUpdate,
+    ListaUpdate,
 )
-from app.services import licensing
+from app.services import crm, hopper, integraciones, licensing, salientes
 from app.services.appointments import is_slot_free
 from app.services.fechas import parse_fecha_hora as _parse_fecha_hora
 from app.workers.dialer import dialer
@@ -172,6 +175,10 @@ async def list_campaigns_detail(session: AsyncSession = Depends(get_session)):
                 "voicebot_id": c.voicebot_id,
                 "max_concurrency": c.max_concurrency,
                 "retries": c.retries,
+                # Sin los topes, el formulario de edición del panel los
+                # recibía vacíos y al guardar los borraba.
+                "max_calls_per_day": c.max_calls_per_day,
+                "max_minutes_per_day": c.max_minutes_per_day,
                 "message_template": c.message_template,
                 "ai_intent": c.ai_intent,
                 "status": c.status,
@@ -195,13 +202,35 @@ async def list_campaigns_detail(session: AsyncSession = Depends(get_session)):
     return out
 
 
+@router.get("/horario")
+async def horario_de_marcacion(session: AsyncSession = Depends(get_session)):
+    """Si las campañas pueden marcar ahora y, si no, desde cuándo (Ley 2300
+    para las de cobranza; ver services/horario_marcacion.py). Para que quien
+    inicia una campaña de noche entienda por qué no sale ninguna llamada."""
+    from app.core.clock import now_local
+    from app.services import horario_marcacion
+    from app.services.ajustes import ajustes_de
+
+    ajustes = await ajustes_de(session)
+    ahora = now_local()
+    salida = {}
+    for intencion in ("cobranza", "otras"):
+        prox = horario_marcacion.proxima_apertura(ajustes, intencion, ahora)
+        salida[intencion] = {
+            "puede_marcar": horario_marcacion.puede_marcar(ajustes, intencion, ahora),
+            "proxima_apertura": prox.isoformat(timespec="minutes") if prox else None,
+        }
+    salida["festivo_hoy"] = horario_marcacion.es_festivo(ahora.date())
+    return salida
+
+
 async def _validar_referencias(session: AsyncSession, trunk_id: int | None, voicebot_id: int | None) -> None:
     """La troncal y el voizbot tienen que ser de ESTA empresa. `session.get` va
     por la sesión atada a la empresa, que no ve las ajenas; sin esta comprobación
     un id adivinado apuntaba a la troncal de otra (la FK no distingue empresas)."""
-    if trunk_id and not await session.get(Trunk, trunk_id):
+    if trunk_id and not await traer_propio(session, Trunk, trunk_id):
         raise HTTPException(status_code=400, detail="Troncal inexistente")
-    if voicebot_id and not await session.get(VoiceBot, voicebot_id):
+    if voicebot_id and not await traer_propio(session, VoiceBot, voicebot_id):
         raise HTTPException(status_code=400, detail="Voizbot inexistente")
 
 
@@ -217,6 +246,8 @@ async def create_campaign(payload: CampaignCreate, session: AsyncSession = Depen
             )
     await _validar_referencias(session, payload.trunk_id, payload.voicebot_id)
     campaign = Campaign(**payload.model_dump())
+    if campaign.crm_url:
+        campaign.crm_secreto = integraciones.nuevo_secreto()
     session.add(campaign)
     try:
         await session.commit()
@@ -224,12 +255,30 @@ async def create_campaign(payload: CampaignCreate, session: AsyncSession = Depen
         await session.rollback()
         raise HTTPException(status_code=400, detail="Nombre de campaña duplicado")
     await session.refresh(campaign)
+    await _audio_abandono(session, campaign, cambio=True)
     return campaign
+
+
+async def _audio_abandono(session: AsyncSession, campaign: Campaign, cambio: bool) -> None:
+    """Las campañas proporcionales y predictivas necesitan el audio del
+    mensaje de abandono: se genera al guardarlas si cambió el texto o si
+    todavía no lo tienen."""
+    from app.models import Tenant
+    from app.services import predictivo
+
+    if campaign.metodo not in predictivo.METODOS or (campaign.audio_abandono and not cambio):
+        return
+    empresa = await session.get(Tenant, campaign.tenant_id)
+    ruta = await predictivo.generar_audio_abandono(campaign, empresa.name if empresa else "la empresa")
+    if ruta:
+        campaign.audio_abandono = ruta
+        await session.commit()
+        await session.refresh(campaign)
 
 
 @router.get("/{campaign_id}", response_model=CampaignOut)
 async def get_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     return campaign
@@ -239,21 +288,41 @@ async def get_campaign(campaign_id: int, session: AsyncSession = Depends(get_ses
 async def update_campaign(
     campaign_id: int, payload: CampaignUpdate, session: AsyncSession = Depends(get_session)
 ):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     cambios = payload.model_dump(exclude_unset=True)
     await _validar_referencias(session, cambios.get("trunk_id"), cambios.get("voicebot_id"))
+    texto_antes = campaign.mensaje_abandono
     for field, value in cambios.items():
         setattr(campaign, field, value)
+    if "nivel_marcacion" in cambios or "metodo" in cambios:
+        # El predictivo arranca desde el nivel configurado.
+        campaign.nivel_actual = None
+    if campaign.crm_url and not campaign.crm_secreto:
+        campaign.crm_secreto = integraciones.nuevo_secreto()
     await session.commit()
     await session.refresh(campaign)
+    await _audio_abandono(session, campaign, cambio="mensaje_abandono" in cambios and cambios["mensaje_abandono"] != texto_antes)
     return campaign
+
+
+@router.post("/{campaign_id}/crm-secreto")
+async def secreto_crm(campaign_id: int, rotar: bool = False, session: AsyncSession = Depends(get_session)):
+    """El secreto con el que se firma la URL del CRM, para configurarlo del
+    lado del CRM. `rotar=true` lo cambia (los enlaces viejos dejan de valer)."""
+    campaign = await traer_propio(session, Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    if rotar or not campaign.crm_secreto:
+        campaign.crm_secreto = integraciones.nuevo_secreto()
+        await session.commit()
+    return {"secreto": campaign.crm_secreto}
 
 
 @router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     await session.delete(campaign)
@@ -270,64 +339,246 @@ def _number_out(n: CampaignNumber) -> dict:
         "last_error": n.last_error,
         "vars": json.loads(n.extra_data) if n.extra_data else {},
         "created_at": n.created_at,
+        "contacto_id": n.contacto_id,
+        "lista_id": n.lista_id,
+        "prioridad": n.prioridad,
+        "proximo_intento_at": n.proximo_intento_at,
     }
+
+
+@router.get("/{campaign_id}/listas")
+async def listas_de_campana(campaign_id: int, session: AsyncSession = Depends(get_session)):
+    """Las cargas de la campaña, con cuántos números tiene cada una por estado."""
+    campaign = await traer_propio(session, Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    listas = (
+        await session.execute(select(Lista).where(Lista.campaign_id == campaign_id).order_by(Lista.id))
+    ).scalars().all()
+    conteos: dict[int, dict[str, int]] = {}
+    filas = await session.execute(
+        select(CampaignNumber.lista_id, CampaignNumber.status, func.count())
+        .where(CampaignNumber.campaign_id == campaign_id, CampaignNumber.lista_id.is_not(None))
+        .group_by(CampaignNumber.lista_id, CampaignNumber.status)
+    )
+    for lista_id, estado, n in filas.all():
+        conteos.setdefault(lista_id, {})[estado] = n
+    return [_lista_out(l, conteos.get(l.id, {})) for l in listas]
+
+
+def _lista_out(lista: Lista, conteo: dict[str, int] | None = None) -> dict:
+    conteo = conteo or {}
+    return {
+        "id": lista.id,
+        "campaign_id": lista.campaign_id,
+        "nombre": lista.nombre,
+        "activa": lista.activa,
+        "prioridad": lista.prioridad,
+        "origen": lista.origen,
+        "created_at": lista.created_at,
+        "total": sum(conteo.values()),
+        "pendientes": conteo.get("pending", 0),
+        "por_estado": conteo,
+    }
+
+
+@router.get("/{campaign_id}/agentes")
+async def agentes_de_campana(campaign_id: int, session: AsyncSession = Depends(get_session)):
+    """Quién trabaja esta campaña y quién podría (usuarios con extensión y
+    permiso de agente). Solo nombre y extensión: no hace falta poder
+    administrar usuarios para asignar agentes."""
+    from app.core import permissions
+    from app.models import CampanaAgente, User
+
+    campaign = await traer_propio(session, Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    asignados = set(
+        (await session.execute(select(CampanaAgente.user_id).where(CampanaAgente.campaign_id == campaign_id))).scalars()
+    )
+    usuarios = (await session.execute(select(User).where(User.enabled.is_(True)).order_by(User.full_name))).unique().scalars()
+    return [
+        {
+            "id": u.id,
+            "nombre": u.full_name or u.username,
+            "username": u.username,
+            "extension": u.extension.number if u.extension else None,
+            "asignado": u.id in asignados,
+        }
+        for u in usuarios
+        if u.id in asignados or (u.extension and permissions.puede(u.role, permissions.AGENTE_OPERAR, u.tenant_id))
+    ]
+
+
+@router.put("/{campaign_id}/agentes")
+async def asignar_agentes(campaign_id: int, payload: AgentesCampanaIn, session: AsyncSession = Depends(get_session)):
+    from app.models import CampanaAgente, User
+
+    campaign = await traer_propio(session, Campaign, campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    pedidos = set(payload.user_ids)
+    if pedidos:
+        propios = set((await session.execute(select(User.id).where(User.id.in_(pedidos)))).scalars())
+        if propios != pedidos:
+            raise HTTPException(status_code=400, detail="Usuario inexistente")
+    actuales = {
+        a.user_id: a
+        for a in (await session.execute(select(CampanaAgente).where(CampanaAgente.campaign_id == campaign_id))).scalars()
+    }
+    for user_id, fila in actuales.items():
+        if user_id not in pedidos:
+            await session.delete(fila)
+    for user_id in pedidos - set(actuales):
+        session.add(CampanaAgente(tenant_id=campaign.tenant_id, campaign_id=campaign_id, user_id=user_id))
+    await session.commit()
+    return await agentes_de_campana(campaign_id, session)
+
+
+@router.put("/{campaign_id}/listas/{lista_id}")
+async def actualizar_lista(
+    campaign_id: int, lista_id: int, payload: ListaUpdate, session: AsyncSession = Depends(get_session)
+):
+    """Pausar o reanudar una carga (sus números esperan sin marcarse) o
+    cambiar su prioridad (las de prioridad más alta se marcan primero)."""
+    lista = await traer_propio(session, Lista, lista_id)
+    if not lista or lista.campaign_id != campaign_id:
+        raise HTTPException(status_code=404, detail="Lista no encontrada")
+    for campo, valor in payload.model_dump(exclude_unset=True).items():
+        setattr(lista, campo, valor)
+    await session.commit()
+    return _lista_out(lista)
 
 
 @router.post("/{campaign_id}/numbers", status_code=status.HTTP_201_CREATED)
 async def add_numbers(
     campaign_id: int, payload: CampaignNumberIn, session: AsyncSession = Depends(get_session)
 ):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
-    res = await session.execute(
-        select(CampaignNumber).where(CampaignNumber.campaign_id == campaign_id)
+    resultado = await cargar_numeros(
+        session, campaign, [(f.phone, f.vars, None) for f in payload.numbers], origen="manual"
     )
-    existentes = {n.phone: n for n in res.scalars().all()}
+    await session.commit()
+    return resultado
+
+
+async def cargar_numeros(
+    session: AsyncSession,
+    campaign: Campaign,
+    filas: list[tuple[str, dict[str, str], "crm.Contacto | None"]],
+    origen: str,
+    nombre_lista: str | None = None,
+) -> dict:
+    """Carga (teléfono, variables, contacto) en la campaña, sin commit.
+
+    Cada número queda ligado a su contacto del CRM (se crea si no existe) y
+    los nuevos entran en una lista de esta carga, que después se puede
+    pausar o priorizar. Lo usan la carga manual y la importación de CSV
+    (api/crm.py)."""
+    campaign_id = campaign.id
+    # Solo los números que vienen en esta carga, no la campaña entera: con
+    # una campaña de 200.000 números, sumar 10.000 traía las 200.000 filas
+    # (casi 300 MB por petición). En tandas, para no pasar el límite de
+    # parámetros de una consulta.
+    entrantes = list(dict.fromkeys(f[0] for f in filas))
+    existentes = {}
+    for i in range(0, len(entrantes), 1000):
+        res = await session.execute(
+            select(CampaignNumber).where(
+                CampaignNumber.campaign_id == campaign_id, CampaignNumber.phone.in_(entrantes[i:i + 1000])
+            )
+        )
+        existentes.update({n.phone: n for n in res.scalars().all()})
     es_cobranza = (campaign.ai_intent or "").strip().lower() == "cobranza"
     added = 0
     updated = 0
     agenda_creadas = 0
     agenda_omitidas: list[dict] = []
-    for fila in payload.numbers:
-        numero = existentes.get(fila.phone)
+    # Destinos que la política de salientes nunca dejaría marcar
+    # (internacional sin permiso, país no habilitado, premium): se avisan al
+    # cargar, en vez de que la campaña los descubra fallando uno por uno.
+    # El marcador igual los vuelve a revisar antes de cada llamada.
+    politica = replace(await salientes.politica_de(session, campaign.tenant_id), bloqueo=None)
+    bloqueados: list[dict] = []
+    validas = []
+    for phone, variables, contacto in filas:
+        motivo = salientes.motivo_bloqueo(phone, politica)
+        if motivo:
+            bloqueados.append({"phone": phone, "motivo": motivo})
+        else:
+            validas.append((phone, variables, contacto))
+
+    # Un contacto por teléfono (los que ya existen se reutilizan).
+    cache = await crm.por_claves(session, [crm.clave_telefono(p) for p, _, _ in validas])
+    contactos = {}
+    for phone, variables, contacto in validas:
+        contactos[phone] = contacto or await crm.asegurar(
+            session, campaign.tenant_id, phone, crm.nombre_de_variables(variables), "campaña", cache
+        )
+    await session.flush()
+
+    lista = None
+    for phone, variables, _ in validas:
+        contacto = contactos.get(phone)
+        numero = existentes.get(phone)
         if numero:
             # Ya estaba cargado en esta campaña. Antes esto se ignoraba
             # en silencio — si alguien volvía a pegar el mismo número
             # para corregir un dato mal cargado, la corrección nunca
             # llegaba a guardarse y no había ningún aviso de que pasó
             # eso. Ahora, si esta vez trae variables, se actualizan.
-            if fila.vars:
-                numero.extra_data = json.dumps(fila.vars, ensure_ascii=False)
+            if variables:
+                numero.extra_data = json.dumps(variables, ensure_ascii=False)
                 updated += 1
+            if numero.contacto_id is None and contacto is not None:
+                numero.contacto_id = contacto.id
         else:
+            if lista is None:
+                lista = Lista(
+                    tenant_id=campaign.tenant_id,
+                    campaign_id=campaign_id,
+                    nombre=(nombre_lista or f"Carga {datetime.now():%Y-%m-%d %H:%M}")[:120],
+                    origen=origen,
+                )
+                session.add(lista)
+                await session.flush()
             numero = CampaignNumber(
                 campaign_id=campaign_id,
-                phone=fila.phone,
-                extra_data=json.dumps(fila.vars, ensure_ascii=False) if fila.vars else None,
+                tenant_id=campaign.tenant_id,
+                phone=phone,
+                extra_data=json.dumps(variables, ensure_ascii=False) if variables else None,
+                contacto_id=contacto.id if contacto else None,
+                lista_id=lista.id,
             )
             session.add(numero)
-            existentes[fila.phone] = numero
+            existentes[phone] = numero
             added += 1
-        if fila.vars:
+        if variables:
             if es_cobranza:
-                deuda_id, motivo = await _sincronizar_deuda(session, fila.phone, fila.vars)
+                deuda_id, motivo = await _sincronizar_deuda(session, phone, variables)
                 if motivo:
-                    agenda_omitidas.append({"phone": fila.phone, "motivo": motivo})
+                    agenda_omitidas.append({"phone": phone, "motivo": motivo})
             else:
-                appointment_id, motivo = await _sincronizar_agenda(session, fila.phone, fila.vars)
+                appointment_id, motivo = await _sincronizar_agenda(session, phone, variables)
                 if motivo:
-                    agenda_omitidas.append({"phone": fila.phone, "motivo": motivo})
+                    agenda_omitidas.append({"phone": phone, "motivo": motivo})
                 elif appointment_id:
                     numero.appointment_id = appointment_id
                     agenda_creadas += 1
-    await session.commit()
+    await session.flush()
+    total = (await session.execute(
+        select(func.count(CampaignNumber.id)).where(CampaignNumber.campaign_id == campaign_id)
+    )).scalar_one()
     return {
         "added": added,
         "updated": updated,
-        "total": len(existentes),
+        "total": total,
         "agenda_creadas": agenda_creadas,
         "agenda_omitidas": agenda_omitidas,
+        "bloqueados": bloqueados,
+        "lista_id": lista.id if lista else None,
     }
 
 
@@ -345,7 +596,7 @@ async def list_numbers(
     apertura del detalle — con el navegador dibujando la lista entera.
     El filtro por estado es lo que hace usable revisar "cuáles fallaron"
     sin tener que recorrer la lista completa a ojo."""
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     query = select(CampaignNumber).where(CampaignNumber.campaign_id == campaign_id)
@@ -366,7 +617,7 @@ async def list_numbers(
 async def update_number(
     campaign_id: int, number_id: int, payload: CampaignNumberUpdate, session: AsyncSession = Depends(get_session)
 ):
-    number = await session.get(CampaignNumber, number_id)
+    number = await traer_propio(session, CampaignNumber, number_id)
     if not number or number.campaign_id != campaign_id:
         raise HTTPException(status_code=404, detail="Número no encontrado")
     number.phone = payload.phone
@@ -379,7 +630,7 @@ async def update_number(
 
 @router.delete("/{campaign_id}/numbers/{number_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_number(campaign_id: int, number_id: int, session: AsyncSession = Depends(get_session)):
-    number = await session.get(CampaignNumber, number_id)
+    number = await traer_propio(session, CampaignNumber, number_id)
     if not number or number.campaign_id != campaign_id:
         raise HTTPException(status_code=404, detail="Número no encontrado")
     await session.delete(number)
@@ -391,7 +642,7 @@ async def clear_numbers(campaign_id: int, session: AsyncSession = Depends(get_se
     """Vacía toda la lista de números ya cargados — para volver a empezar
     sin borrarlos uno por uno. No toca las citas que se hayan
     sincronizado en la Agenda a partir de ellos, esas quedan igual."""
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     if campaign.status == "running":
@@ -403,7 +654,7 @@ async def clear_numbers(campaign_id: int, session: AsyncSession = Depends(get_se
 
 @router.get("/{campaign_id}/stats", response_model=CampaignStats)
 async def campaign_stats(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     res = await session.execute(
@@ -421,14 +672,39 @@ async def campaign_stats(campaign_id: int, session: AsyncSession = Depends(get_s
         noanswer=counts.get("noanswer", 0),
         failed=counts.get("failed", 0),
         done=counts.get("done", 0),
+        no_llamar=counts.get("no_llamar", 0),
         active_calls=counts.get("dialing", 0),
     )
+    disponibles = (
+        await session.execute(
+            select(func.count(CampaignNumber.id))
+            .outerjoin(Lista, Lista.id == CampaignNumber.lista_id)
+            .where(*hopper.condiciones_disponibles(campaign_id, datetime.utcnow()))
+        )
+    ).scalar_one()
+    stats.en_espera = max(0, stats.pending - disponibles)
+    from app.core.clock import now_local
+    from app.services import tope_campanas
+
+    hoy = now_local().date()
+    minutos = (await tope_campanas.minutos_hoy(session, [campaign.id])).get(campaign.id, 0)
+    stats.llamadas_hoy = tope_campanas.llamadas_hoy(campaign, hoy)
+    stats.minutos_hoy = round(minutos, 1)
+    stats.tope_alcanzado = tope_campanas.disponibles(campaign, hoy, minutos)[1]
+    from app.services import predictivo
+
+    if campaign.metodo in predictivo.METODOS:
+        stats.predictivo = {
+            **await predictivo.metricas_de_hoy(session, campaign.id),
+            "nivel": campaign.nivel_actual or campaign.nivel_marcacion,
+            **{k: v for k, v in predictivo.instantanea(campaign.id).items() if k in ("timbrando", "en_espera")},
+        }
     return stats
 
 
 @router.post("/{campaign_id}/start")
 async def start_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     res = await session.execute(
@@ -450,28 +726,21 @@ async def start_campaign(campaign_id: int, session: AsyncSession = Depends(get_s
 async def retry_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
     """Vuelve a poner en 'pending' los números fallidos o completados, para
     poder relanzar la campaña (ej. tras corregir la troncal o el voizbot)."""
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
-    result = await session.execute(
-        update(CampaignNumber)
-        .where(
-            CampaignNumber.campaign_id == campaign_id,
-            CampaignNumber.status.in_(["failed", "done", "busy", "noanswer"]),
-        )
-        .values(status="pending", attempts=0, last_error=None)
-    )
-    if result.rowcount == 0:
+    reiniciados = await hopper.reiniciar_campana(session, campaign_id)
+    if reiniciados == 0:
         raise HTTPException(status_code=400, detail="No hay números para reintentar")
     campaign.status = "idle"
     campaign.finished_at = None
     await session.commit()
-    return {"ok": True, "reset": result.rowcount}
+    return {"ok": True, "reset": reiniciados}
 
 
 @router.post("/{campaign_id}/stop")
 async def stop_campaign(campaign_id: int, session: AsyncSession = Depends(get_session)):
-    campaign = await session.get(Campaign, campaign_id)
+    campaign = await traer_propio(session, Campaign, campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaña no encontrada")
     campaign.status = "idle"

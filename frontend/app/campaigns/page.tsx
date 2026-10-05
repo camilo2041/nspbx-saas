@@ -25,6 +25,7 @@ import {
   Textarea,
   Tr,
 } from "@/components/ui";
+import { AvisoHorarioCampanas } from "@/components/aviso-horario-campanas";
 import { api } from "@/lib/api";
 import {
   CampaignNumber,
@@ -32,11 +33,49 @@ import {
   CampaignStats,
   CampaignWithStats,
   Trunk,
+  MetodoCampana,
   VoiceBot,
 } from "@/lib/types";
+import { AgentesCampana } from "@/components/agentes-campana";
+import { ListasCampana } from "@/components/listas-campana";
 import { statusBadge } from "@/lib/utils";
 
-const empty = { name: "", trunk_id: "", voicebot_id: "", max_concurrency: 5, retries: 0, ai_intent: "", message_template: "" };
+const empty = {
+  name: "",
+  trunk_id: "",
+  voicebot_id: "",
+  max_concurrency: 5,
+  retries: 0,
+  max_calls_per_day: "",
+  max_minutes_per_day: "",
+  ai_intent: "",
+  message_template: "",
+  // Minutos de espera antes de volver a marcar, por resultado (vacío = ya).
+  espera_busy: "",
+  espera_noanswer: "",
+  espera_failed: "",
+  metodo: "voizbot" as MetodoCampana,
+  grabacion: "todas" as "todas" | "ninguna",
+  guion: "",
+  // Proporcional y predictivo (ver services/predictivo.py).
+  nivel_marcacion: "1",
+  nivel_max: "3",
+  abandono_objetivo: "3",
+  temporizador_abandono: "2",
+  mensaje_abandono: "",
+  crm_url: "",
+};
+
+const METODOS: { value: MetodoCampana; label: string }[] = [
+  { value: "voizbot", label: "Voizbot (sin agentes)" },
+  { value: "manual", label: "Agentes: marcación manual" },
+  { value: "vista_previa", label: "Agentes: vista previa" },
+  { value: "progresivo", label: "Agentes: progresivo" },
+  { value: "proporcional", label: "Agentes: proporcional (nivel fijo)" },
+  { value: "predictivo", label: "Agentes: predictivo (adaptativo)" },
+];
+
+const SOBREMARCA = new Set<MetodoCampana>(["proporcional", "predictivo"]);
 
 const INTENCIONES = [
   { value: "confirmar", label: "Confirmar cita" },
@@ -47,6 +86,19 @@ const INTENCIONES = [
 ];
 
 const POR_PAGINA = 50;
+
+function reglasDe(f: typeof empty) {
+  const reglas: Record<string, number> = {};
+  for (const [resultado, valor] of [
+    ["busy", f.espera_busy],
+    ["noanswer", f.espera_noanswer],
+    ["failed", f.espera_failed],
+  ] as const) {
+    const n = Number(valor);
+    if (valor.trim() && n > 0) reglas[resultado] = Math.round(n);
+  }
+  return Object.keys(reglas).length ? reglas : null;
+}
 
 export default function CampaignsPage() {
   const [items, setItems] = useState<CampaignWithStats[]>([]);
@@ -121,8 +173,22 @@ export default function CampaignsPage() {
       voicebot_id: c.voicebot_id ? String(c.voicebot_id) : "",
       max_concurrency: c.max_concurrency,
       retries: c.retries,
+      max_calls_per_day: c.max_calls_per_day != null ? String(c.max_calls_per_day) : "",
+      max_minutes_per_day: c.max_minutes_per_day != null ? String(c.max_minutes_per_day) : "",
       ai_intent: c.ai_intent ?? "",
       message_template: c.message_template ?? "",
+      espera_busy: c.reglas_reciclaje?.busy != null ? String(c.reglas_reciclaje.busy) : "",
+      espera_noanswer: c.reglas_reciclaje?.noanswer != null ? String(c.reglas_reciclaje.noanswer) : "",
+      espera_failed: c.reglas_reciclaje?.failed != null ? String(c.reglas_reciclaje.failed) : "",
+      metodo: c.metodo ?? "voizbot",
+      grabacion: c.grabacion ?? "todas",
+      guion: c.guion ?? "",
+      nivel_marcacion: String(c.nivel_marcacion ?? 1),
+      nivel_max: String(c.nivel_max ?? 3),
+      abandono_objetivo: String(c.abandono_objetivo ?? 3),
+      temporizador_abandono: String(c.temporizador_abandono ?? 2),
+      mensaje_abandono: c.mensaje_abandono ?? "",
+      crm_url: c.crm_url ?? "",
     });
     setModal(true);
   };
@@ -140,8 +206,22 @@ export default function CampaignsPage() {
         voicebot_id: form.voicebot_id ? Number(form.voicebot_id) : null,
         max_concurrency: Number(form.max_concurrency),
         retries: Number(form.retries),
+        max_calls_per_day: form.max_calls_per_day.trim() ? Number(form.max_calls_per_day) : null,
+        max_minutes_per_day: form.max_minutes_per_day.trim() ? Number(form.max_minutes_per_day) : null,
         ai_intent: form.ai_intent || null,
         message_template: form.message_template.trim() || null,
+        reglas_reciclaje: reglasDe(form),
+        metodo: form.metodo,
+        grabacion: form.grabacion,
+        guion: form.guion.trim() || null,
+        ...(form.metodo !== "voizbot" && { crm_url: form.crm_url.trim() }),
+        ...(SOBREMARCA.has(form.metodo) && {
+          nivel_marcacion: Number(form.nivel_marcacion) || 1,
+          nivel_max: Number(form.nivel_max) || 3,
+          abandono_objetivo: Number(form.abandono_objetivo) || 3,
+          temporizador_abandono: Number(form.temporizador_abandono) || 2,
+          mensaje_abandono: form.mensaje_abandono.trim() || null,
+        }),
       };
       if (editing) {
         await api.put(`/api/campaigns/${editing.id}`, payload);
@@ -455,6 +535,7 @@ export default function CampaignsPage() {
         subtitle="Marcación masiva con autodialer"
         actions={<Button onClick={openCreate}>+ Nueva campaña</Button>}
       />
+      <AvisoHorarioCampanas />
 
       {error && (
         <div className="mb-4">
@@ -569,6 +650,114 @@ export default function CampaignsPage() {
             options={INTENCIONES}
             hint="Qué gestión resuelve el voizbot en estas llamadas. Cobranza le informa la deuda y registra promesas de pago; el resto trabaja sobre la agenda de citas."
           />
+          <Select
+            label="Cómo se marca"
+            value={form.metodo}
+            onChange={(v) => setForm({ ...form, metodo: v as MetodoCampana })}
+            options={METODOS}
+            hint="Con agentes: manual (el agente escribe o elige el número), vista previa (ve el cliente y decide marcar), progresivo (una llamada por agente listo), proporcional (varias por agente, nivel fijo) o predictivo (ajusta solo cuántas lanza para no pasar el abandono objetivo). Asígnalos en el detalle de la campaña."
+          />
+          {form.metodo === "proporcional" && (
+            <>
+              <Input
+                label="Llamadas por agente libre"
+                type="number"
+                value={form.nivel_marcacion}
+                onChange={(v) => setForm({ ...form, nivel_marcacion: v })}
+                hint="De 1 a 5. Con 1 es el progresivo."
+              />
+              {Number(form.nivel_marcacion) > 1.2 && (
+                <Note tone="warn">
+                  Un nivel fijo no mira el abandono: con poco contacto rinde y con mucho deja clientes colgados (en simulación, nivel 2 llegó a 22 % de abandono). Si no lo vas a vigilar, usa el predictivo.
+                </Note>
+              )}
+            </>
+          )}
+          {form.metodo === "predictivo" && (
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                label="Abandono objetivo (%)"
+                type="number"
+                value={form.abandono_objetivo}
+                onChange={(v) => setForm({ ...form, abandono_objetivo: v })}
+                hint="Máximo de contestadas sin agente. 3 % es el estándar."
+              />
+              <Input
+                label="Tope de llamadas por agente"
+                type="number"
+                value={form.nivel_max}
+                onChange={(v) => setForm({ ...form, nivel_max: v })}
+                hint="De 1 a 5. Nunca marca más que esto."
+              />
+            </div>
+          )}
+          {SOBREMARCA.has(form.metodo) && (
+            <>
+              <Input
+                label="Segundos de espera antes de abandonar"
+                type="number"
+                value={form.temporizador_abandono}
+                onChange={(v) => setForm({ ...form, temporizador_abandono: v })}
+                hint="Si el cliente contesta y no hay agente libre en este tiempo, escucha el mensaje y se le vuelve a llamar en 10 minutos. De 1 a 10."
+              />
+              <Textarea
+                label="Mensaje si no hay agente (opcional)"
+                value={form.mensaje_abandono}
+                onChange={(v) => setForm({ ...form, mensaje_abandono: v })}
+                rows={2}
+                placeholder="Hola, le llamábamos de … En este momento todos nuestros asesores están ocupados; le volveremos a llamar en unos minutos."
+                hint="Vacío = uno estándar con el nombre de la empresa. Se convierte en audio al guardar."
+              />
+              {editing && !editing.audio_abandono && (
+                <Note tone="warn">Todavía no hay audio de abandono: si no hay agente, la llamada se cuelga sin mensaje. Guarda de nuevo para generarlo.</Note>
+              )}
+            </>
+          )}
+          {form.metodo !== "voizbot" && (
+            <>
+              <Select
+                label="Grabación"
+                value={form.grabacion}
+                onChange={(v) => setForm({ ...form, grabacion: v as "todas" | "ninguna" })}
+                options={[
+                  { value: "todas", label: "Grabar todas las llamadas" },
+                  { value: "ninguna", label: "No grabar" },
+                ]}
+              />
+              <Textarea
+                label="Guion para el agente (opcional)"
+                value={form.guion}
+                onChange={(v) => setForm({ ...form, guion: v })}
+                rows={4}
+                placeholder="Buenos días, {nombre}. Le habla {agente} de…"
+                hint="Con {variables}: {nombre}, {telefono}, {agente}, los campos propios del contacto y las columnas cargadas con el número."
+              />
+              <Input
+                label="URL del CRM (opcional)"
+                value={form.crm_url}
+                mono
+                onChange={(v) => setForm({ ...form, crm_url: v })}
+                placeholder="https://micrm.com/clientes?tel={telefono}&doc={documento}"
+                hint="La consola del agente muestra «Abrir en el CRM» con esta dirección. Variables: {telefono}, {nombre}, {documento}, {email}, {lead_id}, {contacto_id}, {agente_id}, {llamada_uuid} y las columnas del número. Va firmada (nspbx_ts y nspbx_firma)."
+              />
+              {editing && form.crm_url.trim() && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={async () => {
+                    try {
+                      const r = await api.post<{ secreto: string }>(`/api/campaigns/${editing.id}/crm-secreto`, {});
+                      prompt("Secreto para verificar la firma en tu CRM: HMAC-SHA256 de la URL sin «&nspbx_firma=…».", r.secreto);
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : "No se pudo obtener el secreto");
+                    }
+                  }}
+                >
+                  Ver secreto de la firma
+                </Button>
+              )}
+            </>
+          )}
           <Input
             label="Concurrencia máxima"
             type="number"
@@ -580,6 +769,31 @@ export default function CampaignsPage() {
             type="number"
             value={form.retries}
             onChange={(v) => setForm({ ...form, retries: Number(v) })}
+          />
+          <div>
+            <span className="mb-1.5 block text-xs font-medium text-fg-soft">Esperar antes de reintentar (minutos)</span>
+            <div className="grid grid-cols-3 gap-2">
+              <Input label="Ocupado" type="number" value={form.espera_busy} onChange={(v) => setForm({ ...form, espera_busy: v })} />
+              <Input label="No contesta" type="number" value={form.espera_noanswer} onChange={(v) => setForm({ ...form, espera_noanswer: v })} />
+              <Input label="Falló" type="number" value={form.espera_failed} onChange={(v) => setForm({ ...form, espera_failed: v })} />
+            </div>
+            <span className="mt-1.5 block text-[11px] leading-snug text-faint">
+              Cuántas veces sigue siendo «Reintentos». Vacío = en la vuelta siguiente. Hasta 7 días (10080).
+            </span>
+          </div>
+          <Input
+            label="Tope de llamadas por día"
+            type="number"
+            value={form.max_calls_per_day}
+            onChange={(v) => setForm({ ...form, max_calls_per_day: v })}
+            hint="Al llegar, la campaña espera al día siguiente (sin dar números por fallidos). Vacío = sin tope."
+          />
+          <Input
+            label="Tope de minutos por día"
+            type="number"
+            value={form.max_minutes_per_day}
+            onChange={(v) => setForm({ ...form, max_minutes_per_day: v })}
+            hint="Minutos hablados por la troncal en el día. Vacío = sin tope."
           />
           <Textarea
             label="Mensaje de apertura personalizado (opcional)"
@@ -618,6 +832,26 @@ export default function CampaignsPage() {
                 <ErrorBanner message={errorNumeros} onClose={() => setErrorNumeros("")} />
               </div>
             )}
+            {stats?.tope_alcanzado && (
+              <div className="mb-4">
+                <Note tone="warn">{stats.tope_alcanzado}</Note>
+              </div>
+            )}
+            {stats && (selected.max_calls_per_day || selected.max_minutes_per_day) && (
+              <p className="mb-3 text-xs text-muted">
+                Hoy: {stats.llamadas_hoy ?? 0}
+                {selected.max_calls_per_day ? ` de ${selected.max_calls_per_day}` : ""} llamadas ·{" "}
+                {stats.minutos_hoy ?? 0}
+                {selected.max_minutes_per_day ? ` de ${selected.max_minutes_per_day}` : ""} min
+              </p>
+            )}
+            {stats && ((stats.en_espera ?? 0) > 0 || (stats.no_llamar ?? 0) > 0) && (
+              <p className="mb-3 text-xs text-muted">
+                {(stats.en_espera ?? 0) > 0 && `${stats.en_espera} pendiente(s) esperando su próximo intento o con la lista en pausa`}
+                {(stats.en_espera ?? 0) > 0 && (stats.no_llamar ?? 0) > 0 && " · "}
+                {(stats.no_llamar ?? 0) > 0 && `${stats.no_llamar} en la lista de no llamar (no se marcan)`}
+              </p>
+            )}
             {stats && (
               <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[
@@ -637,6 +871,47 @@ export default function CampaignsPage() {
                 ))}
               </div>
             )}
+
+            {stats?.predictivo && (
+              <div className="mb-5">
+                <p className="mb-2 text-xs font-medium text-fg-soft">
+                  Marcador de hoy
+                  {stats.predictivo.nivel != null && ` · marcando ${stats.predictivo.nivel} llamadas por agente libre`}
+                </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {[
+                    { label: "Intentos", value: stats.predictivo.intentos, tone: "text-fg" },
+                    { label: "Contestadas", value: stats.predictivo.contestadas, tone: "text-ok-text" },
+                    { label: "Con agente", value: stats.predictivo.asignadas, tone: "text-info-text" },
+                    {
+                      label: "Abandono",
+                      value: stats.predictivo.abandono_pct == null ? "—" : `${stats.predictivo.abandono_pct} %`,
+                      tone:
+                        stats.predictivo.abandono_pct != null && stats.predictivo.abandono_pct > (selected.abandono_objetivo ?? 3)
+                          ? "text-danger-text"
+                          : "text-ok-text",
+                    },
+                  ].map((s) => (
+                    <div key={s.label} className="rounded-xl border border-line bg-surface-2 p-3">
+                      <div className={`text-xl font-bold tabular-nums ${s.tone}`}>{s.value}</div>
+                      <div className="mt-0.5 text-xs text-muted">{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-muted">
+                  Ahora: {stats.predictivo.timbrando} timbrando · {stats.predictivo.en_espera} esperando agente ·{" "}
+                  {stats.predictivo.abandonadas} abandonada(s) hoy
+                </p>
+              </div>
+            )}
+
+            {selected.metodo && selected.metodo !== "voizbot" && <AgentesCampana campaignId={selected.id} />}
+
+            <ListasCampana
+              campaignId={selected.id}
+              version={stats?.total ?? 0}
+              onCambio={async () => setStats(await api.get<CampaignStats>(`/api/campaigns/${selected.id}/stats`))}
+            />
 
             <div className="mb-5">
               {nombresColumnas.length > 0 ? (
@@ -711,6 +986,20 @@ export default function CampaignsPage() {
                     {uploadResult.updated > 0 && ` · ${uploadResult.updated} actualizado(s) (ya estaban cargados)`}
                     {uploadResult.agenda_creadas > 0 && ` · ${uploadResult.agenda_creadas} cita(s) cargada(s) en la Agenda`}
                   </p>
+                  {(uploadResult.bloqueados?.length ?? 0) > 0 && (
+                    <>
+                      <p className="mt-1.5 text-danger-text">
+                        {uploadResult.bloqueados!.length} número(s) no cargado(s): la política de salientes no los deja marcar.
+                      </p>
+                      <ul className="mt-1 space-y-0.5 text-danger-text">
+                        {uploadResult.bloqueados!.map((o) => (
+                          <li key={`b-${o.phone}`}>
+                            {o.phone}: {o.motivo}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                   {uploadResult.agenda_omitidas.length > 0 && (
                     <ul className="mt-1.5 space-y-0.5 text-danger-text">
                       {uploadResult.agenda_omitidas.map((o) => (

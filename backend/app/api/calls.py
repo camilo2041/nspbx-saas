@@ -19,10 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import permissions
 from app.core.auth import requiere, usuario_actual, verificar_secreto_fs
 from app.core.config import settings
-from app.core.database import get_admin_session, get_session
+from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
-from app.services import deepgram, llm
+from app.services import deepgram, llm, tiempos_llamada
 from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
@@ -125,13 +125,29 @@ async def _traer(call_id: int, session: AsyncSession, usuario: User) -> CallLog:
     confirmaría que ese identificador existe, y con eso se puede recorrer
     el historial ajeno de a uno.
     """
-    call = await session.get(CallLog, call_id)
+    call = await traer_propio(session, CallLog, call_id)
     if not call:
         raise HTTPException(status_code=404, detail="Llamada no encontrada")
     propia = _solo_suyas(usuario)
     if propia is not None and propia not in (call.caller_number, call.callee_number):
         raise HTTPException(status_code=404, detail="Llamada no encontrada")
     return call
+
+
+async def _campana_de_cdr(session: AsyncSession, variables: dict, tenant_id: int) -> int | None:
+    """La campaña que originó la llamada (la fija el marcador). Solo si es
+    de la misma empresa: una variable alterada no puede cargarle minutos a
+    la campaña de otra."""
+    try:
+        campaign_id = int(variables.get("nspbx_campaign_id") or 0)
+    except (TypeError, ValueError):
+        return None
+    if campaign_id <= 0:
+        return None
+    from app.models import Campaign
+
+    c = await session.get(Campaign, campaign_id)
+    return campaign_id if c is not None and c.tenant_id == tenant_id else None
 
 
 def _epoch_us_to_dt(value) -> datetime | None:
@@ -229,8 +245,11 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         or variables.get("ani")
     )
 
+    tiempos = tiempos_llamada.calcular(variables)
+    agente_id, lead_id, disposicion_id = await _agente_de_cdr(session, variables, tenant_id, uuid)
     call = CallLog(
         tenant_id=tenant_id,
+        campaign_id=await _campana_de_cdr(session, variables, tenant_id),
         uuid=uuid,
         caller_number=caller,
         caller_name=variables.get("caller_id_name") or variables.get("origination_caller_id_name"),
@@ -240,10 +259,20 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         duration=int(variables.get("duration") or 0),
         billsec=billsec,
         hangup_cause=cause,
+        via_trunk=_salio_por_troncal(variables),
         recording_path=_ruta_grabacion_valida(variables.get("nspbx_recording")),
         started_at=_epoch_us_to_dt(variables.get("start_uepoch")),
         answered_at=_epoch_us_to_dt(variables.get("answer_uepoch")),
         ended_at=_epoch_us_to_dt(variables.get("end_uepoch")),
+        progress_at=tiempos.progress_at,
+        setup_ms=tiempos.setup_ms,
+        ring_ms=tiempos.ring_ms,
+        espera_ms=tiempos.espera_ms,
+        colgo=tiempos.colgo,
+        agente_id=agente_id,
+        lead_id=lead_id,
+        disposicion_id=disposicion_id,
+        abandonada=True if variables.get("nspbx_abandonada") == "true" else None,
     )
     session.add(call)
     try:
@@ -251,6 +280,41 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     except Exception:
         await session.rollback()  # carrera con otro POST del mismo uuid
     return {"ok": True}
+
+
+async def _agente_de_cdr(session: AsyncSession, variables: dict, tenant_id: int, uuid: str):
+    """(agente, lead, disposición) de una llamada de agente
+    (services/agentes.py). Solo si el agente y el lead son de la misma
+    empresa: una variable alterada no puede atribuirle la llamada a otro."""
+    from app.models import CampaignNumber
+    from app.services import agentes
+
+    def entero(clave):
+        try:
+            return int(variables.get(clave) or 0) or None
+        except (TypeError, ValueError):
+            return None
+
+    agente_id, lead_id = entero("nspbx_agente_id"), entero("nspbx_lead_id")
+    if agente_id is None:
+        return None, None, None
+    agente = await session.get(User, agente_id)
+    if agente is None or agente.tenant_id != tenant_id:
+        return None, None, None
+    lead = await session.get(CampaignNumber, lead_id) if lead_id else None
+    if lead is not None and lead.tenant_id != tenant_id:
+        lead_id = None
+    return agente_id, lead_id, await agentes.disposicion_de_llamada(session, uuid)
+
+
+def _salio_por_troncal(variables: dict) -> bool:
+    """¿Es la pata que fue al proveedor? Es la que se factura y la que suma
+    al cupo diario (ver services/salientes.py). Las entrantes del proveedor
+    también usan el perfil "external", por eso se exige dirección saliente."""
+    if variables.get("direction") == "inbound":
+        return False
+    canal = variables.get("channel_name") or ""
+    return canal.startswith("sofia/external/") or bool(variables.get("sip_gateway_name"))
 
 
 async def _tenant_de_cdr(session: AsyncSession, variables: dict) -> int | None:
@@ -307,6 +371,10 @@ def _call_out(call: CallLog) -> dict:
         "started_at": call.started_at,
         "answered_at": call.answered_at,
         "ended_at": call.ended_at,
+        "setup_ms": call.setup_ms,
+        "ring_ms": call.ring_ms,
+        "espera_ms": call.espera_ms,
+        "colgo": call.colgo,
     }
 
 
@@ -417,7 +485,30 @@ async def call_stats(session: AsyncSession = Depends(get_session), usuario: User
     total_min = (
         await session.execute(_acotar(select(func.coalesce(func.sum(CallLog.billsec), 0)), propia))
     ).scalar() or 0
+    contestada = CallLog.status == "answered"
+    promedios = (
+        await session.execute(
+            _acotar(
+                select(
+                    func.avg(CallLog.ring_ms).filter(contestada),
+                    func.avg(CallLog.setup_ms),
+                    func.avg(CallLog.billsec).filter(contestada),
+                    func.avg(CallLog.espera_ms).filter(contestada),
+                ),
+                propia,
+            )
+        )
+    ).one()
+
+    def _seg(ms):
+        return round(float(ms) / 1000, 1) if ms is not None else None
+
     return {
+        # Promedios en segundos; None si todavía no hay llamadas con ese dato.
+        "ring_promedio_s": _seg(promedios[0]),
+        "setup_promedio_s": _seg(promedios[1]),
+        "hablado_promedio_s": round(float(promedios[2]), 1) if promedios[2] is not None else None,
+        "espera_promedio_s": _seg(promedios[3]),
         "total": sum(counts.values()),
         "answered": counts.get("answered", 0),
         "no_answer": counts.get("no_answer", 0),

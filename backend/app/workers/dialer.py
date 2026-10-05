@@ -5,11 +5,11 @@ from datetime import datetime
 
 from sqlalchemy import select, update
 
-from app.core.clock import fecha_en_palabras
+from app.core.clock import fecha_en_palabras, now_local
 from app.core.config import settings
-from app.core.database import async_session
+from app.core.database import async_session, sesion_de_empresa
 from app.models import Campaign, CampaignNumber, SystemSettings, Tenant, Trunk, VoiceBot
-from app.services import esl, licensing, templating
+from app.services import esl, hopper, horario_marcacion, licensing, salientes, templating, tope_campanas
 from app.services.fechas import formatear_natural, parse_fecha_hora
 from app.services.config_generator import orden_troncales
 from app.services.numeros import numero_a_palabras
@@ -86,8 +86,10 @@ class CampaignDialer:
             tenants_activos = {
                 t.id for t in (await session.execute(select(Tenant))).scalars().all() if t.enabled
             }
+            # Solo las campañas del voizbot: las de agentes las marca
+            # services/agentes.py (manual, vista previa, progresivo).
             result = await session.execute(
-                select(Campaign).where(Campaign.status == "running")
+                select(Campaign).where(Campaign.status == "running", Campaign.metodo == "voizbot")
             )
             campaigns = []
             topes_por_tenant: dict[int, int] = {}
@@ -107,6 +109,19 @@ class CampaignDialer:
                         topes_por_tenant[c.tenant_id] = await licensing.tope_concurrentes(session, c.tenant_id, cap)
                 if topes_por_tenant[c.tenant_id] > 0:
                     campaigns.append(c)
+            # Salientes cortadas (interruptor o cupo diario agotado): sus
+            # campañas esperan sin tomar números, en vez de tomarlos y
+            # devolverlos en cada ciclo. Ver services/salientes.py.
+            politicas = await salientes.politicas(session, {c.tenant_id for c in campaigns})
+            campaigns = [c for c in campaigns if not politicas[c.tenant_id].bloqueo]
+            # Fuera de su franja de marcación (Ley 2300 para cobranza; ver
+            # services/horario_marcacion.py) la campaña espera sin tomar
+            # números: no se marcan como fallidos, se llaman cuando abra.
+            ahora = now_local()
+            campaigns = [
+                c for c in campaigns
+                if horario_marcacion.puede_marcar(ajustes_por_tenant.get(c.tenant_id), c.ai_intent, ahora)
+            ]
             # Lo máximo que pueden marcar TODAS juntas: la suma de lo que cada una tiene
             # permitido, sin pasar del tope de la plataforma. (Con el máximo, una
             # empresa marcando le quitaba margen a otra que aún estaba bajo su tope.)
@@ -116,8 +131,8 @@ class CampaignDialer:
             lanzados_por_tenant: dict[int, int] = {}
 
             try:
-                estado = await esl.status()
-                margen_global = tope_global - estado.get("current_sessions", 0)
+                # Canales en curso en TODOS los servidores (services/nodos.py).
+                margen_global = tope_global - await esl.sesiones_en_curso()
             except Exception:
                 # Si no se puede consultar FreeSWITCH, mejor no marcar
                 # nada este ciclo que arriesgarse a pasar el tope a ciegas.
@@ -125,6 +140,10 @@ class CampaignDialer:
                 return
             if margen_global <= 0:
                 return
+
+            # Topes diarios de cada campaña (services/tope_campanas.py).
+            hoy = ahora.date()
+            minutos_por_campana = await tope_campanas.minutos_hoy(session, [c.id for c in campaigns])
 
             for campaign in campaigns:
                 if margen_global <= 0:
@@ -140,23 +159,23 @@ class CampaignDialer:
                     margen_global,
                     topes_por_tenant.get(campaign.tenant_id, 0) - activas_empresa,
                 )
+                quedan_hoy, _ = tope_campanas.disponibles(campaign, hoy, minutos_por_campana.get(campaign.id, 0))
+                if quedan_hoy is not None:
+                    slots = min(slots, quedan_hoy)
                 if slots <= 0:
                     continue
-                numbers = await session.execute(
-                    select(CampaignNumber)
-                    .where(
-                        CampaignNumber.campaign_id == campaign.id,
-                        CampaignNumber.status == "pending",
-                    )
-                    .limit(slots)
-                )
-                numbers_list = list(numbers.scalars().all())
+                # Los números se toman en una sesión atada a la empresa de la
+                # campaña: solo pueden salir los suyos (ver sesion_de_empresa).
+                async with sesion_de_empresa(campaign.tenant_id) as s_emp:
+                    propia = await s_emp.get(Campaign, campaign.id)
+                    if propia is None:
+                        continue
+                    # Reciclaje, listas pausadas y no llamar: services/hopper.py.
+                    numbers_list = await hopper.tomar(s_emp, propia, slots)
+                    tope_campanas.contar_lanzadas(propia, hoy, len(numbers_list))
+                    await s_emp.commit()
                 margen_global -= len(numbers_list)
                 lanzados_por_tenant[campaign.tenant_id] = lanzados_por_tenant.get(campaign.tenant_id, 0) + len(numbers_list)
-                for number in numbers_list:
-                    number.status = "dialing"
-                    number.attempts += 1
-                await session.commit()
                 for number in numbers_list:
                     task = asyncio.create_task(self._dial(session, campaign, number))
                     self._dial_tasks.add(task)
@@ -165,22 +184,20 @@ class CampaignDialer:
     async def _dial(self, session, campaign: Campaign, number: CampaignNumber):
         self._active[campaign.id] = self._active.get(campaign.id, 0) + 1
         try:
-            async with async_session() as s:
+            async with sesion_de_empresa(campaign.tenant_id) as s:
                 fresh = await s.get(Campaign, campaign.id)
                 trunk = await s.get(Trunk, fresh.trunk_id) if fresh.trunk_id else None
                 bot = await s.get(VoiceBot, fresh.voicebot_id) if fresh.voicebot_id else None
-                # Esta sesión es la del DUEÑO (sin aislamiento por empresa): un
-                # trunk_id o voicebot_id que apunte a la troncal o al bot de OTRA
-                # empresa se resolvería igual, y la campaña marcaría por su troncal
-                # (y con su identificador de llamada). Se exige la misma empresa.
+                # La sesión está atada a la empresa de la campaña: un trunk_id o
+                # voicebot_id de OTRA empresa no se resuelve. La comprobación
+                # explícita queda como tercera capa (la campaña marcaría por la
+                # troncal ajena, con su identificador de llamada).
                 if trunk and trunk.tenant_id != fresh.tenant_id:
                     trunk = None
                 if bot and bot.tenant_id != fresh.tenant_id:
                     bot = None
-                # SOLO las troncales de la empresa de la campaña: con la
-                # sesión del dueño, un SELECT sin filtro traería las de
-                # TODAS las empresas y una campaña podría marcar por la
-                # troncal de otra — una fuga de recursos entre tenants.
+                # SOLO las troncales de la empresa de la campaña: la sesión ya
+                # filtra, y el WHERE lo deja escrito.
                 todas_troncales = (
                     await s.execute(
                         select(Trunk).where(Trunk.tenant_id == fresh.tenant_id)
@@ -194,6 +211,14 @@ class CampaignDialer:
                 slug = tenant.slug if tenant else "x"
             if not trunk or not trunk.enabled:
                 raise RuntimeError("Campaña sin troncal habilitado")
+            # El originate va directo a la troncal, sin pasar por el
+            # dialplan: la política de salientes (internacional, países,
+            # destinos premium, interruptores) se aplica acá o no se aplica.
+            async with sesion_de_empresa(campaign.tenant_id) as s:
+                politica = await salientes.politica_de(s, fresh.tenant_id)
+            motivo = salientes.motivo_bloqueo(number.phone, politica)
+            if motivo:
+                raise salientes.SalienteBloqueada(motivo, definitiva=politica.bloqueo is None)
             exten = f"bot_{bot.id}" if bot and bot.enabled else None
 
             # La empresa y la gestión de esta llamada viajan SIEMPRE en el
@@ -204,6 +229,10 @@ class CampaignDialer:
             # compatibilidad con las campañas viejas.
             extra_vars: dict[str, str] = {
                 "nspbx_tenant_id": str(fresh.tenant_id),
+                # Sale por troncal: se puede colgar en curso (services/emergencia.py).
+                "nspbx_saliente": str(fresh.tenant_id),
+                # El CDR la guarda en CallLog.campaign_id: minutos por campaña.
+                "nspbx_campaign_id": str(fresh.id),
                 "nspbx_ai_intent": (fresh.ai_intent or "").strip().lower() or "confirmar",
             }
             intencion = extra_vars["nspbx_ai_intent"]
@@ -303,8 +332,9 @@ class CampaignDialer:
                 wait_timeout=30 * len(tramos) + 15,
                 extra_vars=extra_vars or None,
                 contexto=contexto,
+                tenant_id=campaign.tenant_id,
             )
-            async with async_session() as s:
+            async with sesion_de_empresa(campaign.tenant_id) as s:
                 await s.execute(
                     update(CampaignNumber)
                     .where(CampaignNumber.id == number.id)
@@ -319,22 +349,33 @@ class CampaignDialer:
                 final_status = "busy"
             elif "NO_ANSWER" in cause or "NO_USER_RESPONSE" in cause or "ORIGINATOR_CANCEL" in cause:
                 final_status = "noanswer"
-            async with async_session() as s:
+            async with sesion_de_empresa(campaign.tenant_id) as s:
                 target = await s.get(CampaignNumber, number.id)
                 fresh = await s.get(Campaign, campaign.id)
                 if target:
                     target.last_error = str(exc)[:500]
-                    if target.attempts > (fresh.retries if fresh else 0):
+                    if isinstance(exc, salientes.SalienteBloqueada):
+                        # Destino prohibido: reintentar no cambia nada. Salientes
+                        # cortadas (interruptor, cupo): el número espera, sin
+                        # gastar un intento.
+                        if exc.definitiva:
+                            target.status = "failed"
+                        else:
+                            target.status = "pending"
+                            target.attempts = max(0, target.attempts - 1)
+                    elif target.attempts > (fresh.retries if fresh else 0):
                         target.status = final_status
                     else:
-                        target.status = "pending"
+                        # Vuelve a pendiente, con la espera que la campaña
+                        # defina para este resultado.
+                        hopper.reprogramar(target, fresh, final_status)
                     await s.commit()
         finally:
             self._active[campaign.id] = max(0, self._active.get(campaign.id, 0) - 1)
-            await self._maybe_finish(campaign.id)
+            await self._maybe_finish(campaign.tenant_id, campaign.id)
 
-    async def _maybe_finish(self, campaign_id: int):
-        async with async_session() as session:
+    async def _maybe_finish(self, tenant_id: int, campaign_id: int):
+        async with sesion_de_empresa(tenant_id) as session:
             remaining = await session.execute(
                 select(CampaignNumber.id)
                 .where(

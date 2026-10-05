@@ -11,12 +11,12 @@ bot — la página de Cobranza del panel muestra deudas y promesas en vivo.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session
+from app.core.database import filtro_empresa, get_session, traer_propio
 from app.models import Debt, PaymentPromise
-from app.schemas import DebtCreate, DebtOut, DebtUpdate, PaymentPromiseOut
+from app.schemas import DebtCreate, DebtOut, DebtUpdate, PaymentPromiseOut, PaymentPromiseUpdate
 
 router = APIRouter(prefix="/api/cobranza", tags=["cobranza"])
 
@@ -50,7 +50,7 @@ async def create_debt(payload: DebtCreate, session: AsyncSession = Depends(get_s
 
 @router.put("/debts/{debt_id}", response_model=DebtOut)
 async def update_debt(debt_id: int, payload: DebtUpdate, session: AsyncSession = Depends(get_session)):
-    deuda = await session.get(Debt, debt_id)
+    deuda = await traer_propio(session, Debt, debt_id)
     if not deuda:
         raise HTTPException(status_code=404, detail="Deuda no encontrada")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -62,7 +62,7 @@ async def update_debt(debt_id: int, payload: DebtUpdate, session: AsyncSession =
 
 @router.delete("/debts/{debt_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_debt(debt_id: int, session: AsyncSession = Depends(get_session)):
-    deuda = await session.get(Debt, debt_id)
+    deuda = await traer_propio(session, Debt, debt_id)
     if not deuda:
         raise HTTPException(status_code=404, detail="Deuda no encontrada")
     await session.delete(deuda)
@@ -87,17 +87,48 @@ async def list_promises(
     return (await session.execute(query)).scalars().all()
 
 
+@router.put("/promises/{promise_id}", response_model=PaymentPromiseOut)
+async def update_promise(promise_id: int, payload: PaymentPromiseUpdate, session: AsyncSession = Depends(get_session)):
+    """Marcar la promesa como cumplida o incumplida según el cobro real.
+
+    Cumplida no salda la deuda sola: un abono o una cuota cumplen la
+    promesa y la deuda sigue. Eso se cambia en la deuda."""
+    promesa = await traer_propio(session, PaymentPromise, promise_id)
+    if not promesa:
+        raise HTTPException(status_code=404, detail="Promesa no encontrada")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(promesa, field, value)
+    await session.commit()
+    await session.refresh(promesa)
+    return promesa
+
+
 @router.get("/summary")
 async def summary(session: AsyncSession = Depends(get_session)):
     """Totales de la cartera: cuánto se debe, cuánto se prometió pagar y
     cuántas promesas están vigentes."""
-    deudas = (await session.execute(select(Debt))).scalars().all()
-    promesas = (await session.execute(select(PaymentPromise))).scalars().all()
+    # Sumado en la base: antes se traía la cartera entera a Python (con
+    # 100.000 deudas y otras tantas promesas, 3 s y casi 300 MB por petición).
+    vigente = Debt.status.in_(("open", "promised", "overdue"))
+    deudas = (await session.execute(
+        select(
+            func.count(Debt.id),
+            func.count(case((Debt.status == "open", 1))),
+            func.coalesce(func.sum(case((vigente, Debt.amount), else_=0)), 0),
+        ).where(filtro_empresa(session, Debt))
+    )).one()
+    promesas = (await session.execute(
+        select(
+            func.count(PaymentPromise.id),
+            func.count(case((PaymentPromise.status == "pending", 1))),
+            func.coalesce(func.sum(PaymentPromise.amount_promised), 0),
+        ).where(filtro_empresa(session, PaymentPromise))
+    )).one()
     return {
-        "debts_total": len(deudas),
-        "debts_open": sum(1 for d in deudas if d.status == "open"),
-        "amount_owed": round(sum(d.amount for d in deudas if d.status in ("open", "promised", "overdue")), 2),
-        "promises_total": len(promesas),
-        "promises_pending": sum(1 for p in promesas if p.status == "pending"),
-        "amount_promised": round(sum(p.amount_promised for p in promesas), 2),
+        "debts_total": deudas[0],
+        "debts_open": deudas[1],
+        "amount_owed": round(float(deudas[2]), 2),
+        "promises_total": promesas[0],
+        "promises_pending": promesas[1],
+        "amount_promised": round(float(promesas[2]), 2),
     }

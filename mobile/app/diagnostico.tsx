@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { Linking, PermissionsAndroid, Platform, Text, View } from "react-native";
+import { AppState, Linking, PermissionsAndroid, Platform, Text, View } from "react-native";
 
+import * as conexion from "@/modules/conexion-permanente";
 import { ApiError, peticion } from "@/src/api/client";
 import { Aviso, Pantalla } from "@/src/gestion";
 import { exito } from "@/src/haptico";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
 import { probarTimbre } from "@/src/timbre";
-import { colores, radios } from "@/src/tema";
-import { Boton, Tarjeta } from "@/src/ui";
+import { radios, useColores } from "@/src/tema";
+import { Boton, CajaIcono, Segmentado, Tarjeta } from "@/src/ui";
+import type { ModoConexion } from "@/src/softphone/conexionPermanente";
+import type { NombreIcono } from "@/src/Icono";
 
 type Estado = "ok" | "aviso" | "mal";
 
@@ -18,7 +21,11 @@ interface Chequeo {
   detalle: string;
 }
 
-const ICONO: Record<Estado, string> = { ok: "✅", aviso: "⚠️", mal: "❌" };
+const ICONO: Record<Estado, [NombreIcono, "ok" | "aviso" | "peligro"]> = {
+  ok: ["ok", "ok"],
+  aviso: ["alerta", "aviso"],
+  mal: ["error", "peligro"],
+};
 
 async function permisoAndroid(permiso: string): Promise<boolean> {
   if (Platform.OS !== "android") return true;
@@ -35,7 +42,9 @@ async function permisoAndroid(permiso: string): Promise<boolean> {
  * explica con el paso exacto para revisarlo.
  */
 export default function Diagnostico() {
-  const { connState, connError, entorno, pushListo, connect } = useSoftphone();
+  const col = useColores();
+  const { connState, connError, entorno, pushListo, connect, conexionPermanente } = useSoftphone();
+  const [bateriaLibre, setBateriaLibre] = useState(true);
   const [notif, setNotif] = useState<boolean | null>(null);
   const [mic, setMic] = useState<boolean | null>(null);
   const [probando, setProbando] = useState(false);
@@ -46,11 +55,19 @@ export default function Diagnostico() {
     const versionNotif = Platform.OS === "android" && Number(Platform.Version) >= 33;
     setNotif(versionNotif ? await permisoAndroid("android.permission.POST_NOTIFICATIONS") : true);
     setMic(await permisoAndroid("android.permission.RECORD_AUDIO"));
+    setBateriaLibre(conexion.sinRestriccionBateria());
   }, []);
 
   useEffect(() => {
     revisar();
+    // Al volver del diálogo de batería del sistema.
+    const sub = AppState.addEventListener("change", (e) => {
+      if (e === "active") revisar();
+    });
+    return () => sub.remove();
   }, [revisar]);
+
+  const permanente = conexionPermanente.disponible && conexionPermanente.modo !== "apagada";
 
   const registrado = connState === "registered";
   const chequeos: Chequeo[] = [
@@ -72,13 +89,29 @@ export default function Diagnostico() {
         ? "La central sabe dónde encontrarte: las llamadas llegan a este teléfono."
         : connError || "Mientras no diga «Conectado», ninguna llamada puede entrar. Revisa tu internet o toca «Reconectar».",
     },
+    ...(permanente
+      ? [
+          {
+            clave: "permanente",
+            estado: (conexionPermanente.activa && bateriaLibre ? "ok" : "aviso") as Estado,
+            titulo: conexionPermanente.activa ? "Conexión permanente: activa" : "Conexión permanente: esperando conexión",
+            detalle: !bateriaLibre
+              ? "Falta sacar la app del ahorro de batería (abajo): sin eso, con la pantalla apagada Android le corta internet y las llamadas dejan de entrar."
+              : conexionPermanente.activa
+                ? "La app sigue conectada con la pantalla apagada o en segundo plano (verás la notificación fija «Central conectada»)."
+                : "Se activa sola en cuanto la extensión quede conectada a la central.",
+          },
+        ]
+      : []),
     {
       clave: "push",
-      estado: pushListo ? "ok" : "mal",
+      estado: pushListo ? "ok" : permanente ? "aviso" : "mal",
       titulo: pushListo ? "Avisos para despertar la app: activos" : "Avisos para despertar la app: NO configurados",
       detalle: pushListo
         ? "Con el teléfono bloqueado o la app cerrada, la llamada despierta la app."
-        : "Sin esto, las llamadas SOLO entran con la app abierta en pantalla. Con la app en segundo plano o el teléfono bloqueado no llega nada. Requiere configurar Firebase (Android) o Apple (iPhone) en la app y en el servidor: pídeselo a quien administra la central.",
+        : permanente
+          ? "No configurados: si la app se detiene del todo («Forzar detención», reiniciar el teléfono o el ahorro de algunas marcas), no entra nada hasta que la vuelvas a abrir."
+          : "Sin esto, las llamadas SOLO entran con la app abierta en pantalla. Con la app en segundo plano o el teléfono bloqueado no llega nada. Requiere configurar Firebase (Android) o Apple (iPhone) en la app y en el servidor: pídeselo a quien administra la central.",
     },
     {
       clave: "notificaciones",
@@ -135,35 +168,69 @@ export default function Diagnostico() {
       />
       {chequeos.map((c) => (
         <Tarjeta key={c.clave} style={{ flexDirection: "row", gap: 12, padding: 14 }}>
-          <Text style={{ fontSize: 22 }}>{ICONO[c.estado]}</Text>
+          <CajaIcono icono={ICONO[c.estado][0]} tono={ICONO[c.estado][1]} tam={36} />
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={{ fontSize: 15, fontWeight: "700", color: colores.texto }}>{c.titulo}</Text>
-            <Text style={{ fontSize: 13, color: colores.textoSecundario, lineHeight: 19 }}>{c.detalle}</Text>
+            <Text style={{ fontSize: 15, fontWeight: "700", color: col.texto }}>{c.titulo}</Text>
+            <Text style={{ fontSize: 13, color: col.textoSecundario, lineHeight: 19 }}>{c.detalle}</Text>
           </View>
         </Tarjeta>
       ))}
 
+      {conexionPermanente.disponible ? (
+        <Tarjeta style={{ gap: 10 }}>
+          <Text style={{ fontSize: 15, fontWeight: "700", color: col.texto }}>Recibir llamadas con la pantalla apagada</Text>
+          <Text style={{ fontSize: 13, color: col.textoSecundario, lineHeight: 19 }}>
+            Mantiene la app conectada a la central todo el tiempo, con una notificación fija. No necesita Firebase.
+            «Máxima» no deja dormir al procesador: úsala solo si con «Normal» se pierden llamadas (gasta bastante más batería).
+          </Text>
+          <Segmentado<ModoConexion>
+            opciones={[
+              { valor: "apagada", etiqueta: "Apagada" },
+              { valor: "normal", etiqueta: "Normal" },
+              { valor: "maxima", etiqueta: "Máxima" },
+            ]}
+            valor={conexionPermanente.modo}
+            onChange={(m) => conexionPermanente.cambiarModo(m)}
+          />
+          {permanente && !bateriaLibre ? (
+            <>
+              <Aviso tono="aviso" texto="Paso obligatorio: permite que la app funcione sin restricciones de batería." />
+              <Boton titulo="Quitar restricción de batería" icono="ajustes" onPress={() => conexion.pedirSinRestriccionBateria()} />
+            </>
+          ) : null}
+          {permanente ? (
+            <>
+              <Text style={{ fontSize: 12.5, color: col.textoSecundario, lineHeight: 18 }}>
+                En Xiaomi, Huawei, Oppo, Vivo y Samsung hay además un ahorro propio de la marca: en los ajustes de la app, pon la batería en «Sin
+                restricciones» y activa el «Inicio automático» si aparece. En algunas marcas cerrar la app deslizándola la detiene; y tras reiniciar el teléfono hay que abrirla una vez.
+              </Text>
+              <Boton titulo="Ajustes de la app" icono="ajustes" variante="suave" onPress={() => conexion.abrirAjustesApp()} />
+            </>
+          ) : null}
+        </Tarjeta>
+      ) : null}
+
       <Tarjeta style={{ gap: 10 }}>
-        <Text style={{ fontSize: 15, fontWeight: "700", color: colores.texto }}>Sonido y ahorro de batería</Text>
-        <Text style={{ fontSize: 13, color: colores.textoSecundario, lineHeight: 19 }}>
+        <Text style={{ fontSize: 15, fontWeight: "700", color: col.texto }}>Sonido y ahorro de batería</Text>
+        <Text style={{ fontSize: 13, color: col.textoSecundario, lineHeight: 19 }}>
           Si en la barra de estado ves una campana tachada, el teléfono está en silencio o «No molestar»: el timbre del sistema no suena (el de la app sí,
           con la app abierta). Además, el ahorro de batería puede cerrar la app en segundo plano: ponla como «Sin restricciones».
         </Text>
-        <Boton titulo={probando ? "Sonando…" : "Probar timbre (4 s)"} variante="suave" onPress={probar} deshabilitado={probando} />
-        <Boton titulo="Ajustes de batería de la app" variante="suave" onPress={abrirBateria} />
+        <Boton titulo={probando ? "Sonando…" : "Probar timbre (4 s)"} icono="altavoz" variante="suave" onPress={probar} deshabilitado={probando} />
+        <Boton titulo="Ajustes de batería de la app" icono="ajustes" variante="suave" onPress={abrirBateria} />
       </Tarjeta>
 
       <Tarjeta style={{ gap: 10 }}>
-        <Text style={{ fontSize: 15, fontWeight: "700", color: colores.texto }}>Probar una llamada con la app cerrada</Text>
-        <Text style={{ fontSize: 13, color: colores.textoSecundario, lineHeight: 19 }}>
+        <Text style={{ fontSize: 15, fontWeight: "700", color: col.texto }}>Probar una llamada con la app cerrada</Text>
+        <Text style={{ fontSize: 13, color: col.textoSecundario, lineHeight: 19 }}>
           Es la prueba que de verdad importa: el servidor te manda una llamada de prueba por push. No necesitas que nadie te llame.
         </Text>
         {pruebaPush ? <Aviso texto={pruebaPush.texto} tono={pruebaPush.ok ? "ok" : "peligro"} /> : null}
-        <Boton titulo="Enviarme una llamada de prueba en 15 s" onPress={probarPush} cargando={enviandoPush} />
+        <Boton titulo="Enviarme una llamada de prueba en 15 s" icono="notificaciones" onPress={probarPush} cargando={enviandoPush} />
       </Tarjeta>
 
       {!registrado ? <Boton titulo="Reconectar con la central" onPress={() => connect()} /> : null}
-      <Boton titulo="Volver a revisar" variante="suave" onPress={revisar} style={{ borderRadius: radios.medio }} />
+      <Boton titulo="Volver a revisar" icono="refrescar" variante="suave" onPress={revisar} style={{ borderRadius: radios.medio }} />
     </Pantalla>
   );
 }

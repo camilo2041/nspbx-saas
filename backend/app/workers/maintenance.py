@@ -26,10 +26,15 @@ from sqlalchemy.engine import make_url
 
 from app.core.config import settings
 from app.core.database import async_session
-from app.models import RefreshToken, SystemSettings
-from app.services import webcall
+from app.models import AuditLog, RefreshToken, SystemSettings
+from app.services import alertas, webcall
 
 logger = logging.getLogger(__name__)
+
+# Grabaciones por empresa (ver config_generator.carpeta_grabaciones y
+# queues_sync): carpeta t<id>/… o archivo de cola queue_t<id>_….
+_GRABACION_DE_EMPRESA = re.compile(r"^t(\d+)$")
+_COLA_DE_EMPRESA = re.compile(r"^queue_t(\d+)_")
 
 
 def _topes_de_disco(filas: list) -> tuple[float, float]:
@@ -82,9 +87,16 @@ class MaintenanceWorker:
                 await self.ejecutar_una_vez()
             except Exception:
                 logger.exception("Error en MaintenanceWorker")
-            for _ in range(6 * 60):  # 6 horas, en pasos de 1 minuto
+            for minuto in range(6 * 60):  # 6 horas, en pasos de 1 minuto
                 if not self._running:
                     return
+                # Tráfico saliente anómalo (fraude en curso), cada 5 minutos.
+                if minuto % 5 == 0:
+                    try:
+                        async with async_session() as session:
+                            await alertas.revisar(session)
+                    except Exception:
+                        logger.exception("Error revisando el tráfico saliente")
                 # Libera cupos de sesiones del widget de llamada web que el
                 # navegador nunca cerró (cerró la pestaña sin colgar,
                 # perdió red) — ver app/services/webcall.py.
@@ -114,13 +126,30 @@ class MaintenanceWorker:
                 for f in filas
             )
             retencion_backup = max(f.backup_retention_days for f in filas)
+            # Lo de antes de separar por empresa (sin carpeta t<id>) usa la más
+            # larga; lo de cada empresa, la suya.
             retencion_grabaciones = max(f.recordings_retention_days for f in filas)
+            retencion_por_empresa = {f.tenant_id: f.recordings_retention_days for f in filas}
             tope_backup_gb, tope_gb = _topes_de_disco(filas)
 
         await self._purgar_refresh_tokens()
+        await self._purgar_auditoria()
         if necesita_backup:
             await self._respaldar_postgres(retencion_backup, tope_backup_gb)
-        await self._limpiar_grabaciones(retencion_grabaciones, tope_gb)
+        await self._limpiar_grabaciones(retencion_grabaciones, tope_gb, retencion_por_empresa)
+
+    async def _purgar_auditoria(self) -> None:
+        """Retención del registro de auditoría (AUDITORIA_RETENCION_DIAS).
+        El rol de la aplicación no puede borrar en audit_log; este worker
+        usa el dueño."""
+        dias = max(30, settings.auditoria_retencion_dias)
+        async with async_session() as session:
+            borradas = await session.execute(
+                delete(AuditLog).where(AuditLog.created_at < datetime.utcnow() - timedelta(days=dias))
+            )
+            await session.commit()
+        if borradas.rowcount:
+            logger.info("Auditoría: %d registros de más de %d días borrados", borradas.rowcount, dias)
 
     async def _purgar_refresh_tokens(self) -> None:
         """Borra refresh tokens vencidos o revocados hace más de una semana.
@@ -247,7 +276,23 @@ class MaintenanceWorker:
                 eliminados_por_edad, retencion_dias, eliminados_por_tope, tope_gb,
             )
 
-    async def _limpiar_grabaciones(self, retencion_dias: int, tope_gb: float) -> None:
+    @staticmethod
+    def _empresa_de_grabacion(carpeta: Path, archivo: Path) -> int | None:
+        """t<id>/AAAA/MM/DD/llamada_….wav o queue_t<id>_….wav → id."""
+        relativa = archivo.relative_to(carpeta)
+        m = _GRABACION_DE_EMPRESA.match(relativa.parts[0]) if relativa.parts else None
+        if m is None and len(relativa.parts) == 1:
+            m = _COLA_DE_EMPRESA.match(relativa.name)
+        return int(m.group(1)) if m else None
+
+    async def _limpiar_grabaciones(
+        self, retencion_dias: int, tope_gb: float, por_empresa: dict[int, int] | None = None
+    ) -> None:
+        """Retención por empresa (cada una la suya, de Ajustes) y, encima, el
+        tope de disco de la plataforma. Antes se usaba la retención más larga
+        de todas para todas: una empresa que pedía 30 días por privacidad
+        guardaba lo que guardara la que pedía un año."""
+        por_empresa = por_empresa or {}
         carpeta = Path(settings.recordings_dir)
         if not carpeta.exists():
             return
@@ -257,7 +302,7 @@ class MaintenanceWorker:
         # con el glob plano de antes, la limpieza dejaba de ver CUALQUIER
         # grabación nueva y nunca las borraba.
         archivos = [f for f in carpeta.glob("**/*.wav") if f.is_file()]
-        limite = datetime.utcnow() - timedelta(days=retencion_dias)
+        ahora = datetime.utcnow()
         eliminados_por_edad = 0
         vigentes = []
         for f in archivos:
@@ -265,7 +310,9 @@ class MaintenanceWorker:
                 mtime = datetime.utcfromtimestamp(f.stat().st_mtime)
             except FileNotFoundError:
                 continue
-            if mtime < limite:
+            empresa = self._empresa_de_grabacion(carpeta, f)
+            dias = por_empresa.get(empresa, retencion_dias) if empresa is not None else retencion_dias
+            if mtime < ahora - timedelta(days=dias):
                 f.unlink(missing_ok=True)
                 eliminados_por_edad += 1
             else:
@@ -302,10 +349,11 @@ class MaintenanceWorker:
         """Las carpetas AAAA/MM/DD se crean una por día (ver
         config_generator.py) y nunca se borran solas — sin esto, con la
         retención activa se van acumulando miles de carpetas de días
-        vacíos con el tiempo. Solo las de fecha (DD bajo MM bajo AAAA),
-        de más profundo a más superficial para que un mes/año completo
-        también quede vacío y se borre en la misma pasada."""
-        for profundidad in (3, 2, 1):
+        vacíos con el tiempo. De más profundo a más superficial para que un
+        mes/año completo también quede vacío y se borre en la misma pasada;
+        4 niveles por la carpeta de empresa (t<id>/AAAA/MM/DD), que
+        FreeSWITCH vuelve a crear sola (mkdir -p) si hace falta."""
+        for profundidad in (4, 3, 2, 1):
             for sub in carpeta.glob("/".join(["*"] * profundidad)):
                 if sub.is_dir():
                     try:

@@ -24,7 +24,11 @@ leer() {
 }
 
 # Antes de tocar nada: el archivo tiene que descomprimirse y verse como un volcado.
-leer | head -c 4096 | grep -q "PostgreSQL database dump" || { echo "El archivo no parece un volcado de pg_dump"; exit 1; }
+# Sin pipefail en esta línea: `head` corta la lectura y gunzip termina por
+# SIGPIPE; con pipefail eso hacía fallar el chequeo con CUALQUIER volcado de
+# más de ~64 KB, es decir, con todo respaldo real.
+( set +o pipefail; leer 2>/dev/null | head -c 4096 ) | grep -q "PostgreSQL database dump" \
+  || { echo "El archivo no parece un volcado de pg_dump"; exit 1; }
 
 echo "Se BORRARÁ la base '$base' y se restaurará desde $archivo"
 read -r -p 'Escribe RESTAURAR para continuar: ' ok

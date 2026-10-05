@@ -12,6 +12,7 @@ sola vez. Después, quien entra con ese usuario queda encerrado en su
 empresa por RLS.
 """
 
+import logging
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -23,10 +24,12 @@ from app.core import permissions
 from app.core.auth import requiere
 from app.core.database import get_admin_session
 from app.core.security import hash_password
-from app.models import Extension, License, Tenant, User
+from app.models import Extension, License, Tenant, User, VoiceBot
 from app.schemas import LicenseOut, LicenseUpdate, TenantCreate, TenantCreatedOut, TenantOut, TenantUpdate
-from app.services import licensing
+from app.services import esl, licensing, privacidad
 from app.services.ajustes import get_or_create_settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tenants", tags=["tenants"])
 
@@ -48,6 +51,8 @@ async def _out(session: AsyncSession, t: Tenant) -> TenantOut:
         business_type=t.business_type,
         modules=t.modules_list,
         enabled=t.enabled,
+        outbound_blocked=bool(t.outbound_blocked),
+        nodo_id=t.nodo_id,
         created_at=t.created_at,
         users_count=users,
         extensions_count=extensions,
@@ -66,6 +71,8 @@ async def _lic_out(session: AsyncSession, lic: License) -> LicenseOut:
         max_trunks=licensing.limite(lic, "max_trunks"),
         max_concurrent_calls=licensing.limite(lic, "max_concurrent_calls"),
         max_campaigns=licensing.limite(lic, "max_campaigns"),
+        max_outbound_minutes_day=licensing.limite(lic, "max_outbound_minutes_day"),
+        max_outbound_cps=licensing.limite(lic, "max_outbound_cps"),
     )
 
 
@@ -130,7 +137,8 @@ async def update_tenant(
     ten = await session.get(Tenant, tenant_id)
     if not ten:
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    cambios = payload.model_dump(exclude_unset=True)
+    for field, value in cambios.items():
         if field == "modules" and value is not None:
             setattr(ten, "modules", ",".join(value))
         else:
@@ -140,6 +148,15 @@ async def update_tenant(
     except IntegrityError:
         await session.rollback()
         raise HTTPException(status_code=400, detail="El dominio SIP ya lo usa otra empresa")
+    if "outbound_blocked" in cambios:
+        logger.warning(
+            "Salientes de la empresa %s %s por la plataforma",
+            ten.slug, "CORTADAS" if ten.outbound_blocked else "reactivadas",
+        )
+        try:
+            await esl.reloadxml()
+        except Exception:
+            pass
     await session.refresh(ten)
     return await _out(session, ten)
 
@@ -171,6 +188,37 @@ async def update_licencia(
     return await _lic_out(session, lic)
 
 
+@router.post("/{tenant_id}/salientes/colgar")
+async def colgar_salientes_de_la_empresa(tenant_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Cuelga las salientes EN CURSO de esta empresa (ver services/emergencia.py)."""
+    from app.services import emergencia
+
+    if not await session.get(Tenant, tenant_id):
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    try:
+        await emergencia.colgar_salientes([tenant_id])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"FreeSWITCH no respondió; no se pudo colgar: {exc}")
+    return {"empresas": 1}
+
+
+@router.post("/{tenant_id}/cerrar-sesiones")
+async def cerrar_sesiones_de_la_empresa(tenant_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Saca a TODOS los usuarios de la empresa de todos sus equipos (ante
+    una intrusión). Pueden volver a entrar con su contraseña: para impedirlo,
+    desactivar la empresa o suspender su licencia."""
+    from app.services.sesiones import revocar_sesiones
+
+    if not await session.get(Tenant, tenant_id):
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    usuarios = (await session.execute(select(User).where(User.tenant_id == tenant_id))).scalars().all()
+    for u in usuarios:
+        await revocar_sesiones(session, u)
+    await session.commit()
+    logger.warning("Sesiones de toda la empresa %s cerradas (%d usuarios)", tenant_id, len(usuarios))
+    return {"usuarios": len(usuarios)}
+
+
 @router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_tenant(tenant_id: int, session: AsyncSession = Depends(get_admin_session)):
     ten = await session.get(Tenant, tenant_id)
@@ -178,5 +226,8 @@ async def delete_tenant(tenant_id: int, session: AsyncSession = Depends(get_admi
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
     if ten.id == 1:
         raise HTTPException(status_code=400, detail="No se puede eliminar la empresa inicial")
+    bot_ids = list((await session.execute(select(VoiceBot.id).where(VoiceBot.tenant_id == tenant_id))).scalars())
     await session.delete(ten)
     await session.commit()
+    # Después del commit: si la base fallara, los archivos siguen ahí.
+    privacidad.borrar_archivos_de_empresa(tenant_id, bot_ids)

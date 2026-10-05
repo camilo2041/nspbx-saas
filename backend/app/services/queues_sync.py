@@ -87,8 +87,10 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
             "agent-no-answer-status": "Available",
         }
         if queue.record:
+            # queue_t<id>_…: de qué empresa es cada grabación de cola (en la
+            # raíz y no en la carpeta t<id>, que mod_callcenter no crea solo).
             params["record-template"] = (
-                "$${recordings_dir}/queue_"
+                f"$${{recordings_dir}}/queue_t{int(queue.tenant_id)}_"
                 + queue.name
                 + "_${strftime(%Y-%m-%d-%H-%M-%S)}_${caller_id_number}.wav"
             )
@@ -127,9 +129,9 @@ def write_callcenter_conf(queues: list, dominios: dict[int, str]) -> Path:
     return path
 
 
-async def _run(cmd: str) -> str:
+async def _run(cmd: str, tenant_id: int | None = None) -> str:
     try:
-        return await esl.api(cmd)
+        return await esl.api(cmd, tenant_id=tenant_id)
     except Exception as exc:
         logger.warning("callcenter_config falló (%s): %s", cmd, exc)
         return ""
@@ -177,10 +179,14 @@ async def apply_queues(queues: list, dominios: dict[int, str]) -> None:
     (carga/recarga) cada cola habilitada de forma dirigida. Se usa al
     arrancar el backend, cuando mod_callcenter pierde todo su estado."""
     write_callcenter_conf(queues, dominios)
-    await _run("reloadxml")
+    try:
+        await esl.reloadxml()  # en todos los servidores
+    except Exception as exc:
+        logger.warning("reloadxml falló: %s", exc)
     for queue in queues:
         if queue.enabled:
+            # En el servidor de la empresa de la cola (services/nodos.py).
             qkey = _queue_key(queue.name, dominios[queue.tenant_id])
-            result = await _run(f"callcenter_config queue reload {qkey}")
+            result = await _run(f"callcenter_config queue reload {qkey}", queue.tenant_id)
             if "-ERR" in result:
-                await _run(f"callcenter_config queue load {qkey}")
+                await _run(f"callcenter_config queue load {qkey}", queue.tenant_id)

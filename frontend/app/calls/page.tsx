@@ -22,7 +22,10 @@ import {
   Tr,
 } from "@/components/ui";
 import { api } from "@/lib/api";
-import { CallLog, CallStats } from "@/lib/types";
+import { LlamadasEnVivo } from "@/components/llamadas-en-vivo";
+import { useAuth } from "@/lib/auth";
+import { CallLog, CallStats, PERMISOS } from "@/lib/types";
+import { tiempoCorto } from "@/lib/utils";
 
 const estados: Record<string, { label: string; color: string }> = {
   answered: { label: "Contestada", color: "green" },
@@ -393,6 +396,7 @@ function ArbolFechas({
 }
 
 export default function CallsPage() {
+  const { puede } = useAuth();
   const [items, setItems] = useState<CallLog[]>([]);
   const [stats, setStats] = useState<CallStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -559,16 +563,30 @@ export default function CallsPage() {
       {stats && (
         <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
           <StatCard label="Llamadas totales" value={stats.total} color="sky" delay={0} />
-          <StatCard label="Contestadas" value={stats.answered} color="emerald" delay={70} />
+          <StatCard
+            label="Contestadas"
+            value={stats.answered}
+            color="emerald"
+            delay={70}
+            hint={stats.ring_promedio_s !== null ? `Ring promedio ${tiempoCorto(stats.ring_promedio_s)}` : undefined}
+          />
           <StatCard
             label="Sin respuesta / ocupado"
             value={stats.no_answer + stats.busy}
             color="amber"
             delay={140}
           />
-          <StatCard label="Minutos hablados" value={stats.talk_minutes} color="violet" delay={210} />
+          <StatCard
+            label="Minutos hablados"
+            value={stats.talk_minutes}
+            color="violet"
+            delay={210}
+            hint={stats.hablado_promedio_s !== null ? `Promedio ${tiempoCorto(stats.hablado_promedio_s)} por llamada` : undefined}
+          />
         </div>
       )}
+
+      {puede(PERMISOS.llamadasTodas) && <LlamadasEnVivo />}
 
       <Card>
         <CardHeader
@@ -657,7 +675,16 @@ export default function CallsPage() {
                         )}
                       </Td>
                       <Td mono>{c.callee_number || "—"}</Td>
-                      <Td muted>{duracion(c.duration)}</Td>
+                      <Td muted>
+                        {duracion(c.duration)}
+                        {/* El timbre va bajo el total y no en columna aparte:
+                            la tabla ya está al límite de ancho. */}
+                        {c.ring_ms !== null && (
+                          <span className="block text-[11px] text-faint" title="Tiempo de timbre">
+                            ring {tiempoCorto(c.ring_ms / 1000)}
+                          </span>
+                        )}
+                      </Td>
                       <Td muted>{duracion(c.billsec)}</Td>
                       <Td>
                         <Badge color={e.color} dot>

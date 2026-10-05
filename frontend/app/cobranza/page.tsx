@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
-  Badge,
   Button,
   Card,
   CardHeader,
@@ -28,6 +27,12 @@ const ESTADOS_DEUDA = [
   { value: "promised", label: "Con promesa" },
   { value: "overdue", label: "Vencida" },
   { value: "paid", label: "Pagada" },
+];
+
+const ESTADOS_PROMESA = [
+  { value: "pending", label: "Pendiente" },
+  { value: "completed", label: "Cumplida" },
+  { value: "missed", label: "Incumplida" },
 ];
 
 const PLANES: Record<string, string> = {
@@ -108,6 +113,15 @@ export default function CobranzaPage() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al actualizar");
+    }
+  };
+
+  const cambiarPromesa = async (p: PaymentPromise, estado: string) => {
+    try {
+      await api.put(`/api/cobranza/promises/${p.id}`, { status: estado });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al actualizar la promesa");
     }
   };
 
@@ -215,9 +229,17 @@ export default function CobranzaPage() {
                 <Td>{PLANES[p.plan] ?? p.plan}</Td>
                 <Td>{p.installments ?? "—"}</Td>
                 <Td>
-                  <Badge color={p.status === "completed" ? "green" : p.status === "missed" ? "red" : "amber"} dot>
-                    {p.status === "pending" ? "Pendiente" : p.status === "completed" ? "Cumplida" : "Vencida"}
-                  </Badge>
+                  <select
+                    className={`${fieldClass} w-36 px-2 py-1 text-xs`}
+                    value={p.status}
+                    onChange={(e) => cambiarPromesa(p, e.target.value)}
+                  >
+                    {ESTADOS_PROMESA.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
                 </Td>
               </Tr>
             ))}

@@ -89,6 +89,52 @@ const GROUPS: NavGroup[] = [
         ),
       },
       {
+        href: "/agente",
+        label: "Consola de agente",
+        permiso: PERMISOS.agente,
+        icon: icon(
+          <>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 14v-2a8 8 0 0116 0v2" />
+            <rect x="2.5" y="13" width="4" height="7" rx="1.5" />
+            <rect x="17.5" y="13" width="4" height="7" rx="1.5" />
+            <path strokeLinecap="round" d="M19.5 20a4 4 0 01-4 2H13" />
+          </>
+        ),
+      },
+      {
+        href: "/supervision",
+        label: "Supervisión",
+        permiso: PERMISOS.supervisionVer,
+        icon: icon(
+          <>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+            <circle cx="12" cy="12" r="3" />
+          </>
+        ),
+      },
+      {
+        href: "/reportes",
+        label: "Reportes",
+        permiso: PERMISOS.reportes,
+        icon: icon(
+          <>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
+          </>
+        ),
+      },
+      {
+        href: "/crm",
+        label: "Contactos",
+        permiso: PERMISOS.crmVer,
+        icon: icon(
+          <>
+            <circle cx="9" cy="8" r="3.5" />
+            <path strokeLinecap="round" d="M2.5 20a6.5 6.5 0 0113 0" />
+            <path strokeLinecap="round" d="M16 4.5a3.5 3.5 0 010 7M18 14.5a6.5 6.5 0 013.5 5.5" />
+          </>
+        ),
+      },
+      {
         href: "/cobranza",
         label: "Cobranza",
         permiso: PERMISOS.campanas,
@@ -199,6 +245,17 @@ const GROUPS: NavGroup[] = [
             <circle cx="12" cy="12" r="9" />
             <circle cx="12" cy="12" r="5" />
             <circle cx="12" cy="12" r="1" />
+          </>
+        ),
+      },
+      {
+        href: "/contact-center",
+        label: "Pausas y disposiciones",
+        permiso: PERMISOS.campanas,
+        icon: icon(
+          <>
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+            <path strokeLinecap="round" d="M9 9v6M15 9v6" />
           </>
         ),
       },
@@ -402,7 +459,9 @@ function Marco({ children }: { children: ReactNode }) {
   // sesión de panel ahí, así que ni el sidebar ni la verificación de
   // usuario de abajo tienen sentido (y sin esta excepción, `!usuario`
   // dejaría la página en blanco para siempre).
-  if (pathname === "/login" || pathname === "/webcall") return <>{children}</>;
+  // /wallboard: pantalla completa para la TV de la sala; puede no haber
+  // sesión (entra con su token de pantalla, ver app/wallboard/page.tsx).
+  if (pathname === "/login" || pathname === "/webcall" || pathname === "/wallboard") return <>{children}</>;
   if (cargando || !usuario) return null;
 
   // Escribir la dirección a mano no debe abrir una pantalla que el rol no
@@ -512,6 +571,19 @@ function Marco({ children }: { children: ReactNode }) {
                 </div>
               </div>
             )}
+            <Link
+              href="/mfa"
+              title="Seguridad de tu cuenta: verificación en dos pasos y sesiones"
+              aria-label="Seguridad de tu cuenta"
+              className={`press shrink-0 rounded-lg p-1.5 text-faint transition-colors hover:bg-surface-2 hover:text-fg ${
+                collapsed ? "hidden" : ""
+              }`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4" />
+              </svg>
+            </Link>
             <button
               type="button"
               onClick={salir}

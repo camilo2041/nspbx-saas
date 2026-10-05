@@ -1,6 +1,10 @@
+import asyncio
 import logging
 import os
 import secrets
+
+from app.core.auditoria import MiddlewareAuditoria, configurar_logging
+from app.core.cabeceras import MiddlewareCabeceras
 
 # Sin esto, los logger.info() de todo el proyecto se perdían en silencio:
 # uvicorn configura SUS PROPIOS loggers ("uvicorn", "uvicorn.error") pero
@@ -8,23 +12,28 @@ import secrets
 # saca por stderr los WARNING+ (el "handler de último recurso"). Costó
 # darse cuenta al verificar el contenedor "voicebot" recién separado: no
 # aparecía ni el log de "arrancó" aunque todo funcionaba bien.
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# El formato lleva el request_id (y es JSON con LOG_FORMATO=json): ver
+# core/auditoria.py.
+configurar_logging()
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, outbound_routes, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
-from app.core import permissions
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, nodos as nodos_api, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.core import cifrado, permissions
+from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
 from app.core.database import Base, async_session, engine, verificar_rol_sin_privilegios
 from app.core.security import hash_password
-from app.models import CampaignNumber, Queue, Tenant, Trunk, User
+from app.models import CampaignNumber, NodoFreeswitch, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import voice_prompts, xml_endpoints
+from app.services import agentes, esl, integraciones, predictivo, reportes_programados, supervision, tiempo_real, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
+from app.services.bus import bus
+from app.services.lider import lider
 from app.services.queues_sync import apply_queues
 from app.workers.dialer import dialer
 from app.workers.maintenance import maintenance
@@ -48,6 +57,18 @@ _COLUMN_PATCHES = [
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS deepseek_api_key VARCHAR(255)",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS record_all_calls BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS allow_international BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS international_countries VARCHAR(200) NOT NULL DEFAULT ''",
+    "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS outbound_paused BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS outbound_blocked BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE licenses ADD COLUMN IF NOT EXISTS max_outbound_minutes_day INTEGER",
+    "ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS via_trunk BOOLEAN",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_last_step INTEGER",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_recovery JSON",
+    # El cupo diario suma los minutos de hoy por empresa en cada llamada
+    # saliente (el dialplan se pide en cada llamada).
+    "CREATE INDEX IF NOT EXISTS ix_call_logs_tenant_started ON call_logs (tenant_id, started_at)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS sesiones_desde TIMESTAMP",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ai_voice_provider VARCHAR(20) NOT NULL DEFAULT 'elevenlabs'",
     "ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS ai_voice_id VARCHAR(100) NOT NULL DEFAULT 'Xb7hH8MSUJpSbSDYk0k2'",
@@ -195,6 +216,7 @@ _TABLAS_CON_TENANT = [
     "payment_promises",
     "licenses",
     "device_tokens",
+    "security_alerts",
 ]
 
 # Restricciones que Postgres creó con nombre automático cuando la columna
@@ -324,7 +346,23 @@ _COLUMN_PATCHES += _parches_multiempresa()
 #
 # `users` también entra: guarda correos y hashes de contraseña, así que
 # una consulta sin filtrar ahí es peor que una de negocio.
-_TABLAS_CON_RLS = _TABLAS_CON_TENANT + ["users"]
+# Las tablas nuevas con tenant_id que llegan por revisiones de Alembic se
+# agregan acá (no a _TABLAS_CON_TENANT, que es parte del esquema base).
+_TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
+    "users", "audit_log", "voicebot_versions", "api_keys",
+    # CRM (revisión 0012)
+    "contactos", "campos_contacto", "listas", "notas", "no_llamar",
+    # Agentes (revisión 0013)
+    "codigos_pausa", "disposiciones", "campana_agentes", "sesiones_agente",
+    "estados_agente", "agentes_vivo", "callbacks",
+    # Predictivo (revisión 0014)
+    "metricas_campana",
+    "tokens_wallboard",
+    "webhooks",
+    "entregas_webhook",
+    "reportes_programados",
+    "monitoreos",
+]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
 # en cada transacción (ver core/database.py).
@@ -400,7 +438,48 @@ def _parches_rls() -> list[str]:
     return stmts
 
 
-_COLUMN_PATCHES += _parches_rls()
+# Hasta acá, el esquema BASE: lo aplica la revisión 0001 de Alembic
+# (app/migraciones). Congelado: los cambios nuevos van en revisiones
+# nuevas, no en esta lista.
+_PARCHES_BASE = list(_COLUMN_PATCHES)
+
+# Convergencia: rol de la aplicación, permisos, políticas de RLS y la
+# auditoría de solo agregar. Corre en CADA arranque, después de las
+# revisiones, y no es una revisión porque depende del entorno (el nombre y
+# la clave del rol salen de DATABASE_URL_APP) y porque los GRANT tienen que
+# volver a cubrir las tablas que agregue cualquier revisión nueva.
+_PARCHES_CONVERGENCIA = _parches_rls()
+
+
+def _parches_auditoria() -> list[str]:
+    """`audit_log` es de solo agregar.
+
+    Va DESPUÉS de los GRANT de `_parches_rls`, que en cada arranque vuelven
+    a dar UPDATE/DELETE sobre todas las tablas: el REVOKE tiene que ser lo
+    último. El trigger rechaza UPDATE incluso del dueño, para que ni un
+    error en un worker pueda reescribir la historia; borrar (retención) solo
+    lo puede el dueño."""
+    stmts = [
+        """
+        CREATE OR REPLACE FUNCTION audit_log_inmutable() RETURNS trigger AS $$
+        BEGIN
+          RAISE EXCEPTION 'audit_log es de solo agregar';
+        END $$ LANGUAGE plpgsql
+        """,
+        "DROP TRIGGER IF EXISTS audit_log_sin_update ON audit_log",
+        "CREATE TRIGGER audit_log_sin_update BEFORE UPDATE ON audit_log "
+        "FOR EACH ROW EXECUTE FUNCTION audit_log_inmutable()",
+    ]
+    if settings.database_url_app:
+        from urllib.parse import unquote, urlsplit
+
+        rol = unquote(urlsplit(settings.database_url_app).username or "")
+        if rol:
+            stmts.append(f"REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM {rol}")
+    return stmts
+
+
+_PARCHES_CONVERGENCIA += _parches_auditoria()
 
 
 async def _asegurar_admin(session) -> None:
@@ -488,19 +567,42 @@ async def _asegurar_plataforma(session) -> None:
     logger.warning("Usuario de plataforma creado: 'plataforma' con la misma contraseña que 'admin'")
 
 
-async def lifespan(app: FastAPI):
-    # Las migraciones van con el motor del DUEÑO, no con el de la
-    # aplicación: el rol restringido está sujeto a las políticas que
-    # estas mismas sentencias crean, así que un UPDATE de relleno vería
-    # cero filas y la migración "terminaría bien" sin haber hecho nada.
+async def migrar() -> None:
+    """Revisiones de Alembic, rol de la aplicación y políticas de RLS.
+
+    Separado del arranque para que las pruebas (backend/tests) migren su
+    base exactamente por el mismo camino que producción: un aislamiento
+    probado contra un esquema armado a mano no prueba nada.
+
+    Las migraciones van con el motor del DUEÑO, no con el de la
+    aplicación: el rol restringido está sujeto a las políticas que estas
+    mismas sentencias crean, así que un UPDATE de relleno vería cero
+    filas y la migración "terminaría bien" sin haber hecho nada.
+    """
+    from app import migraciones
+
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        for stmt in _COLUMN_PATCHES:
+        # Con varias réplicas arrancando a la vez, una migra y las demás
+        # esperan (el candado se suelta solo al terminar la transacción).
+        await conn.execute(text("SELECT pg_advisory_xact_lock(7324002)"))
+        # Revisiones de Alembic hasta la última (app/migraciones/versiones).
+        await conn.run_sync(migraciones.actualizar)
+        for stmt in _PARCHES_CONVERGENCIA:
             await conn.execute(text(stmt))
+        # Secretos todavía en claro (o con la clave anterior): se cifran con
+        # la actual. Ver core/cifrado.py.
+        await conn.run_sync(cifrado.cifrar_pendientes)
     # Después de crear el rol y las políticas, comprobar que el rol con
     # el que se va a atender NO puede saltárselas. Va acá y no antes
     # porque el rol se crea recién en la migración de arriba.
     await verificar_rol_sin_privilegios()
+
+
+async def lifespan(app: FastAPI):
+    # Antes de tocar la base: sin los secretos que sostienen el
+    # aislamiento, en producción no se arranca (ver core/arranque.py).
+    exigir_configuracion_segura()
+    await migrar()
     async with async_session() as session:
         # Ajustes y ESL por empresa. Los ajustes se siembran desde cada
         # tenant (fs_domain sale de Tenant.sip_domain) y la config de
@@ -526,29 +628,83 @@ async def lifespan(app: FastAPI):
             if len(tenantes_rows) == 1:
                 settings_api.apply_to_runtime(fila_ajustes)
         trunks_rows = (await session.execute(select(Trunk))).scalars().all()
-        sync_gateways(trunks_rows, slugs)
+        # Cada servidor FreeSWITCH con los gateways de sus empresas
+        # (services/nodos.py; sin servidores adicionales, todo en el principal).
+        nodos_rows = (await session.execute(select(NodoFreeswitch))).scalars().all()
+        nombre_nodo = {n.id: n.nombre for n in nodos_rows}
+        sync_gateways(trunks_rows, slugs, {t.id: nombre_nodo.get(t.nodo_id) for t in tenantes_rows},
+                      [n.nombre for n in nodos_rows])
         # mod_callcenter guarda colas/agentes en memoria — se pierden en cada
         # reinicio de FreeSWITCH, así que hay que reescribir su config y
         # recargar el módulo al arrancar el backend.
         queues_rows = (await session.execute(select(Queue))).scalars().all()
         await apply_queues(queues_rows, dominios)
-        # Números que quedaron en "dialing" por un reinicio/caída previa del
-        # backend nunca vuelven a "pending" solos (las tareas de _dial se
-        # cancelan sin llegar a su bloque finally) — quedarían excluidos de
-        # por vida del ciclo de marcado. Se recuperan al arrancar.
-        await session.execute(
-            update(CampaignNumber).where(CampaignNumber.status == "dialing").values(status="pending")
-        )
         await session.commit()
         await _asegurar_admin(session)
         await _asegurar_plataforma(session)
         for t in tenantes_rows:
             await voice_prompts.ensure_prompts(session, t.id)
-    dialer.start()
-    maintenance.start()
+    # Lo que hace UNA sola réplica (services/lider.py): marcar, procesar los
+    # eventos de FreeSWITCH, webhooks, reportes y mantenimiento. Con una
+    # réplica, toma el liderazgo acá mismo; con varias, la que no lo tiene
+    # atiende HTTP y queda esperando por si el líder cae.
+    tareas: dict[str, asyncio.Task] = {}
+
+    async def ascender() -> None:
+        async with async_session() as s:
+            # Números que quedaron en "dialing" por una caída del líder anterior
+            # nunca vuelven a "pending" solos (las tareas de _dial se cancelan sin
+            # llegar a su bloque finally). Solo el líder: otra réplica que arranca
+            # le pisaría las llamadas en curso.
+            await s.execute(update(CampaignNumber).where(CampaignNumber.status == "dialing").values(status="pending"))
+            await s.commit()
+        # Llamadas del predictivo de un líder anterior (timbrando o con el
+        # cliente esperando agente): nadie las va a asignar y el cliente
+        # quedaría en silencio. Se cuelgan; sus números ya volvieron a
+        # pendientes arriba. En un arranque normal no hay ninguna.
+        try:
+            await esl.api_todos("hupall NORMAL_CLEARING nspbx_pred 1")
+        except Exception as exc:
+            logger.warning("No se pudieron colgar llamadas huérfanas del predictivo: %s", exc)
+        # La conexión de eventos que tuviera como seguidora era solo de
+        # BACKGROUND_JOB: se reabre con los de canal.
+        await esl.cerrar_eventos()
+        dialer.start()
+        maintenance.start()
+        # Llamadas en vivo (services/tiempo_real.py): conexión de eventos de ESL
+        # abierta desde el arranque, no recién con el primer originate.
+        tareas["eventos"] = asyncio.create_task(tiempo_real.mantener_conexion())
+        # Agentes: las sesiones de antes no tienen audio ni eventos confiables
+        # (reinicio o cambio de líder); el agente vuelve a entrar.
+        await agentes.cerrar_todas()
+        await supervision.monitoreo.limpiar_todo()
+        agentes.motor.start()
+        predictivo.motor.start()
+        # Webhooks hacia los CRM (services/integraciones.py): la cola sobrevive
+        # al reinicio porque vive en la base.
+        integraciones.repartidor.start()
+        reportes_programados.programador.start()
+
+    async def descender() -> None:
+        await reportes_programados.programador.stop()
+        await integraciones.repartidor.stop()
+        await predictivo.motor.stop()
+        await agentes.motor.stop()
+        if "eventos" in tareas:
+            tareas.pop("eventos").cancel()
+        await esl.cerrar_eventos()
+        await dialer.stop()
+        await maintenance.stop()
+
+    # Mensajes entre réplicas (tiempo real, permisos, foto del predictivo):
+    # en todas, sean líder o no (services/bus.py).
+    await bus.start()
+    lider.al_ascender, lider.al_descender = ascender, descender
+    await lider.intentar()
+    lider.start()
     yield
-    await dialer.stop()
-    await maintenance.stop()
+    await lider.stop()
+    await bus.stop()
     await engine.dispose()
 
 
@@ -572,6 +728,11 @@ app = FastAPI(
 # devolviendo el origen que pida cada petición con credenciales permitidas,
 # que equivale a autorizar a cualquier sitio y es justo lo que hay que evitar
 # el día que alguien agregue una cookie.
+# Auditoría y request_id. Se agrega antes que CORS para quedar por dentro:
+# las respuestas a preflight de CORS no son acciones de nadie.
+app.add_middleware(MiddlewareAuditoria)
+# Cabeceras de seguridad (nosniff, sin caché, sin iframes): ver core/cabeceras.py.
+app.add_middleware(MiddlewareCabeceras)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -599,6 +760,7 @@ app.include_router(fs_push.router)
 # Authorization, así que este router valida el token a mano (ver
 # app/api/logs_ws.py) en vez de con el guardia global de arriba.
 app.include_router(logs_ws.router)
+app.include_router(tiempo_real_ws.router)
 
 # El login y "quién soy" se protegen dentro del propio router: pedir el
 # token no puede exigir tener uno.
@@ -653,6 +815,40 @@ app.include_router(
     cobranza.router,
     dependencies=[Depends(requiere(permissions.CAMPANAS_GESTIONAR)), *_VOICEBOT],
 )
+# CRM: ver con crm:ver; crear, importar y lo demás exige además
+# crm:gestionar en cada endpoint (ver app/api/crm.py).
+app.include_router(
+    crm_api.router,
+    dependencies=[Depends(requiere(permissions.CRM_VER)), Depends(licencia_operativa())],
+)
+# Consola del agente: cualquiera con agente:operar, sobre sí mismo
+# (app/api/agente.py). Catálogos del contact center: quien gestiona campañas.
+app.include_router(
+    agente_api.router,
+    dependencies=[Depends(requiere(permissions.AGENTE_OPERAR)), Depends(licencia_operativa())],
+)
+app.include_router(
+    contact_center_api.router,
+    dependencies=[Depends(requiere(permissions.CAMPANAS_GESTIONAR)), Depends(licencia_operativa())],
+)
+# Supervisor (fase 5): ver para entrar; cada acción exige además
+# supervision:intervenir (app/api/supervision.py). El wallboard sin usuario
+# entra con su propio token (lista de rutas abiertas en app/core/auth.py).
+app.include_router(
+    supervision_api.router,
+    dependencies=[Depends(requiere(permissions.SUPERVISION_VER)), Depends(licencia_operativa())],
+)
+app.include_router(supervision_api.publico)
+app.include_router(
+    reportes_api.router,
+    dependencies=[Depends(requiere(permissions.REPORTES_VER))],
+)
+# Webhooks hacia el CRM de la empresa: como las claves de API, los
+# administra quien administra la empresa.
+app.include_router(
+    integraciones_api.router,
+    dependencies=[Depends(requiere(permissions.AJUSTES_GESTIONAR)), Depends(licencia_operativa())],
+)
 app.include_router(
     ai_usage.router,
     dependencies=[Depends(requiere(permissions.CONSUMO_IA_VER)), *_VOICEBOT],
@@ -660,6 +856,17 @@ app.include_router(
 # Empresas: SOLO el rol de plataforma (usa la sesión del dueño).
 app.include_router(
     tenants_api.router,
+    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
+)
+# Controles de emergencia de toda la plataforma (interruptor global de
+# salientes). Mismo permiso y misma sesión del dueño.
+app.include_router(
+    plataforma_api.router,
+    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
+)
+# Servidores FreeSWITCH y en cuál vive cada empresa (docs/escala.md §4).
+app.include_router(
+    nodos_api.router,
     dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
 )
 app.include_router(appointments_api.router)  # permisos por endpoint: el agente de IA entra acá
@@ -672,6 +879,13 @@ app.include_router(assistant.router)  # solo lectura; recorta por rol dentro
 # FreeSWITCH.
 # Estado de las defensas (fail2ban). Solo lectura: ver services/fail2ban.py.
 app.include_router(security_api.router, **_con(permissions.AJUSTES_GESTIONAR))
+app.include_router(privacidad_api.router, **_con(permissions.AJUSTES_GESTIONAR))
+app.include_router(claves_api_api.router, **_con(permissions.AJUSTES_GESTIONAR))
+app.include_router(consumo_api.router, **_con(permissions.AJUSTES_GESTIONAR))
+# API pública: la autentica una clave de API en `sesion_obligatoria`, y cada
+# endpoint exige su permiso (ver core/claves_api.py).
+app.include_router(api_v1.router)
+app.include_router(csp_api.router)  # abierta: la llaman los navegadores
 app.include_router(system.router, **_con(permissions.AJUSTES_GESTIONAR))
 app.include_router(settings_api.router, **_con(permissions.AJUSTES_GESTIONAR))
 

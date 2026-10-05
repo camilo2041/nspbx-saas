@@ -17,7 +17,7 @@ import {
   NodeChange,
   EdgeChange,
 } from "@xyflow/react";
-import { Button, ErrorBanner, Spinner } from "@/components/ui";
+import { Button, ErrorBanner, Modal, Spinner, Table, Td, Tr } from "@/components/ui";
 import { api } from "@/lib/api";
 import { FlowNode, FlowEdge, TtsVoice, VoiceBot } from "@/lib/types";
 import { nodeTypes } from "./FlowNodes";
@@ -40,6 +40,11 @@ export default function VoiceBotFlowPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedOk, setSavedOk] = useState(false);
+  // Historial: cada guardado es una versión y se puede volver a cualquiera
+  // (ver backend VoiceBotVersion). Un flujo roto se arregla en un clic.
+  const [versiones, setVersiones] = useState<
+    { id: number; version: number; cuando: string; quien: string | null; motivo: string | null; nodos: number }[] | null
+  >(null);
 
   useEffect(() => {
     (async () => {
@@ -126,6 +131,27 @@ export default function VoiceBotFlowPage() {
 
   const save = () => persistFlow(nodes, edges);
 
+  const abrirHistorial = async () => {
+    try {
+      setVersiones(await api.get(`/api/voicebots/${botId}/versiones`));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo cargar el historial");
+    }
+  };
+
+  const restaurar = async (id: number, version: number) => {
+    if (!confirm(`¿Volver a la versión ${version}? Las llamadas siguientes usarán ese flujo. Se puede deshacer.`)) return;
+    try {
+      await api.post(`/api/voicebots/${botId}/versiones/${id}/restaurar`, {});
+      const flow = await api.get<{ nodes: FlowNode[]; edges: FlowEdge[] }>(`/api/voicebots/${botId}/flow`);
+      setNodes(flow.nodes.length ? flow.nodes : [defaultStartNode()]);
+      setEdges(flow.edges as Edge[]);
+      setVersiones(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo restaurar");
+    }
+  };
+
   if (loading) return <Spinner />;
 
   return (
@@ -152,6 +178,9 @@ export default function VoiceBotFlowPage() {
           </Button>
           <Button variant="secondary" onClick={() => addNode("hangup")}>
             + Colgar
+          </Button>
+          <Button variant="ghost" onClick={abrirHistorial}>
+            Historial
           </Button>
           <Button onClick={save} loading={saving}>
             {saving ? "Guardando..." : savedOk ? "Guardado ✓" : "Guardar flujo"}
@@ -194,6 +223,33 @@ export default function VoiceBotFlowPage() {
           />
         )}
       </div>
+      <Modal open={versiones !== null} onClose={() => setVersiones(null)} title="Historial del flujo">
+        {versiones && versiones.length === 0 ? (
+          <p className="text-sm text-muted">Todavía no hay versiones guardadas.</p>
+        ) : (
+          <Table head={["Versión", "Cuándo", "Quién", "Cambio", ""]}>
+            {(versiones ?? []).map((v, i) => (
+              <Tr key={v.id}>
+                <Td strong>v{v.version}</Td>
+                <Td muted>{new Date(v.cuando + "Z").toLocaleString()}</Td>
+                <Td>{v.quien ?? "—"}</Td>
+                <Td muted>
+                  {v.motivo ?? ""} · {v.nodos} nodos
+                </Td>
+                <Td>
+                  {i === 0 ? (
+                    <span className="text-xs text-faint">actual</span>
+                  ) : (
+                    <Button size="sm" variant="secondary" onClick={() => restaurar(v.id, v.version)}>
+                      Restaurar
+                    </Button>
+                  )}
+                </Td>
+              </Tr>
+            ))}
+          </Table>
+        )}
+      </Modal>
     </div>
   );
 }

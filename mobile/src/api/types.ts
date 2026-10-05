@@ -43,6 +43,11 @@ export interface CallStats {
   busy: number;
   failed: number;
   talk_minutes: number;
+  /** Promedios en segundos; null mientras no haya llamadas con ese dato. */
+  ring_promedio_s: number | null;
+  setup_promedio_s: number | null;
+  hablado_promedio_s: number | null;
+  espera_promedio_s: number | null;
 }
 
 export interface CallLogOut {
@@ -56,6 +61,8 @@ export interface CallLogOut {
   billsec: number;
   started_at: string | null;
   recording_path: string | null;
+  /** Timbre hasta que contestan (o hasta colgar), en milisegundos. */
+  ring_ms: number | null;
 }
 
 export interface AiUsageSummary {

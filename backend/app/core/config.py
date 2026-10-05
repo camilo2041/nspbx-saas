@@ -6,6 +6,13 @@ class Settings(BaseSettings):
 
     app_name: str = "NSPBX"
 
+    # "produccion" o "desarrollo". En producción el arranque se NIEGA a
+    # seguir si faltan los secretos que sostienen el aislamiento y las
+    # sesiones (ver core/arranque.py); en desarrollo solo avisa. El valor
+    # por omisión es el estricto a propósito: olvidarse de definirlo tiene
+    # que dejar el sistema protegido, no abierto.
+    entorno: str = "produccion"
+
     # Conexión del DUEÑO de las tablas. Se usa para migrar al arrancar y
     # para las dos operaciones que por definición no pueden estar
     # limitadas a una empresa: el login —todavía no se sabe de quién es
@@ -70,6 +77,28 @@ class Settings(BaseSettings):
     # Solo para desarrollo o un modelo propio dentro de tu red: deja que las URLs
     # que fijan las empresas (modelo de IA) apunten a direcciones privadas.
     permitir_urls_privadas: bool = False
+    # Webhook al que se mandan las alertas de tráfico saliente de TODAS las
+    # empresas (Slack, Teams, un relay de correo…). Vacío = solo quedan en
+    # el panel. Ver services/alertas.py.
+    alertas_webhook_url: str = ""
+    # Correo saliente de la plataforma (reportes programados, ver
+    # services/reportes_programados.py). Sin SMTP_HOST no se envía nada y el
+    # panel lo dice.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_usuario: str = ""
+    smtp_clave: str = ""
+    smtp_remitente: str = ""
+    # starttls (587) | ssl (465) | ninguno (solo un relay dentro de la red).
+    smtp_seguridad: str = "starttls"
+    # Días que se conserva el registro de auditoría. Lo borra el worker de
+    # mantenimiento con el rol dueño: la aplicación no puede borrar filas.
+    auditoria_retencion_dias: int = 365
+    # Roles que DEBEN usar verificación en dos pasos (ver core/mfa.py). Hasta
+    # activarla, su sesión solo sirve para activarla. Vacío = nadie obligado.
+    mfa_obligatorio: str = "plataforma,admin"
+    # Peticiones por minuto de cada clave de la API pública (/api/v1).
+    api_limite_por_minuto: int = 120
     # Proxies inversos delante del backend (Traefik = 1). Define de dónde se toma la
     # IP real del cliente; 0 = sin proxy, se usa la conexión directa.
     proxies_confiables: int = 1

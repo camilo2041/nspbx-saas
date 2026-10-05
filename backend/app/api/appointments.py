@@ -1,14 +1,14 @@
 import hmac
 from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import permissions
 from app.core.auth import requiere
 from app.core.clock import now_local
-from app.core.database import app_session, async_session, fijar_tenant, get_session
+from app.core.database import app_session, async_session, fijar_tenant, get_session, traer_propio
 from app.models import AiCallUsage, Appointment, SystemSettings
 from app.schemas import (
     AgentBookRequest,
@@ -38,7 +38,7 @@ _GESTION = Depends(requiere(permissions.CITAS_GESTIONAR))
 
 
 @router.get("/gestion", dependencies=[_GESTION])
-async def gestion(days: int = 30, session: AsyncSession = Depends(get_session)):
+async def gestion(days: int = Query(default=30, ge=1, le=366), session: AsyncSession = Depends(get_session)):
     """Qué hizo cada llamada del voizbot sobre la agenda — confirmó,
     canceló o reagendó, y para cuándo — en vez de solo el estado actual
     de cada cita, que no dice nada sobre cómo se llegó ahí ni deja rastro
@@ -110,7 +110,7 @@ async def create_appointment(payload: AppointmentCreate, session: AsyncSession =
 
 @router.put("/{appointment_id}", response_model=AppointmentOut, dependencies=[_GESTION])
 async def update_appointment(appointment_id: int, payload: AppointmentUpdate, session: AsyncSession = Depends(get_session)):
-    appt = await session.get(Appointment, appointment_id)
+    appt = await traer_propio(session, Appointment, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -122,7 +122,7 @@ async def update_appointment(appointment_id: int, payload: AppointmentUpdate, se
 
 @router.delete("/{appointment_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[_GESTION])
 async def delete_appointment(appointment_id: int, session: AsyncSession = Depends(get_session)):
-    appt = await session.get(Appointment, appointment_id)
+    appt = await traer_propio(session, Appointment, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Cita no encontrada")
     await session.delete(appt)

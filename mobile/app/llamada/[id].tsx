@@ -9,7 +9,8 @@ import { useDatos } from "@/src/datos";
 import { Aviso, Avatar, Esqueleto } from "@/src/gestion";
 import { exito, fallo, impacto } from "@/src/haptico";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
-import { colores, radios } from "@/src/tema";
+import { Icono } from "@/src/Icono";
+import { radios, useColores } from "@/src/tema";
 import { Boton, Pildora, Tarjeta } from "@/src/ui";
 
 interface Detalle extends CallLogOut {
@@ -31,6 +32,7 @@ const ESTADOS: Record<string, { texto: string; tono: "ok" | "aviso" | "peligro" 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 function Reproductor({ fuente }: { fuente: { uri: string; headers: Record<string, string> } }) {
+  const col = useColores();
   const player = useAudioPlayer(fuente);
   const estado = useAudioPlayerStatus(player);
   const [ancho, setAncho] = useState(1);
@@ -54,26 +56,27 @@ function Reproductor({ fuente }: { fuente: { uri: string; headers: Record<string
   return (
     <View style={{ gap: 12 }}>
       <Pressable onPress={tocarBarra} onLayout={(e: LayoutChangeEvent) => setAncho(e.nativeEvent.layout.width || 1)} hitSlop={{ top: 10, bottom: 10 }}>
-        <View style={{ height: 6, borderRadius: 3, backgroundColor: colores.superficie3, overflow: "hidden" }}>
-          <View style={{ height: 6, width: `${dur ? (pos / dur) * 100 : 0}%`, backgroundColor: colores.marca }} />
+        <View style={{ height: 6, borderRadius: 3, backgroundColor: col.superficie3, overflow: "hidden" }}>
+          <View style={{ height: 6, width: `${dur ? (pos / dur) * 100 : 0}%`, backgroundColor: col.marca }} />
         </View>
       </Pressable>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-        <Text style={{ fontSize: 12, color: colores.textoSecundario }}>{mmss(pos)}</Text>
-        <Text style={{ fontSize: 12, color: colores.textoSecundario }}>{dur ? mmss(dur) : estado.isBuffering ? "Cargando…" : "--:--"}</Text>
+        <Text style={{ fontSize: 12, color: col.textoSecundario }}>{mmss(pos)}</Text>
+        <Text style={{ fontSize: 12, color: col.textoSecundario }}>{dur ? mmss(dur) : estado.isBuffering ? "Cargando…" : "--:--"}</Text>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 28 }}>
-        <Pressable onPress={() => saltar(-10)} hitSlop={10}>
-          <Text style={{ fontSize: 13, fontWeight: "700", color: colores.textoSuave }}>⏪ 10 s</Text>
+        <Pressable onPress={() => saltar(-10)} hitSlop={10} accessibilityLabel="Retroceder 10 segundos">
+          <Icono nombre="retroceder10" tam={28} color={col.textoSuave} />
         </Pressable>
         <Pressable
           onPress={alternar}
-          style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: colores.marca, alignItems: "center", justifyContent: "center" }}
+          accessibilityLabel={estado.playing ? "Pausar" : "Reproducir"}
+          style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: col.marca, alignItems: "center", justifyContent: "center" }}
         >
-          <Text style={{ color: "#fff", fontSize: 24 }}>{estado.playing ? "⏸" : "▶"}</Text>
+          <Icono nombre={estado.playing ? "pausa" : "reproducir"} tam={28} color={col.sobreMarca} />
         </Pressable>
-        <Pressable onPress={() => saltar(10)} hitSlop={10}>
-          <Text style={{ fontSize: 13, fontWeight: "700", color: colores.textoSuave }}>10 s ⏩</Text>
+        <Pressable onPress={() => saltar(10)} hitSlop={10} accessibilityLabel="Adelantar 10 segundos">
+          <Icono nombre="adelantar10" tam={28} color={col.textoSuave} />
         </Pressable>
       </View>
     </View>
@@ -96,6 +99,7 @@ function Grabacion({ id }: { id: string }) {
 }
 
 export default function DetalleLlamada() {
+  const col = useColores();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { call } = useSoftphone();
@@ -121,7 +125,7 @@ export default function DetalleLlamada() {
 
   if (cargando && !c) {
     return (
-      <View style={{ flex: 1, backgroundColor: colores.fondo, padding: 16, gap: 12 }}>
+      <View style={{ flex: 1, backgroundColor: col.fondo, padding: 16, gap: 12 }}>
         <Stack.Screen options={{ title: "Llamada" }} />
         <Esqueleto alto={110} />
         <Esqueleto alto={140} />
@@ -130,7 +134,7 @@ export default function DetalleLlamada() {
   }
   if (!c) {
     return (
-      <View style={{ flex: 1, backgroundColor: colores.fondo, padding: 16 }}>
+      <View style={{ flex: 1, backgroundColor: col.fondo, padding: 16 }}>
         <Stack.Screen options={{ title: "Llamada" }} />
         <Aviso texto={error || "No se encontró la llamada."} />
       </View>
@@ -144,32 +148,32 @@ export default function DetalleLlamada() {
   const inicio = c.started_at ? new Date(c.started_at.endsWith("Z") ? c.started_at : `${c.started_at}Z`) : null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colores.fondo }}>
-      <Stack.Screen options={{ title: "Llamada", headerTintColor: colores.marca }} />
+    <View style={{ flex: 1, backgroundColor: col.fondo }}>
+      <Stack.Screen options={{ title: "Llamada", headerTintColor: col.marca }} />
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 60 }}>
         <Tarjeta style={{ alignItems: "center", gap: 10 }}>
           <Avatar nombre={nombre} tam={64} />
-          <Text style={{ fontSize: 20, fontWeight: "700", color: colores.texto }}>{nombre}</Text>
-          {nombre !== numero && numero ? <Text style={{ fontSize: 14, color: colores.textoSecundario }}>{numero}</Text> : null}
+          <Text style={{ fontSize: 20, fontWeight: "700", color: col.texto }}>{nombre}</Text>
+          {nombre !== numero && numero ? <Text style={{ fontSize: 14, color: col.textoSecundario }}>{numero}</Text> : null}
           <Pildora texto={e.texto} tono={e.tono} />
           <View style={{ flexDirection: "row", gap: 24, marginTop: 4 }}>
             <View style={{ alignItems: "center" }}>
-              <Text style={{ fontSize: 12, color: colores.textoSecundario }}>{entrante ? "Entrante" : "Saliente"}</Text>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: colores.texto }}>{entrante ? "↙" : "↗"}</Text>
+              <Text style={{ fontSize: 12, color: col.textoSecundario }}>{entrante ? "Entrante" : "Saliente"}</Text>
+              <Icono nombre={entrante ? "entrante" : "saliente"} tam={18} color={entrante ? col.info : col.ok} style={{ marginTop: 1 }} />
             </View>
             <View style={{ alignItems: "center" }}>
-              <Text style={{ fontSize: 12, color: colores.textoSecundario }}>Duración</Text>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: colores.texto }}>{c.billsec > 0 ? mmss(c.billsec) : "—"}</Text>
+              <Text style={{ fontSize: 12, color: col.textoSecundario }}>Duración</Text>
+              <Text style={{ fontSize: 15, fontWeight: "600", color: col.texto }}>{c.billsec > 0 ? mmss(c.billsec) : "—"}</Text>
             </View>
             <View style={{ alignItems: "center" }}>
-              <Text style={{ fontSize: 12, color: colores.textoSecundario }}>Fecha</Text>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: colores.texto }}>
+              <Text style={{ fontSize: 12, color: col.textoSecundario }}>Fecha</Text>
+              <Text style={{ fontSize: 15, fontWeight: "600", color: col.texto }}>
                 {inicio ? inicio.toLocaleDateString("es-CO", { day: "numeric", month: "short" }) : "—"}
               </Text>
             </View>
             <View style={{ alignItems: "center" }}>
-              <Text style={{ fontSize: 12, color: colores.textoSecundario }}>Hora</Text>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: colores.texto }}>
+              <Text style={{ fontSize: 12, color: col.textoSecundario }}>Hora</Text>
+              <Text style={{ fontSize: 15, fontWeight: "600", color: col.texto }}>
                 {inicio ? inicio.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : "—"}
               </Text>
             </View>
@@ -179,6 +183,7 @@ export default function DetalleLlamada() {
         {numero ? (
           <Boton
             titulo={`Llamar a ${numero}`}
+            icono="telefono"
             variante="ok"
             onPress={() => {
               call(numero.replace(/[^0-9+*#]/g, ""));
@@ -189,7 +194,7 @@ export default function DetalleLlamada() {
 
         {c.has_recording ? (
           <Tarjeta style={{ gap: 8 }}>
-            <Text style={{ fontSize: 14, fontWeight: "700", color: colores.texto }}>Grabación</Text>
+            <Text style={{ fontSize: 14, fontWeight: "700", color: col.texto }}>Grabación</Text>
             <Grabacion id={String(c.id)} />
           </Tarjeta>
         ) : (
@@ -198,21 +203,21 @@ export default function DetalleLlamada() {
 
         {c.status === "answered" ? (
           <Tarjeta style={{ gap: 10 }}>
-            <Text style={{ fontSize: 14, fontWeight: "700", color: colores.texto }}>Resumen con IA</Text>
+            <Text style={{ fontSize: 14, fontWeight: "700", color: col.texto }}>Resumen con IA</Text>
             {resumen ? (
-              <Text style={{ fontSize: 14, color: colores.textoSuave, lineHeight: 21 }}>{resumen}</Text>
+              <Text style={{ fontSize: 14, color: col.textoSuave, lineHeight: 21 }}>{resumen}</Text>
             ) : (
-              <Text style={{ fontSize: 12.5, color: colores.textoSecundario, lineHeight: 18 }}>
+              <Text style={{ fontSize: 12.5, color: col.textoSecundario, lineHeight: 18 }}>
                 Transcribe la llamada y la resume. Tarda unos segundos y usa el modelo de IA de la empresa.
               </Text>
             )}
             {errorResumen ? <Aviso texto={errorResumen} /> : null}
-            {!resumen ? <Boton titulo="Generar resumen" variante="suave" onPress={resumir} cargando={resumiendo} /> : null}
+            {!resumen ? <Boton titulo="Generar resumen" icono="asistente" variante="suave" onPress={resumir} cargando={resumiendo} /> : null}
           </Tarjeta>
         ) : null}
 
         {c.hangup_cause ? (
-          <Text style={{ fontSize: 12, color: colores.placeholder, textAlign: "center", borderRadius: radios.chico }}>Motivo de fin: {c.hangup_cause}</Text>
+          <Text style={{ fontSize: 12, color: col.placeholder, textAlign: "center", borderRadius: radios.chico }}>Motivo de fin: {c.hangup_cause}</Text>
         ) : null}
       </ScrollView>
     </View>

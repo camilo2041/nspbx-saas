@@ -54,6 +54,11 @@ fi
 
 cp "$NUEVO" "$DESTINO"
 chmod 600 "$DESTINO"
+# Del usuario de FreeSWITCH (uid 10001, ver freeswitch/Dockerfile): ya no
+# corre como root, y con el archivo de root en 600 no lo podía leer. Como
+# acá se reinicia solo el perfil (no el contenedor, cuyo arranque sí ajusta
+# el dueño), el puerto wss dejaba de aceptar conexiones: softphone caído.
+chown 10001:10001 "$DESTINO"
 echo "$(date -Is) wss.pem actualizado: $(openssl x509 -in "$DESTINO" -noout -enddate)"
 
 # Reiniciar el perfil y no el contenedor: mod_sofia lee wss.pem solo al

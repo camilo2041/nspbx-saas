@@ -33,11 +33,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 from fastapi import FastAPI
 
+from app.core.auditoria import instalar_filtro_de_secretos
 from app.core.config import settings
 from app.core.database import engine
 from app.services import ai_agent, ambience
 
 logger = logging.getLogger(__name__)
+instalar_filtro_de_secretos()
 
 
 async def lifespan(app: FastAPI):

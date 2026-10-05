@@ -11,12 +11,19 @@ logger = logging.getLogger(__name__)
 GATEWAYS_DIR = "sip_profiles/external"
 
 
-def _gateways_path() -> Path:
-    return Path(settings.fs_conf_dir) / GATEWAYS_DIR
+def _gateways_path(nodo: str | None = None) -> Path:
+    """Carpeta de gateways de un servidor. El principal usa la de siempre;
+    un servidor adicional (services/nodos.py), la suya en
+    `<FS_CONF>/nodos/<nombre>/`, que ese FreeSWITCH monta como su
+    sip_profiles/external (docs/escala.md §4)."""
+    if nodo is None:
+        return Path(settings.fs_conf_dir) / GATEWAYS_DIR
+    validacion.exigir(validacion.NOMBRE_RE, nodo, "Nombre de servidor")
+    return Path(settings.fs_conf_dir) / "nodos" / nodo / GATEWAYS_DIR
 
 
-def ensure_dirs():
-    _gateways_path().mkdir(parents=True, exist_ok=True)
+def ensure_dirs(nodo: str | None = None):
+    _gateways_path(nodo).mkdir(parents=True, exist_ok=True)
 
 
 def nombre_gateway(nombre: str, slug: str) -> str:
@@ -42,21 +49,22 @@ def _attr(valor) -> str:
     return html.escape(str(valor), quote=True)
 
 
-def _ruta_segura(gw_name: str) -> Path:
+def _ruta_segura(gw_name: str, nodo: str | None = None) -> Path:
     """Ruta del archivo del gateway, garantizando que queda DENTRO de la
     carpeta de gateways: un nombre con `../` escribiría o borraría
     archivos en cualquier parte del volumen de configuración."""
     validacion.exigir(validacion.NOMBRE_RE, gw_name, "Nombre de gateway")
-    base = _gateways_path().resolve()
+    base = _gateways_path(nodo).resolve()
     path = (base / f"gw_{gw_name}.xml").resolve()
     if path.parent != base:
         raise ValueError("Ruta de gateway fuera de la carpeta permitida")
     return path
 
 
-def write_gateway_file(trunk, slug: str) -> Path:
-    """Escribe/actualiza el gateway de una troncal en la config de FreeSWITCH."""
-    ensure_dirs()
+def write_gateway_file(trunk, slug: str, nodo: str | None = None) -> Path:
+    """Escribe/actualiza el gateway de una troncal en la config del
+    FreeSWITCH de su empresa (`nodo`: None = el principal)."""
+    ensure_dirs(nodo)
     validacion.exigir(validacion.NOMBRE_RE, slug, "Identificador de empresa")
     validacion.exigir(validacion.NOMBRE_RE, trunk.name, "Nombre de troncal")
     validacion.exigir(validacion.HOST_RE, trunk.gateway_host, "Host de la troncal")
@@ -69,7 +77,7 @@ def write_gateway_file(trunk, slug: str) -> Path:
     if codecs:
         validacion.exigir(validacion.CODECS_RE, codecs, "Códecs")
     gw_name = nombre_gateway(trunk.name, slug)
-    path = _ruta_segura(gw_name)
+    path = _ruta_segura(gw_name, nodo)
 
     has_credentials = bool(trunk.username and trunk.password)
     # Solo se registra si hay credenciales Y la troncal lo tiene habilitado.
@@ -110,10 +118,10 @@ def write_gateway_file(trunk, slug: str) -> Path:
     return path
 
 
-def remove_gateway_file(gw_name: str):
-    ensure_dirs()
+def remove_gateway_file(gw_name: str, nodo: str | None = None):
+    ensure_dirs(nodo)
     try:
-        path = _ruta_segura(gw_name)
+        path = _ruta_segura(gw_name, nodo)
     except ValueError:
         logger.warning("Gateway con nombre no permitido, no se elimina: %r", gw_name)
         return
@@ -122,21 +130,33 @@ def remove_gateway_file(gw_name: str):
         logger.info("Gateway %s eliminado", gw_name)
 
 
-def clean_gateways(valid_names: set[str]):
+def clean_gateways(valid_names: set[str], nodo: str | None = None):
     """Elimina archivos de gateway que no corresponden a troncales validas."""
-    ensure_dirs()
-    for f in os.listdir(_gateways_path()):
+    ensure_dirs(nodo)
+    for f in os.listdir(_gateways_path(nodo)):
         if f.startswith("gw_") and f.endswith(".xml"):
             name = f[3:-4]
             if name not in valid_names:
                 try:
-                    (_gateways_path() / f).unlink()
+                    (_gateways_path(nodo) / f).unlink()
                     logger.info("Gateway obsoleto eliminado: %s", name)
                 except OSError:
                     pass
 
 
-def sync_gateways(trunks: list, slug_por_tenant: dict[int, str]):
+def sync_gateways(trunks: list, slug_por_tenant: dict[int, str], nodo_por_tenant: dict[int, str] | None = None,
+                  nodos: list[str] | None = None):
+    """Por servidor: cada uno con los gateways de SUS empresas
+    (`nodo_por_tenant`: nombre del servidor de cada empresa; las que no
+    están, en el principal). `nodos`: los servidores adicionales que existen
+    (para limpiar también los que quedaron sin empresas)."""
+    nodo_por_tenant = nodo_por_tenant or {}
+    for nodo in [None, *(nodos or [])]:
+        _sync_un_servidor([t for t in trunks if nodo_por_tenant.get(t.tenant_id) == nodo], slug_por_tenant, nodo,
+                          hay_troncales=bool(trunks))
+
+
+def _sync_un_servidor(trunks: list, slug_por_tenant: dict[int, str], nodo: str | None, hay_troncales: bool):
     """Reconcilia los archivos de gateway con las troncales de la base.
 
     Solo se llama al ARRANCAR. El alta, la edición y el borrado desde el
@@ -160,8 +180,11 @@ def sync_gateways(trunks: list, slug_por_tenant: dict[int, str]):
     # gateways que registran sin respaldo en la base, algo visible y
     # trivial de limpiar a mano; borrarlos de menos tira el servicio y
     # destruye credenciales que quizá no estén en ningún otro lado.
-    if not validos:
-        existentes = [f for f in os.listdir(_gateways_path()) if f.startswith("gw_") and f.endswith(".xml")]
+    ensure_dirs(nodo)
+    # La guarda mira TODAS las troncales: un servidor que se quedó sin
+    # empresas sí se limpia, pero una base sin ninguna troncal no borra nada.
+    if not hay_troncales:
+        existentes = [f for f in os.listdir(_gateways_path(nodo)) if f.startswith("gw_") and f.endswith(".xml")]
         if existentes:
             logger.error(
                 "La base no tiene NINGUNA troncal pero hay %d gateway(s) en disco (%s). "
@@ -172,13 +195,13 @@ def sync_gateways(trunks: list, slug_por_tenant: dict[int, str]):
             )
             return
 
-    clean_gateways(validos)
+    clean_gateways(validos, nodo)
     for trunk in trunks:
         if trunk.enabled:
             # Una troncal guardada antes de existir la validación (ej. con
             # espacios en el nombre) no debe impedir que arranque el sistema
             # ni que se escriban las demás: se omite y queda registrada.
             try:
-                write_gateway_file(trunk, slug_por_tenant.get(trunk.tenant_id, "x"))
+                write_gateway_file(trunk, slug_por_tenant.get(trunk.tenant_id, "x"), nodo)
             except ValueError as exc:
                 logger.error("Troncal %s omitida: %s. Corrígela desde el panel.", trunk.id, exc)

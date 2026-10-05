@@ -20,8 +20,89 @@ cd "$(dirname "$0")/.."
 
 AUTOLOAD="freeswitch/conf/autoload_configs"
 
+# Sin caracteres raros a propósito: estos valores viajan dentro de XML,
+# de una URL y de una línea de comando (fs_cli), así que un '&', un '<'
+# o una '/' sueltos rompen alguno de los tres usos.
+gen() { openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c "${1:-32}"; }
+
+# 32 bytes al azar en base64 URL-safe: el formato que espera
+# DATA_ENCRYPTION_KEY (ver backend/app/core/cifrado.py).
+nueva_clave_datos() { openssl rand 32 | base64 | tr '+/' '-_' | tr -d '\n'; }
+
+# Los tres archivos de FreeSWITCH que llevan secretos, generados desde
+# sus plantillas .example con los MISMOS valores del .env.
+# ./secrets se monta de solo lectura en el backend, que corre como el usuario
+# 10001 (no root): sus archivos tienen que ser de ese usuario. El resto de
+# las carpetas montadas las ajustan los propios contenedores al arrancar.
+dar_secretos_al_backend() {
+  if [ -d secrets ]; then
+    chown -R 10001:10001 secrets 2>/dev/null \
+      || echo "  AVISO: no pude cambiar el dueño de secrets/ (corré: sudo chown -R 10001:10001 secrets)"
+  fi
+}
+
+generar_xml_faltantes() {
+  local esl="$1" xml="$2" f
+  for f in event_socket.conf.xml xml_curl.conf.xml json_cdr.conf.xml; do
+    if [ -f "$AUTOLOAD/$f" ]; then
+      echo "  $f ya existe — no se toca."
+      continue
+    fi
+    sed -e "s|REEMPLAZAR_POR_FS_ESL_PASSWORD|${esl}|g" \
+        -e "s|REEMPLAZAR_POR_FS_XML_SECRET|${xml}|g" \
+        "$AUTOLOAD/$f.example" > "$AUTOLOAD/$f"
+    echo "  $f generado."
+  done
+}
+
+# vars.xml: lleva la IP PÚBLICA de ESTE servidor. Se detecta sola porque
+# escrita a mano es justo lo que rompe una mudanza: al mover el sistema,
+# FreeSWITCH seguía anunciando la IP del equipo anterior, el proveedor
+# respondía a una dirección ajena y el REGISTER moría por timeout con un
+# 503 genérico que no dice nada del motivo.
+#
+# Se detecta acá y no por STUN en tiempo de ejecución: STUN acierta la
+# IP pero devuelve el puerto de SU sesión NAT (ej. 2648) en vez del
+# publicado (5080), y entonces el registro funciona pero las llamadas
+# ENTRANTES se dirigen a un puerto que nadie escucha.
+generar_vars_xml() {
+  local IP_PUB
+  if [ -f freeswitch/conf/vars.xml ]; then
+    echo "  vars.xml ya existe — no se toca."
+    return
+  fi
+  IP_PUB="$(curl -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)"
+  if [ -z "$IP_PUB" ]; then
+    read -rp "  No pude detectar la IP pública. Escribila a mano: " IP_PUB
+  fi
+  # default_password: FreeSWITCH la usa como contraseña de cualquier cuenta o
+  # módulo que no defina la suya. Su valor de fábrica ("ClueCon") es el
+  # primero que prueba cualquier escáner de Internet.
+  sed -e "s|REEMPLAZAR_POR_IP_PUBLICA|${IP_PUB}|g" \
+      -e "s|REEMPLAZAR_POR_DEFAULT_PASSWORD|$(gen 32)|g" \
+      freeswitch/conf/vars.xml.example > freeswitch/conf/vars.xml
+  echo "  vars.xml generado con IP pública ${IP_PUB}."
+}
+
+
 if [ -f .env ]; then
   echo "Ya existe .env — no se regenera."
+  # Servidor nuevo con el .env de otro (recuperación total, mudanza): los
+  # XML con secretos y vars.xml no están en el repositorio, así que se
+  # generan desde las plantillas con los valores del .env. Sin esto el
+  # script salía acá y FreeSWITCH arrancaba sin ESL, sin dialplan y con la
+  # IP pública de nadie.
+  generar_xml_faltantes "$(grep '^FS_ESL_PASSWORD=' .env | cut -d= -f2-)" "$(grep '^FS_XML_SECRET=' .env | cut -d= -f2-)"
+  generar_vars_xml
+  # Instalaciones de antes del cifrado de secretos: se agrega la clave. En
+  # producción el backend no arranca sin ella (ver app/core/arranque.py).
+  if ! grep -qE '^DATA_ENCRYPTION_KEY=.+' .env; then
+    sed -i '/^DATA_ENCRYPTION_KEY=$/d' .env
+    printf '\n# Cifra en la base las claves de proveedores y las contraseñas de troncales.\n# GUARDALA FUERA DEL SERVIDOR junto con la clave de los respaldos.\nDATA_ENCRYPTION_KEY=%s\n' "$(nueva_clave_datos)" >> .env
+    echo "  DATA_ENCRYPTION_KEY agregada al .env. Guardala fuera del servidor."
+  fi
+  mkdir -p backups freeswitch/recordings freeswitch/certs
+  dar_secretos_al_backend
   # Pero sí se revisa que los XML coincidan con él. La versión anterior
   # salía acá directo, y eso permitía el peor de los casos: alguien
   # rehace el .env (con secretos nuevos), los XML se quedan con los
@@ -56,10 +137,6 @@ if [ -f .env ]; then
   exit 0
 fi
 
-# Sin caracteres raros a propósito: estos valores viajan dentro de XML,
-# de una URL y de una línea de comando (fs_cli), así que un '&', un '<'
-# o una '/' sueltos rompen alguno de los tres usos.
-gen() { openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c "${1:-32}"; }
 
 FS_ESL_PASSWORD="$(gen 32)"
 FS_XML_SECRET="$(gen 43)"
@@ -67,6 +144,7 @@ AUTH_SECRET="$(gen 43)"
 POSTGRES_PASSWORD="$(gen 24)"
 POSTGRES_APP_PASSWORD="$(gen 32)"
 TURN_SECRET="$(gen 43)"
+DATA_ENCRYPTION_KEY="$(nueva_clave_datos)"
 
 # El host va SOLO como nombre, sin esquema ni barra ni ruta: se inserta
 # literal en la regla Host(`...`) de Traefik. Escrito como una URL
@@ -108,6 +186,10 @@ FS_ESL_PASSWORD=${FS_ESL_PASSWORD}
 FS_XML_SECRET=${FS_XML_SECRET}
 AUTH_SECRET=${AUTH_SECRET}
 
+# Cifra en la base las claves de proveedores y las contraseñas de troncales.
+# GUARDALA FUERA DEL SERVIDOR junto con la clave de los respaldos.
+DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}
+
 PBX_HOST=${PBX_HOST}
 ACME_RESOLVER=${ACME_RESOLVER}
 
@@ -123,48 +205,13 @@ ADMIN_PASSWORD=
 EOF
 chmod 600 .env
 
-# Los tres archivos de FreeSWITCH que llevan secretos, generados desde
-# sus plantillas .example con los MISMOS valores del .env.
-for f in event_socket.conf.xml xml_curl.conf.xml json_cdr.conf.xml; do
-  if [ -f "$AUTOLOAD/$f" ]; then
-    echo "  $f ya existe — no se toca."
-    continue
-  fi
-  sed -e "s|REEMPLAZAR_POR_FS_ESL_PASSWORD|${FS_ESL_PASSWORD}|g" \
-      -e "s|REEMPLAZAR_POR_FS_XML_SECRET|${FS_XML_SECRET}|g" \
-      "$AUTOLOAD/$f.example" > "$AUTOLOAD/$f"
-  echo "  $f generado."
-done
-
-# vars.xml: lleva la IP PÚBLICA de ESTE servidor. Se detecta sola porque
-# escrita a mano es justo lo que rompe una mudanza: al mover el sistema,
-# FreeSWITCH seguía anunciando la IP del equipo anterior, el proveedor
-# respondía a una dirección ajena y el REGISTER moría por timeout con un
-# 503 genérico que no dice nada del motivo.
-#
-# Se detecta acá y no por STUN en tiempo de ejecución: STUN acierta la
-# IP pero devuelve el puerto de SU sesión NAT (ej. 2648) en vez del
-# publicado (5080), y entonces el registro funciona pero las llamadas
-# ENTRANTES se dirigen a un puerto que nadie escucha.
-if [ -f freeswitch/conf/vars.xml ]; then
-  echo "  vars.xml ya existe — no se toca."
-else
-  IP_PUB="$(curl -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)"
-  if [ -z "$IP_PUB" ]; then
-    read -rp "  No pude detectar la IP pública. Escribila a mano: " IP_PUB
-  fi
-  # default_password: FreeSWITCH la usa como contraseña de cualquier cuenta o
-  # módulo que no defina la suya. Su valor de fábrica ("ClueCon") es el
-  # primero que prueba cualquier escáner de Internet.
-  sed -e "s|REEMPLAZAR_POR_IP_PUBLICA|${IP_PUB}|g" \
-      -e "s|REEMPLAZAR_POR_DEFAULT_PASSWORD|$(gen 32)|g" \
-      freeswitch/conf/vars.xml.example > freeswitch/conf/vars.xml
-  echo "  vars.xml generado con IP pública ${IP_PUB}."
-fi
+generar_xml_faltantes "$FS_ESL_PASSWORD" "$FS_XML_SECRET"
+generar_vars_xml
 
 # Carpetas que el compose monta desde el host. Si no existen, Docker las
 # crea como root y después el backend no puede escribir dentro.
 mkdir -p backups freeswitch/recordings freeswitch/certs
+dar_secretos_al_backend
 
 echo
 echo "Listo. Secretos generados y sincronizados en .env y en $AUTOLOAD/."

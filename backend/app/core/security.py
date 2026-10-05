@@ -92,14 +92,19 @@ def crear_token(user_id: int, rol: str, tenant_id: int | None = None) -> tuple[s
 
     `None` = usuario de la plataforma, sin empresa propia.
     """
-    vence = datetime.now(timezone.utc) + timedelta(hours=HORAS_DE_SESION)
+    ahora = datetime.now(timezone.utc)
+    vence = ahora + timedelta(hours=HORAS_DE_SESION)
     token = jwt.encode(
         {
             "sub": str(user_id),
             "rol": rol,
             "tid": tenant_id,
             "exp": vence,
-            "iat": int(datetime.now(timezone.utc).timestamp()),
+            "iat": int(ahora.timestamp()),
+            # Emisión en milisegundos: `iat` va en segundos, y un token
+            # emitido en el mismo segundo en que se cerraron las sesiones
+            # seguía valiendo (ver core/auth.sesion_obligatoria).
+            "iatm": int(ahora.timestamp() * 1000),
         },
         _clave(),
         algorithm=ALGORITMO,
@@ -130,6 +135,32 @@ def leer_token(token: str) -> dict | None:
     pistas a quien esté probando tokens.
     """
     try:
-        return jwt.decode(token, _clave(), algorithms=[ALGORITMO])
+        datos = jwt.decode(token, _clave(), algorithms=[ALGORITMO])
     except jwt.PyJWTError:
+        return None
+    # Un token con propósito (el del paso intermedio de MFA) no es una
+    # sesión: si sirviera como tal, la verificación en dos pasos se
+    # saltearía con solo la contraseña.
+    if datos.get("proposito"):
+        return None
+    return datos
+
+
+MINUTOS_PASO_MFA = 5
+
+
+def crear_token_mfa(user_id: int) -> str:
+    """Prueba de que la contraseña fue correcta, válida unos minutos y
+    solo para canjearla por una sesión con el código de MFA."""
+    vence = datetime.now(timezone.utc) + timedelta(minutes=MINUTOS_PASO_MFA)
+    return jwt.encode({"sub": str(user_id), "proposito": "mfa", "exp": vence}, _clave(), algorithm=ALGORITMO)
+
+
+def leer_token_mfa(token: str) -> int | None:
+    try:
+        datos = jwt.decode(token, _clave(), algorithms=[ALGORITMO])
+        if datos.get("proposito") != "mfa":
+            return None
+        return int(datos["sub"])
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError):
         return None

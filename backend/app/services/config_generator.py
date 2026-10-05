@@ -2,11 +2,12 @@ import json
 import logging
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 
 from app.core import validacion
 from app.core.config import settings
 from app.core.firmas import firma_push
-from app.services import voice_prompts
+from app.services import salientes, voice_prompts
 from app.services.flow_engine import build_voicebot_flow_routes
 
 logger = logging.getLogger(__name__)
@@ -431,38 +432,52 @@ def _append_outbound_route(
     context: ET.Element,
     trunks: list,
     slug_por_tenant: dict[int, str],
-    permitir_internacional: bool = False,
+    politica: salientes.Politica | None = None,
     tope_simultaneas: int = 0,
     slug: str = "",
     rutas: list | None = None,
 ) -> None:
-    """Ruta de salida: números externos (7-15 dígitos) vía la cadena de
-    troncales habilitadas, en serie (separadas por "|" en `bridge`, que es
-    la sintaxis de FreeSWITCH para "probá la primera; si no contesta o la
-    rechaza, probá la siguiente"). Con una sola troncal habilitada, esto
-    genera exactamente la misma llamada de antes.
+    """Ruta de salida: números externos vía la cadena de troncales
+    habilitadas, en serie (separadas por "|" en `bridge`, que es la sintaxis
+    de FreeSWITCH para "probá la primera; si no contesta o la rechaza,
+    probá la siguiente"). Con una sola troncal habilitada, esto genera
+    exactamente la misma llamada de antes.
 
     Con rutas configuradas (tabla outbound_routes) se emite UNA extensión
     por regla, en orden de prioridad: gana la primera que coincide, igual
-    que en Issabel/FreePBX. Sin ninguna regla se mantiene exactamente la
-    ruta única de siempre, así que una central existente no cambia de
-    comportamiento al actualizar.
+    que en Issabel/FreePBX. Sin ninguna regla se mantiene la ruta única de
+    siempre.
+
+    Qué números pueden salir lo decide services/salientes.py, sobre el
+    número que se le entrega al proveedor (después de quitar y anteponer
+    dígitos): su condición va al comienzo del grupo de captura. Una regla
+    que con esa política no podría sacar ninguna llamada se omite.
+    Internacional exige el permiso de la EMPRESA y el de la regla.
     """
+    politica = politica or salientes.Politica()
     cadena = orden_troncales(trunks)
+    if politica.bloqueo:
+        _append_outbound_blocked(context, politica.bloqueo)
+        return
     if not cadena:
         return
+    if politica.fuera_de_horario:
+        _append_outbound_fuera_de_horario(context, politica.permitidas_fuera_de_horario)
 
     activas = sorted(
         (r for r in (rutas or []) if getattr(r, "enabled", True)),
         key=lambda r: (r.priority, r.id),
     )
     if not activas:
-        # Sin permiso internacional: nada de prefijos 00/011 ni de más de 10
-        # dígitos (el fraude cae en destinos de ese tipo).
-        expresion = r"^(\d{7,15})$" if permitir_internacional else r"^(?!00|011)(\d{7,10})$"
+        restriccion = salientes.restriccion_regex(politica)
+        if restriccion is None:
+            return
+        # Mínimo 7 símbolos: los códigos cortos (ecos, colas, *78) los
+        # atienden las extensiones de más arriba y no tienen que caer acá.
+        expresion = r"^(" + restriccion + r"\+?[0-9]{7,18})$"
         _append_outbound_extension(
             context, "Outbound_External", expresion, cadena,
-            "${destination_number}", slug_por_tenant, tope_simultaneas, slug,
+            "$1", slug_por_tenant, tope_simultaneas, slug, cps=politica.cps if politica else None,
         )
         return
 
@@ -476,8 +491,6 @@ def _append_outbound_route(
             # mande llamadas a donde no corresponde.
             logger.error("Ruta saliente %s omitida: %s", ruta.id, e)
             continue
-        if not ruta.allow_international:
-            expresion = "^(?!00|011)" + expresion[1:]
 
         # Troncales de la regla, en su orden; vacío = todas las de la empresa.
         elegidas = [por_id[i] for i in ruta.trunk_id_list if i in por_id] or cadena
@@ -490,10 +503,55 @@ def _append_outbound_route(
             logger.error("Ruta saliente %s omitida: prefijo %r no válido", ruta.id, prefijo)
             continue
 
+        politica_ruta = replace(
+            politica, permitir_internacional=politica.permitir_internacional and bool(ruta.allow_international)
+        )
+        restriccion = salientes.restriccion_regex(politica_ruta, prefijo)
+        if restriccion is None:
+            logger.warning(
+                "Ruta saliente %s omitida: con el prefijo %r no puede sacar ninguna llamada permitida", ruta.id, prefijo
+            )
+            continue
+        # patron_marcado_a_regex no genera otros paréntesis: el primero es
+        # el grupo de lo que sale.
+        expresion = expresion.replace("(", "(" + restriccion, 1)
+
         _append_outbound_extension(
             context, f"Outbound_{ruta.id}", expresion, elegidas,
             f"{prefijo}$1", slug_por_tenant, tope_simultaneas, slug, ruta.name,
+            cps=politica.cps if politica else None,
         )
+
+
+def _append_outbound_fuera_de_horario(context: ET.Element, permitidas: tuple[str, ...]) -> None:
+    """Fuera del horario laboral de la empresa (ver salientes.Politica): un
+    número externo marcado desde un teléfono se rechaza, salvo que la
+    extensión tenga permiso. Va antes de las rutas de salida con
+    continue="true": si pasa, el dialplan sigue a la ruta de siempre.
+
+    `${user_name}` es el usuario SIP autenticado (no el caller ID, que pone
+    el teléfono). Vacío = la llamada no viene de un teléfono (un desvío del
+    IVR a un celular de guardia, un voizbot que transfiere): esas pasan, que
+    fuera de horario es justo cuando hacen falta."""
+    extension = ET.SubElement(context, "extension", attrib={"name": "Outbound_FueraDeHorario", "continue": "true"})
+    ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": r"^\+?[0-9]{5,}$"})
+    validas = [n for n in permitidas if validacion.EXTENSION_RE.fullmatch(n or "")]
+    expresion = "^(" + "|".join([""] + validas) + ")$"
+    usuario = ET.SubElement(extension, "condition", attrib={"field": "${user_name}", "expression": expresion})
+    ET.SubElement(usuario, "anti-action", attrib={"application": "log", "data": "WARNING Saliente rechazada: fuera del horario laboral de la empresa"})
+    ET.SubElement(usuario, "anti-action", attrib={"application": "hangup", "data": "CALL_REJECTED"})
+
+
+def _append_outbound_blocked(context: ET.Element, motivo: str) -> None:
+    """Salientes cortadas: cualquier número externo se rechaza con un motivo
+    en el log, en vez de caer en "sin ruta" sin explicación."""
+    extension = ET.SubElement(context, "extension", attrib={"name": "Outbound_Bloqueadas", "continue": "false"})
+    condition = ET.SubElement(
+        extension, "condition", attrib={"field": "destination_number", "expression": r"^\+?[0-9]{5,}$"}
+    )
+    texto = re.sub(r"[^\w .,:áéíóúñÁÉÍÓÚÑ-]", "", motivo)[:150]
+    ET.SubElement(condition, "action", attrib={"application": "log", "data": f"WARNING Saliente rechazada: {texto}"})
+    ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "CALL_REJECTED"})
 
 
 def _append_outbound_extension(
@@ -506,18 +564,32 @@ def _append_outbound_extension(
     tope_simultaneas: int,
     slug: str,
     etiqueta: str = "",
+    cps: int | None = None,
 ) -> None:
     """Una extensión de salida ya resuelta: a quién atrapa y por dónde sale."""
     extension = ET.SubElement(context, "extension", attrib={"name": nombre, "continue": "false"})
     condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": expresion})
     # Tope de salientes simultáneas de la empresa: al superarlo se rechaza
     # la llamada en vez de saturar la troncal (y el saldo).
+    # Tope de llamadas NUEVAS por segundo (licencia, ver salientes.Politica):
+    # el patrón de un fraude son cientos de llamadas cortas por minuto, que
+    # ni el tope de simultáneas ni el cupo de minutos frenan a tiempo.
+    # `N/1` en mod_hash es "N por segundo"; la que se pasa se rechaza.
+    if cps and cps > 0 and validacion.NOMBRE_RE.fullmatch(slug or ""):
+        ET.SubElement(condition, "action", attrib={"application": "limit", "data": f"hash cps {slug} {int(cps)}/1 !CALL_REJECTED"})
     if tope_simultaneas and tope_simultaneas > 0 and validacion.NOMBRE_RE.fullmatch(slug or ""):
         ET.SubElement(condition, "action", attrib={"application": "limit", "data": f"hash outbound {slug} {int(tope_simultaneas)} !CALL_REJECTED"})
     nombres = " -> ".join(t.name for t in cadena)
     detalle = f"{etiqueta}: " if etiqueta else ""
     ET.SubElement(condition, "action", attrib={"application": "log", "data": f"Llamada saliente {detalle}vía {nombres}"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
+    # Marca de "sale por troncal": empresa y extensión que llama. Es lo que
+    # permite colgar las salientes EN CURSO ante un fraude (hupall por
+    # variable, ver services/emergencia.py). `user_name` es el usuario SIP
+    # autenticado, no el caller ID que manda el teléfono.
+    if cadena:
+        ET.SubElement(condition, "action", attrib={"application": "set", "data": f"nspbx_saliente={int(cadena[0].tenant_id)}"})
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": "nspbx_saliente_ext=${user_name}@${domain_name}"})
     # Tono de "está llamando" (425 Hz, 1 s sí / 4 s no, el de Colombia) para quien
     # marca: FreeSWITCH lo envía como audio previo a la respuesta (183) mientras el
     # proveedor no mande el suyo. Sin esto, si el proveedor solo manda "180 Ringing"
@@ -624,7 +696,13 @@ def _append_inbound_routes(
     ET.SubElement(fb_cond, "action", attrib={"application": "hangup", "data": "UNALLOCATED_NUMBER"})
 
 
-def _append_recording_hook(context: ET.Element) -> None:
+def carpeta_grabaciones(tenant_id: int) -> str:
+    """Subcarpeta de grabaciones de una empresa: aislamiento físico de los
+    archivos, y retención por empresa (ver workers/maintenance.py)."""
+    return f"t{int(tenant_id)}"
+
+
+def _append_recording_hook(context: ET.Element, tenant_id: int) -> None:
     """Graba TODA llamada del contexto. Va primero y con continue="true"
     para que la llamada siga su ruteo normal después.
 
@@ -638,7 +716,9 @@ def _append_recording_hook(context: ET.Element) -> None:
     # Organizadas por fecha (AAAA/MM/DD) en vez de todas sueltas en un solo
     # directorio — con meses de campañas activas, un directorio plano se
     # vuelve imposible de navegar a mano y de acotar por retención.
-    dia = "${strftime(%Y)}/${strftime(%m)}/${strftime(%d)}"
+    # Y dentro de la carpeta de la empresa (t<id>), para que los archivos de
+    # una no se mezclen con los de otra y cada una tenga su retención.
+    dia = carpeta_grabaciones(tenant_id) + "/${strftime(%Y)}/${strftime(%m)}/${strftime(%d)}"
     ET.SubElement(
         condition,
         "action",
@@ -687,7 +767,8 @@ def _append_call_limits_hook(context: ET.Element, max_minutes: int) -> None:
 
 
 def _append_webcall_context(
-    section: ET.Element, context_name: str, queue, dominio: str, record_all: bool, max_call_minutes: int
+    section: ET.Element, context_name: str, queue, dominio: str, record_all: bool, max_call_minutes: int,
+    tenant_id: int,
 ) -> None:
     """Contexto `webcall_<slug>`: el ÚNICO al que llegan las credenciales
     temporales del widget de llamada web de esa empresa (ver
@@ -711,7 +792,7 @@ def _append_webcall_context(
     cond = ET.SubElement(ext, "condition", attrib={"field": "destination_number", "expression": "^webqueue$"})
     ET.SubElement(cond, "action", attrib={"application": "answer"})
     if queue.record and not record_all:
-        _append_recording_hook_call(cond)
+        _append_recording_hook_call(cond, tenant_id)
     ET.SubElement(cond, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
     # Dominio literal de la empresa (no $${domain}, variable global que no
     # sirve con varias empresas) — mismo patrón que _append_queue_routes.
@@ -723,13 +804,13 @@ def _append_webcall_context(
     ET.SubElement(dcond, "action", attrib={"application": "hangup", "data": "CALL_REJECTED"})
 
 
-def _append_recording_hook_call(cond: ET.Element) -> None:
+def _append_recording_hook_call(cond: ET.Element, tenant_id: int) -> None:
     """Graba esta llamada puntual (cola con `record` propio, sin que la
     grabación global ya esté activa) — mismas acciones que
     `_append_recording_hook` pero dentro de una condición existente en vez
     de una extensión nueva."""
     ET.SubElement(cond, "action", attrib={"application": "set", "data": "RECORD_STEREO=false"})
-    dia = "${strftime(%Y)}/${strftime(%m)}/${strftime(%d)}"
+    dia = carpeta_grabaciones(tenant_id) + "/${strftime(%Y)}/${strftime(%m)}/${strftime(%d)}"
     ET.SubElement(
         cond,
         "action",
@@ -759,7 +840,6 @@ def build_dialplan_xml(
     root = _e("document", attrib={"type": "freeswitch/xml"})
     section = ET.SubElement(root, "section", attrib={"name": "dialplan"})
 
-    record_public = any(t["record_all"] for t in tenantes)
     max_minutes_public = max((t["max_call_minutes"] for t in tenantes), default=60)
 
     for t in tenantes:
@@ -773,7 +853,7 @@ def build_dialplan_xml(
 
         _append_call_limits_hook(context, t["max_call_minutes"])
         if t["record_all"]:
-            _append_recording_hook(context)
+            _append_recording_hook(context, t["tenant_id"])
         _append_dnd_feature_codes(context)
         _append_dnd_hook(context, extensions)
         _append_mobile_push_hook(context, extensions, t.get("push_extensions") or set(), slugs.get(t["tenant_id"], ""))
@@ -792,7 +872,7 @@ def build_dialplan_xml(
             context,
             trunks,
             slugs,
-            t.get("allow_international", False),
+            t.get("politica"),
             t.get("max_concurrent", 0),
             slugs.get(t["tenant_id"], t.get("slug", "")),
             t.get("outbound_routes") or [],
@@ -802,13 +882,16 @@ def build_dialplan_xml(
         if webcall_queue is not None:
             slug = slugs.get(t["tenant_id"], t.get("slug", ""))
             _append_webcall_context(
-                section, f"webcall_{slug}", webcall_queue, dominio, t["record_all"], t["max_call_minutes"]
+                section, f"webcall_{slug}", webcall_queue, dominio, t["record_all"], t["max_call_minutes"],
+                t["tenant_id"],
             )
 
     public_context = ET.SubElement(section, "context", attrib={"name": "public"})
     _append_call_limits_hook(public_context, max_minutes_public)
-    if record_public:
-        _append_recording_hook(public_context)
+    # Sin grabación acá: antes se grababa TODA entrante si CUALQUIER empresa
+    # tenía "grabar todo", así que una empresa que no graba quedaba grabada
+    # por la configuración de otra. La entrante se transfiere al contexto de
+    # su empresa, y ese ya graba (o no) según la empresa.
     _append_inbound_routes(public_context, routes or [], contextos, dominios)
 
     return validacion.limpiar_xml(ET.tostring(root, encoding="unicode"))

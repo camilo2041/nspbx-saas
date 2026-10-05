@@ -20,8 +20,12 @@ import {
   Td,
   Tr,
 } from "@/components/ui";
+import { AuditTable } from "@/components/audit-table";
+import { AvisosCsp } from "@/components/avisos-csp";
+import { ConsumoMensual } from "@/components/consumo-mensual";
+import { MoverEmpresa, ServidoresFreeswitch, nombreServidor } from "@/components/servidores-freeswitch";
 import { api } from "@/lib/api";
-import { Empresa, EmpresaCreada } from "@/lib/types";
+import { AlertaTrafico, Empresa, EmpresaCreada, NodoFreeswitch } from "@/lib/types";
 
 const vacio = { name: "", slug: "", sip_domain: "", subdomain: "", business_type: "general", modules: ["voicebot", "pbx"] as string[] };
 
@@ -64,7 +68,10 @@ const PLANES = [
   { value: "custom", label: "Personalizado" },
 ];
 
-const vacioLic = { plan: "trial", status: "trial", expires_at: "" };
+// `minutos` vacío = el del plan. Solo se envía si se cambió: la API
+// devuelve el límite efectivo, y reenviarlo tal cual lo dejaría fijo aunque
+// después se cambie de plan.
+const vacioLic = { plan: "trial", status: "trial", expires_at: "", minutos: "", minutosInicial: "", cps: "", cpsInicial: "" };
 
 function urlPanel(subdomain: string | null) {
   if (!subdomain) return null;
@@ -88,6 +95,16 @@ export default function EmpresasPage() {
   const [licTarget, setLicTarget] = useState<Empresa | null>(null);
   const [licForm, setLicForm] = useState(vacioLic);
   const [guardandoLic, setGuardandoLic] = useState(false);
+  const [globalCortado, setGlobalCortado] = useState<boolean | null>(null);
+  const [cambiandoGlobal, setCambiandoGlobal] = useState(false);
+  const [alertas, setAlertas] = useState<AlertaTrafico[]>([]);
+  // Destinos internacionales bloqueados para todas las empresas.
+  const [bloqueados, setBloqueados] = useState<{ prefijos: string; fijos: string[] } | null>(null);
+  const [textoBloqueados, setTextoBloqueados] = useState("");
+  const [guardandoBloqueados, setGuardandoBloqueados] = useState(false);
+  // Servidores FreeSWITCH (docs/escala.md §4).
+  const [nodos, setNodos] = useState<NodoFreeswitch[]>([]);
+  const [moverEmpresa, setMoverEmpresa] = useState<Empresa | null>(null);
 
   const abrirLicencia = (e: Empresa) => {
     const lic = e.licencia;
@@ -96,6 +113,10 @@ export default function EmpresasPage() {
       plan: lic?.plan ?? "trial",
       status: lic?.status ?? "trial",
       expires_at: lic?.expires_at ? lic.expires_at.slice(0, 10) : "",
+      minutos: lic?.max_outbound_minutes_day != null ? String(lic.max_outbound_minutes_day) : "",
+      minutosInicial: lic?.max_outbound_minutes_day != null ? String(lic.max_outbound_minutes_day) : "",
+      cps: lic?.max_outbound_cps != null ? String(lic.max_outbound_cps) : "",
+      cpsInicial: lic?.max_outbound_cps != null ? String(lic.max_outbound_cps) : "",
     });
   };
 
@@ -104,11 +125,18 @@ export default function EmpresasPage() {
     setGuardandoLic(true);
     setError("");
     try {
-      await api.put(`/api/tenants/${licTarget.id}/licencia`, {
+      const cuerpo: Record<string, unknown> = {
         plan: licForm.plan,
         status: licForm.status,
         expires_at: licForm.expires_at ? `${licForm.expires_at}T23:59:59` : null,
-      });
+      };
+      if (licForm.minutos.trim() !== licForm.minutosInicial) {
+        cuerpo.max_outbound_minutes_day = licForm.minutos.trim() === "" ? null : Number(licForm.minutos);
+      }
+      if (licForm.cps.trim() !== licForm.cpsInicial) {
+        cuerpo.max_outbound_cps = licForm.cps.trim() === "" ? null : Number(licForm.cps);
+      }
+      await api.put(`/api/tenants/${licTarget.id}/licencia`, cuerpo);
       setLicTarget(null);
       await load();
     } catch (e) {
@@ -118,17 +146,40 @@ export default function EmpresasPage() {
     }
   };
 
+  const cargarNodos = useCallback(async () => {
+    try {
+      setNodos(await api.get<NodoFreeswitch[]>("/api/plataforma/nodos"));
+    } catch {
+      setNodos([]);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(await api.get<Empresa[]>("/api/tenants"));
+      const [empresas, global] = await Promise.all([
+        api.get<Empresa[]>("/api/tenants"),
+        api.get<{ outbound_blocked: boolean }>("/api/plataforma/salientes"),
+      ]);
+      setItems(empresas);
+      setGlobalCortado(global.outbound_blocked);
+      // Informativo: si falla, la lista de empresas igual se muestra.
+      api.get<AlertaTrafico[]>("/api/plataforma/alertas").then(setAlertas).catch(() => setAlertas([]));
+      cargarNodos();
+      api
+        .get<{ prefijos: string; fijos: string[] }>("/api/plataforma/destinos-bloqueados")
+        .then((d) => {
+          setBloqueados(d);
+          setTextoBloqueados(d.prefijos.split(",").filter(Boolean).join(", "));
+        })
+        .catch(() => setBloqueados(null));
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cargarNodos]);
 
   useEffect(() => {
     load();
@@ -207,6 +258,69 @@ export default function EmpresasPage() {
 
   const set = <K extends keyof typeof vacio>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  // Controles de emergencia: cortan toda llamada saliente NUEVA al instante
+  // (dialplan, clic para llamar y campañas). Las que ya están hablando se
+  // cuelgan aparte (backend/app/services/emergencia.py): se pregunta enseguida,
+  // porque en un fraude son justo las que se están facturando.
+  const colgarEnCurso = async (ruta: string, quien: string) => {
+    if (!confirm(`Salientes cortadas. ¿Colgar también las llamadas salientes de ${quien} que están en curso ahora?`)) return;
+    try {
+      await api.post(ruta);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron colgar las llamadas en curso");
+    }
+  };
+
+  const cambiarSalientesEmpresa = async (e: Empresa) => {
+    const cortar = !e.outbound_blocked;
+    if (cortar && !confirm(`¿Cortar todas las llamadas salientes de ${e.name}? La empresa no podrá reactivarlas.`)) return;
+    try {
+      await api.put(`/api/tenants/${e.id}`, { outbound_blocked: cortar });
+      if (cortar) await colgarEnCurso(`/api/tenants/${e.id}/salientes/colgar`, e.name);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cambiar las salientes");
+    }
+  };
+
+  const guardarBloqueados = async () => {
+    setGuardandoBloqueados(true);
+    setError("");
+    try {
+      const d = await api.put<{ prefijos: string; fijos: string[] }>("/api/plataforma/destinos-bloqueados", { prefijos: textoBloqueados });
+      setBloqueados(d);
+      setTextoBloqueados(d.prefijos.split(",").filter(Boolean).join(", "));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron guardar los destinos bloqueados");
+    } finally {
+      setGuardandoBloqueados(false);
+    }
+  };
+
+  const cerrarSesionesEmpresa = async (e: Empresa) => {
+    if (!confirm(`¿Sacar a todos los usuarios de ${e.name} de todos sus equipos? Podrán volver a entrar con su contraseña (para impedirlo, desactiva la empresa).`)) return;
+    try {
+      await api.post(`/api/tenants/${e.id}/cerrar-sesiones`, {});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron cerrar las sesiones");
+    }
+  };
+
+  const cambiarSalientesGlobal = async () => {
+    const cortar = !globalCortado;
+    if (cortar && !confirm("¿Cortar las llamadas salientes de TODAS las empresas?")) return;
+    setCambiandoGlobal(true);
+    try {
+      const r = await api.put<{ outbound_blocked: boolean }>("/api/plataforma/salientes", { outbound_blocked: cortar });
+      setGlobalCortado(r.outbound_blocked);
+      if (cortar) await colgarEnCurso("/api/plataforma/salientes/colgar", "todas las empresas");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cambiar las salientes");
+    } finally {
+      setCambiandoGlobal(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -244,14 +358,87 @@ export default function EmpresasPage() {
         </div>
       )}
 
+      {globalCortado !== null && (
+        <div
+          className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${
+            globalCortado ? "border-danger/30 bg-danger-soft" : "border-line bg-surface-2"
+          }`}
+        >
+          <div>
+            <div className={`text-sm font-semibold ${globalCortado ? "text-danger-text" : "text-fg"}`}>
+              {globalCortado ? "Salientes cortadas en toda la plataforma" : "Salientes de la plataforma"}
+            </div>
+            <p className="mt-0.5 text-xs text-fg-soft">
+              Interruptor de emergencia: corta toda llamada saliente nueva de todas las empresas (fraude en curso,
+              problema con el proveedor).
+            </p>
+          </div>
+          <Button
+            variant={globalCortado ? "secondary" : "danger"}
+            loading={cambiandoGlobal}
+            onClick={cambiarSalientesGlobal}
+          >
+            {globalCortado ? "Reactivar salientes" : "Cortar todas las salientes"}
+          </Button>
+        </div>
+      )}
+
+      {bloqueados && (
+        <Card className="mb-4">
+          <CardHeader
+            title="Destinos bloqueados para todas las empresas"
+            subtitle="Códigos de país o prefijos internacionales (sin el +). Ninguna empresa los puede marcar, aunque los tenga entre sus países permitidos. Aplica desde la próxima llamada."
+          />
+          <div className="flex flex-wrap items-end gap-2 p-4">
+            <div className="min-w-60 flex-1">
+              <Input
+                label="Bloqueados por la plataforma"
+                value={textoBloqueados}
+                onChange={setTextoBloqueados}
+                placeholder="53, 7, 2346"
+                hint={`Siempre bloqueados, además: +${bloqueados.fijos.join(", +")} (satelitales y tarifas premium).`}
+                mono
+              />
+            </div>
+            <Button
+              onClick={guardarBloqueados}
+              loading={guardandoBloqueados}
+              disabled={textoBloqueados.replace(/[\s+]/g, "") === bloqueados.prefijos.replace(/[\s+]/g, "")}
+            >
+              Guardar
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {alertas.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader
+            title="Alertas de tráfico saliente"
+            subtitle="Las más recientes de todas las empresas. Avisan, no cortan: para cortar usa los botones de salientes."
+          />
+          <Table head={["Cuándo", "Empresa", "Detalle"]}>
+            {alertas.slice(0, 20).map((a) => (
+              <Tr key={a.id}>
+                <Td muted>{new Date(a.cuando + "Z").toLocaleString()}</Td>
+                <Td strong>{a.empresa}</Td>
+                <Td>{a.detalle}</Td>
+              </Tr>
+            ))}
+          </Table>
+        </Card>
+      )}
+
+      {nodos.length > 0 && <ServidoresFreeswitch nodos={nodos} onCambio={load} />}
+
       <Card>
         <CardHeader title="Empresas" subtitle={`${items.length} en la plataforma`} />
         {loading ? (
-          <TableSkeleton cols={6} />
+          <TableSkeleton cols={8} />
         ) : items.length === 0 ? (
           <EmptyState title="No hay empresas" hint="Crea la primera para empezar a operar." action={<Button onClick={abrirCrear}>+ Nueva empresa</Button>} />
         ) : (
-          <Table head={["Nombre", "Tipo", "Módulos", "Licencia", "Subdominio", "Usuarios", "Estado"]}>
+          <Table head={["Nombre", "Tipo", "Módulos", "Licencia", "Subdominio", "Servidor", "Usuarios", "Estado"]}>
             {items.map((e) => {
               const url = urlPanel(e.subdomain);
               const tipo = TIPO_ETIQUETA[e.business_type] ?? TIPO_ETIQUETA.general;
@@ -296,12 +483,34 @@ export default function EmpresasPage() {
                       <span className="text-faint">—</span>
                     )}
                   </Td>
+                  <Td>
+                    <button
+                      type="button"
+                      onClick={() => setMoverEmpresa(e)}
+                      className="rounded-full border border-line px-2 py-0.5 font-mono text-xs text-fg-soft transition-colors hover:border-line-strong hover:bg-surface-2"
+                      title="Cambiar de servidor FreeSWITCH"
+                    >
+                      {nombreServidor(nodos, e.nodo_id)}
+                    </button>
+                  </Td>
                   <Td>{e.users_count}</Td>
                   <Td>
                     <div className="flex items-center gap-2">
                       <Badge color={e.enabled ? "green" : "red"} dot>
                         {e.enabled ? "Activa" : "Inactiva"}
                       </Badge>
+                      {e.outbound_blocked && <Badge color="red">Salientes cortadas</Badge>}
+                      <Button
+                        size="sm"
+                        variant={e.outbound_blocked ? "secondary" : "ghost"}
+                        onClick={() => cambiarSalientesEmpresa(e)}
+                        title="Cortar o reactivar las llamadas salientes de esta empresa"
+                      >
+                        {e.outbound_blocked ? "Reactivar salientes" : "Cortar salientes"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => cerrarSesionesEmpresa(e)} title="Saca a todos sus usuarios de todos sus equipos">
+                        Cerrar sesiones
+                      </Button>
                       <Button size="sm" variant="secondary" onClick={() => abrirEditar(e)}>
                         Editar
                       </Button>
@@ -438,6 +647,20 @@ export default function EmpresasPage() {
             onChange={(v) => setLicForm((f) => ({ ...f, expires_at: v }))}
             hint="Vacío = sin vencimiento."
           />
+          <Input
+            label="Minutos salientes por día"
+            type="number"
+            value={licForm.minutos}
+            onChange={(v) => setLicForm((f) => ({ ...f, minutos: v }))}
+            hint="Al llegar se cortan las salientes hasta medianoche. Vacío = el del plan (Prueba 60, Gratis 120, Pro 5000, Enterprise sin tope)."
+          />
+          <Input
+            label="Llamadas salientes por segundo"
+            type="number"
+            value={licForm.cps}
+            onChange={(v) => setLicForm((f) => ({ ...f, cps: v }))}
+            hint="Freno de fraude: las que pasan de este ritmo se rechazan (teléfonos y clic para llamar; las campañas van por su concurrencia). Vacío = el del plan (Prueba y Gratis 1, Pro 5, Enterprise 10)."
+          />
           <div className="rounded-xl border border-line bg-surface-2 p-3 text-xs text-fg-soft">
             <div className="mb-1 font-medium text-fg">Límites del plan</div>
             {licTarget?.licencia && (
@@ -446,6 +669,8 @@ export default function EmpresasPage() {
                 <span>Troncales: <b className="text-fg">{licTarget.licencia.max_trunks ?? "∞"}</b></span>
                 <span>Concurrentes: <b className="text-fg">{licTarget.licencia.max_concurrent_calls ?? "∞"}</b></span>
                 <span>Campañas: <b className="text-fg">{licTarget.licencia.max_campaigns ?? "∞"}</b></span>
+                <span>Min. salientes/día: <b className="text-fg">{licTarget.licencia.max_outbound_minutes_day ?? "∞"}</b></span>
+                <span>Salientes/segundo: <b className="text-fg">{licTarget.licencia.max_outbound_cps ?? "∞"}</b></span>
               </div>
             )}
             <p className="mt-2 text-faint">
@@ -455,6 +680,14 @@ export default function EmpresasPage() {
           </div>
         </div>
       </Modal>
+      <MoverEmpresa empresa={moverEmpresa} nodos={nodos} onCerrar={() => setMoverEmpresa(null)} onCambio={load} />
+      <ConsumoMensual plataforma />
+      <AvisosCsp />
+      <AuditTable
+        endpoint="/api/plataforma/auditoria"
+        title="Auditoría de la plataforma"
+        subtitle="Acciones de todas las empresas y de la plataforma, incluidos los intentos de acceso fallidos."
+      />
     </div>
   );
 }

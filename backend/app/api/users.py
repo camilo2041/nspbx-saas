@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import usuario_out
 from app.core import permissions
 from app.core.auth import requiere, usuario_actual
-from app.core.database import get_session
+from app.core.database import get_session, traer_propio
 from app.core.security import hash_password
 from app.services.sesiones import revocar_sesiones
 from app.models import Extension, User
@@ -32,7 +32,7 @@ async def _validar_extension(session: AsyncSession, rol: str, extension_id: int 
         if rol in permissions.REQUIERE_EXTENSION:
             raise HTTPException(status_code=400, detail="Un asesor necesita una extensión asignada")
         return
-    if not await session.get(Extension, extension_id):
+    if not await traer_propio(session, Extension, extension_id):
         raise HTTPException(status_code=400, detail="La extensión indicada no existe")
 
 
@@ -117,7 +117,7 @@ async def actualizar(
     session: AsyncSession = Depends(get_session),
     quien: User = Depends(usuario_actual),
 ):
-    usuario = await session.get(User, user_id)
+    usuario = await traer_propio(session, User, user_id)
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
@@ -167,7 +167,7 @@ async def eliminar(
     session: AsyncSession = Depends(get_session),
     quien: User = Depends(usuario_actual),
 ):
-    usuario = await session.get(User, user_id)
+    usuario = await traer_propio(session, User, user_id)
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     if usuario.id == quien.id:
@@ -178,3 +178,45 @@ async def eliminar(
     await session.delete(usuario)
     await session.commit()
     logger.info("Usuario %s eliminado por %s", usuario.username, quien.username)
+
+
+@router.post("/{user_id}/cerrar-sesiones", status_code=status.HTTP_204_NO_CONTENT)
+async def cerrar_sesiones_de(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+    quien: User = Depends(usuario_actual),
+):
+    """Saca a un usuario de todos sus equipos (app y panel) sin cambiarle la
+    contraseña: un celular de la empresa que se perdió, alguien que se va."""
+    usuario = await traer_propio(session, User, user_id)
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    await revocar_sesiones(session, usuario)
+    await session.commit()
+    logger.warning("Sesiones de %s cerradas por %s", usuario.username, quien.username)
+
+
+@router.post("/{user_id}/mfa/reset", response_model=UserOut)
+async def restablecer_mfa(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+    quien: User = Depends(usuario_actual),
+):
+    """Para quien perdió el teléfono y los códigos de recuperación: borra
+    su verificación en dos pasos y cierra sus sesiones. Si su rol la exige,
+    la vuelve a configurar al entrar. No sirve sobre la propia cuenta: así
+    una sesión robada no puede quitarse el segundo paso."""
+    usuario = await traer_propio(session, User, user_id)
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    if usuario.id == quien.id:
+        raise HTTPException(status_code=400, detail="No puedes restablecer tu propia verificación en dos pasos")
+    usuario.mfa_enabled = False
+    usuario.mfa_secret = None
+    usuario.mfa_recovery = None
+    usuario.mfa_last_step = None
+    await revocar_sesiones(session, usuario)
+    await session.commit()
+    await session.refresh(usuario)
+    logger.warning("Verificación en dos pasos de %s restablecida por %s", usuario.username, quien.username)
+    return usuario_out(usuario)

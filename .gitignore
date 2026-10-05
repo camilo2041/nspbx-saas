@@ -90,3 +90,6 @@ desktop.ini
 # Claves privadas (Firebase, APNs): nunca al repositorio
 secrets/
 mobile/google-services.json
+
+# Mediciones de scripts/medir-recursos.sh
+recursos-*.csv

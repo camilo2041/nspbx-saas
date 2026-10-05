@@ -197,3 +197,46 @@ def moh_valido(valor: str | None) -> bool:
     if valor == MOH_POR_DEFECTO:
         return True
     return bool(isinstance(valor, str) and _MOH_RE.fullmatch(valor) and ".." not in valor)
+
+
+# --- Contraseñas SIP ------------------------------------------------------
+# Los escáneres de Internet (sipvicious y similares) prueban, para cada
+# extensión, el propio número, secuencias y una lista corta de claves
+# típicas. Una extensión con clave débil es la puerta de entrada del
+# fraude telefónico: desde ahí se marca al exterior a nombre de la empresa.
+LARGO_MINIMO_CLAVE_SIP = 12
+_CLAVES_SIP_COMUNES = {
+    "password", "password1", "password123", "contraseña", "contrasena", "admin", "admin123",
+    "qwerty", "qwerty123", "abc123", "secret", "secreto", "changeme", "welcome", "letmein",
+    "1234", "12345", "123456", "1234567", "12345678", "123456789", "1234567890",
+}
+
+
+def problema_clave_sip(clave: str | None, numero: str | None = None) -> str | None:
+    """Por qué `clave` no sirve como contraseña SIP, o None si sirve."""
+    clave = clave or ""
+    if len(clave) < LARGO_MINIMO_CLAVE_SIP:
+        return f"La contraseña SIP debe tener al menos {LARGO_MINIMO_CLAVE_SIP} caracteres"
+    if clave.isdigit():
+        return "La contraseña SIP no puede ser solo números: es lo primero que prueban los escáneres"
+    minuscula = clave.lower()
+    if numero and numero in clave:
+        return "La contraseña SIP no puede contener el número de la extensión"
+    if minuscula in _CLAVES_SIP_COMUNES or any(minuscula.startswith(c) and len(c) >= 6 for c in _CLAVES_SIP_COMUNES):
+        return "La contraseña SIP es de las que prueban los escáneres"
+    if len(set(clave)) < 6:
+        return "La contraseña SIP repite demasiados caracteres"
+    return None
+
+
+def generar_clave_sip() -> str:
+    """20 caracteres alfanuméricos al azar: fuertes y sin símbolos que
+    algunos teléfonos no dejan escribir."""
+    import secrets
+    import string
+
+    alfabeto = string.ascii_letters + string.digits
+    while True:
+        clave = "".join(secrets.choice(alfabeto) for _ in range(20))
+        if problema_clave_sip(clave) is None:
+            return clave

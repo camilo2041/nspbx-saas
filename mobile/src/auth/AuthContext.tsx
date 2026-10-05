@@ -42,6 +42,8 @@ interface AuthCtx {
   usuario: UsuarioOut | null;
   permisos: string[];
   puede: (permiso: string) => boolean;
+  /** Paquetes que tiene contratados la empresa ("pbx", "voicebot"). */
+  tieneModulo: (modulo: string) => boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 
@@ -73,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [cargando, setCargando] = useState(true);
   const [usuario, setUsuario] = useState<UsuarioOut | null>(null);
   const [permisos, setPermisos] = useState<string[]>([]);
+  const [modulos, setModulos] = useState<string[]>([]);
   const [bioDisponible, setBioDisponible] = useState(false);
   const [bioActiva, setBioActiva] = useState(false);
   const [bloqueada, setBloqueada] = useState(false);
@@ -87,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const aplicarSesion = (sesion: SesionOut) => {
     setUsuario(sesion.usuario);
     setPermisos(sesion.permisos);
+    setModulos(sesion.modulos ?? []);
     setAvisoAcceso("");
   };
 
@@ -94,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     vaciarCache(); // nada del usuario anterior (listas, conversación del asistente) debe verse en la sesión siguiente
     setUsuario(null);
     setPermisos([]);
+    setModulos([]);
   };
 
   // Si el servidor rechaza renovar la sesión, se vuelve al login en lugar de
@@ -266,6 +271,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const puede = useCallback((permiso: string) => permisos.includes(permiso), [permisos]);
+  const tieneModulo = useCallback((modulo: string) => modulos.includes(modulo), [modulos]);
 
   const value = useMemo(
     () => ({
@@ -273,6 +279,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       usuario,
       permisos,
       puede,
+      tieneModulo,
       login,
       logout,
       bioDisponible,
@@ -291,6 +298,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       usuario,
       permisos,
       puede,
+      tieneModulo,
       login,
       logout,
       bioDisponible,

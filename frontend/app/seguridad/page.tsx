@@ -14,7 +14,19 @@ import {
   Td,
   Tr,
 } from "@/components/ui";
+import { AuditTable } from "@/components/audit-table";
+import { ClavesApi } from "@/components/claves-api";
+import { WebhooksCrm } from "@/components/webhooks-crm";
+import { PrivacidadTitular } from "@/components/privacidad-titular";
 import { api } from "@/lib/api";
+import { AlertaTrafico } from "@/lib/types";
+
+const TIPO_ALERTA: Record<string, string> = {
+  pico: "Pico de salientes",
+  madrugada: "Salientes de madrugada",
+  destino_nuevo: "Destino internacional nuevo",
+  cupo: "Cerca del cupo diario",
+};
 
 interface Bloqueo {
   jail: string;
@@ -24,6 +36,12 @@ interface Bloqueo {
   segundos: number;
   veces: number;
   vigente: boolean;
+}
+
+interface ClaveDebil {
+  id: number;
+  number: string;
+  motivo: string;
 }
 
 interface Datos {
@@ -59,6 +77,14 @@ export default function SeguridadPage() {
   const [datos, setDatos] = useState<Datos | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [debiles, setDebiles] = useState<ClaveDebil[] | null>(null);
+  const [alertas, setAlertas] = useState<AlertaTrafico[] | null>(null);
+
+  useEffect(() => {
+    // Independiente de fail2ban: aunque no se pueda leer, esto sí.
+    api.get<ClaveDebil[]>("/api/security/claves-debiles").then(setDebiles).catch(() => setDebiles(null));
+    api.get<AlertaTrafico[]>("/api/security/alertas").then(setAlertas).catch(() => setAlertas(null));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -115,6 +141,45 @@ export default function SeguridadPage() {
         <div className="mb-4">
           <ErrorBanner message={error} onClose={() => setError("")} />
         </div>
+      )}
+
+      {alertas && alertas.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader
+            title="Alertas de tráfico saliente"
+            subtitle="Avisan, no cortan. Si no reconoces el tráfico, pausa las salientes en Ajustes y revisa las extensiones."
+          />
+          <Table head={["Cuándo", "Tipo", "Detalle"]}>
+            {alertas.map((a) => (
+              <Tr key={a.id}>
+                <Td muted>{new Date(a.cuando + "Z").toLocaleString()}</Td>
+                <Td>
+                  <Badge color="amber">{TIPO_ALERTA[a.tipo] ?? a.tipo}</Badge>
+                </Td>
+                <Td>{a.detalle}</Td>
+              </Tr>
+            ))}
+          </Table>
+        </Card>
+      )}
+
+      {debiles && debiles.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader
+            title="Contraseñas SIP débiles"
+            subtitle={`${debiles.length} extensión(es) con una contraseña que los escáneres de Internet adivinan. Cámbialas en Extensiones.`}
+          />
+          <Table head={["Extensión", "Problema"]}>
+            {debiles.map((d) => (
+              <Tr key={d.id}>
+                <Td mono strong>
+                  {d.number}
+                </Td>
+                <Td>{d.motivo}</Td>
+              </Tr>
+            ))}
+          </Table>
+        </Card>
       )}
 
       {loading ? (
@@ -181,6 +246,14 @@ export default function SeguridadPage() {
           </Card>
         </div>
       )}
+      <PrivacidadTitular />
+      <ClavesApi />
+      <WebhooksCrm />
+      <AuditTable
+        endpoint="/api/security/auditoria"
+        title="Registro de auditoría"
+        subtitle="Cada cambio y cada escucha de grabación: quién, cuándo, desde dónde y con qué resultado. Las contraseñas y claves no se guardan."
+      />
     </div>
   );
 }

@@ -168,10 +168,26 @@ RUN ldconfig
 
 ENV PATH=/usr/local/freeswitch/bin:$PATH
 
+# FreeSWITCH corre como `freeswitch` (uid 10001, el mismo del backend: ver
+# entrypoint.sh). Las carpetas donde escribe y que viven dentro de la imagen
+# se crean acá con ese dueño; las montadas las ajusta el entrypoint.
+RUN groupadd --system --gid 10001 freeswitch \
+    && useradd --system --uid 10001 --gid freeswitch --no-create-home --shell /usr/sbin/nologin freeswitch \
+    && mkdir -p /var/lib/freeswitch/db /var/lib/freeswitch/storage /var/lib/freeswitch/cache \
+        /var/lib/freeswitch/recordings /var/log/freeswitch /var/run/freeswitch /usr/local/freeswitch/certs \
+    && chown -R freeswitch:freeswitch /var/lib/freeswitch /var/log/freeswitch /var/run/freeswitch \
+        /usr/local/freeswitch/certs \
+    && mkdir -p /tmp && chmod 1777 /tmp
+# /tmp escribible por el usuario (1777): mod_xml_curl baja ahí cada
+# respuesta del backend (directorio y dialplan). Sin eso no se registra ni
+# llama nadie. La base Debian ya lo trae así; se fija igual para no
+# depender de la imagen base.
+COPY entrypoint.sh /usr/local/bin/nspbx-entrypoint.sh
+
 EXPOSE 5060/udp 5060/tcp 5080/udp 8021 5066 7443
 EXPOSE 16384-16584/udp
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/nspbx-entrypoint.sh"]
 # El binario NO respeta --sysconfdir/--localstatedir/--datadir de ./configure
 # para su búsqueda de config en tiempo de ejecución (esos flags solo influyen
 # en cómo `make install` coloca los archivos) — sin esto arrancaba leyendo
@@ -179,9 +195,20 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 # de ahí "Cannot get information about IP address ::" en mod_event_socket)
 # en vez de la config real montada. -conf/-recordings/-sounds fuerzan las
 # rutas que ya usan docker-compose.yml y el backend.
+#
+# -u/-g: FreeSWITCH deja de ser root apenas arranca, antes de cargar
+# módulos y abrir puertos (todos son > 1024). -run/-storage/-cache llevan a
+# carpetas de ese usuario lo que antes caía en /usr/local/freeswitch, de root.
+# -certs explícito: es donde se monta ./freeswitch/certs (wss.pem) y donde
+# lo deja scripts/renovar-cert-wss.sh; antes dependía del prefijo de compilación.
 CMD ["freeswitch", "-nonat", "-nc", "-nf", \
+     "-u", "freeswitch", "-g", "freeswitch", \
      "-conf", "/etc/freeswitch", \
      "-log", "/var/log/freeswitch", \
      "-db", "/var/lib/freeswitch/db", \
+     "-run", "/var/run/freeswitch", \
+     "-storage", "/var/lib/freeswitch/storage", \
+     "-cache", "/var/lib/freeswitch/cache", \
+     "-certs", "/usr/local/freeswitch/certs", \
      "-recordings", "/var/lib/freeswitch/recordings", \
      "-sounds", "/usr/share/freeswitch/sounds"]

@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import { borrarSesion, guardar, leer } from "./storage";
 import type { SesionOut } from "./types";
 
@@ -90,6 +91,10 @@ export class ApiError extends Error {
 function mensajeDe(cuerpo: unknown, respaldo: string): string {
   const detalle = (cuerpo as { detail?: unknown } | null)?.detail;
   if (typeof detalle === "string" && detalle) return detalle;
+  // Detalle con datos extra (p. ej. el contacto que ya existe): el texto va en «mensaje».
+  if (detalle && typeof detalle === "object" && typeof (detalle as { mensaje?: unknown }).mensaje === "string") {
+    return (detalle as { mensaje: string }).mensaje;
+  }
   if (Array.isArray(detalle) && detalle.length) {
     const primero = detalle[0] as { msg?: string };
     if (primero?.msg) return primero.msg;
@@ -149,7 +154,7 @@ async function refrescarSesion(): Promise<"ok" | "rechazado" | "red"> {
  * mandar a la persona a loguearse de nuevo cada 8 horas. */
 export async function peticion<T>(
   path: string,
-  opciones: { method?: string; body?: unknown } = {}
+  opciones: { method?: string; body?: unknown; /** Devuelve el cuerpo como texto (CSV). */ texto?: boolean } = {}
 ): Promise<T> {
   const hacer = async (): Promise<Response> =>
     conTiempo(`${SERVIDOR_FIJO.apiBase}${path}`, {
@@ -171,6 +176,33 @@ export async function peticion<T>(
     throw new ApiError(mensajeDe(cuerpo, `Error ${resp.status}`), resp.status);
   }
   if (resp.status === 204) return undefined as T;
+  if (opciones.texto) return (await resp.text()) as T;
+  return resp.json() as Promise<T>;
+}
+
+/** Formulario con archivo (multipart), con el mismo refresco de sesión que
+ * `peticion`. El archivo va como {uri, name, type}, que es como lo entiende
+ * el fetch de React Native. Más tiempo que una petición normal: un CSV
+ * grande tarda en procesarse. */
+export async function subirFormulario<T>(path: string, campos: Record<string, string | { uri: string; name: string; type: string }>): Promise<T> {
+  const hacer = async (): Promise<Response> => {
+    const datos = new FormData();
+    for (const [k, v] of Object.entries(campos)) datos.append(k, v as unknown as Blob);
+    return conTiempo(
+      `${SERVIDOR_FIJO.apiBase}${path}`,
+      { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: datos },
+      120_000
+    );
+  };
+  let resp = await hacer();
+  if (resp.status === 401 && refreshToken) {
+    const resultado = await refrescarSesion();
+    if (resultado === "ok") resp = await hacer();
+  }
+  if (!resp.ok) {
+    const cuerpo = await resp.json().catch(() => null);
+    throw new ApiError(mensajeDe(cuerpo, `Error ${resp.status}`), resp.status);
+  }
   return resp.json() as Promise<T>;
 }
 
@@ -183,12 +215,21 @@ export async function peticion<T>(
 export async function verificarCredenciales(
   servidor: ServidorConfigurado,
   username: string,
-  password: string
+  password: string,
+  soloComprobar = false
 ): Promise<SesionOut> {
   const resp = await conTiempo(`${servidor.apiBase}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, subdomain: servidor.subdomain }),
+    body: JSON.stringify({
+      username,
+      password,
+      subdomain: servidor.subdomain,
+      // Para solo comprobar la contraseña se pide como el panel web: así el
+      // servidor no crea una sesión de la app que habría que revocar.
+      plataforma: soloComprobar ? "web" : Platform.OS === "ios" ? "ios" : "android",
+      dispositivo: soloComprobar ? undefined : nombreDelEquipo(),
+    }),
   });
   const cuerpo = await resp.json().catch(() => null);
   if (!resp.ok) throw new ApiError(mensajeDe(cuerpo, "No se pudo iniciar sesión"), resp.status);
@@ -209,8 +250,21 @@ async function revocarRefresh(refresh: string | null): Promise<void> {
 }
 
 export async function verificarSoloContrasena(servidor: ServidorConfigurado, username: string, password: string): Promise<void> {
-  const sesion = await verificarCredenciales(servidor, username, password);
+  const sesion = await verificarCredenciales(servidor, username, password, true);
+  // Un servidor viejo igual entrega un refresh token: se revoca.
   await revocarRefresh(sesion.refresh_token);
+}
+
+/** "Samsung SM-A515F · Android 13" o "iPhone · iOS 17.5": lo que la persona
+ *  ve en Mi cuenta → Sesiones para reconocer el equipo. */
+function nombreDelEquipo(): string {
+  const k = Platform.constants as unknown as Record<string, string | number | undefined>;
+  if (Platform.OS === "android") {
+    const marca = String(k.Brand ?? "").replace(/^./, (x) => x.toUpperCase());
+    return `${[marca, k.Model].filter(Boolean).join(" ") || "Android"} · Android ${k.Release ?? Platform.Version}`.slice(0, 150);
+  }
+  const equipo = Platform.OS === "ios" ? (Platform.isPad ? "iPad" : "iPhone") : "Equipo";
+  return `${equipo} · iOS ${k.osVersion ?? Platform.Version}`.slice(0, 150);
 }
 
 export async function iniciarSesion(

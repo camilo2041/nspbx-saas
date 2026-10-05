@@ -1,0 +1,128 @@
+# Verificación de cada push y de cada pull request.
+#
+# Las pruebas del backend corren contra un Postgres 16 real con
+# Row-Level Security activo: el aislamiento entre empresas es justamente lo
+# que hace Postgres, así que no se puede probar con SQLite ni con mocks.
+# Ver backend/tests/conftest.py y docs/seguridad-y-robustez.md (sección 7).
+#
+# Regla: no se despliega con este workflow en rojo.
+name: CI
+
+on:
+  push:
+  pull_request:
+  # Una vez por semana aunque nadie empuje: una vulnerabilidad nueva en una
+  # dependencia aparece sin que el código cambie.
+  schedule:
+    - cron: "17 11 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Pruebas del backend (aislamiento, rutas, fallo seguro)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nspbx_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/nspbx_test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # La misma versión que la imagen (backend/Dockerfile).
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Pruebas con RLS (como en producción)
+        run: python -m pytest -q
+      # La misma suite con la API usando el rol dueño, que se saltea RLS:
+      # comprueba que la segunda capa (el filtro por empresa en el código,
+      # core/database.py) aísla por sí sola. Si la base quedara mal
+      # configurada, la API igual no mezclaría empresas.
+      - name: Pruebas sin RLS (solo el filtro de la aplicación)
+        env:
+          NSPBX_TEST_SIN_RLS: "1"
+        run: python -m pytest -q
+
+  secretos:
+    name: Secretos en el repositorio (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Historial completo: un secreto borrado en un commit posterior
+          # sigue siendo un secreto filtrado.
+          fetch-depth: 0
+      - name: Instalar gitleaks
+        env:
+          VERSION: 8.24.3
+          SHA256: 9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c
+        run: |
+          curl -sSfL -o gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  gitleaks.tgz" | sha256sum -c -
+          tar xzf gitleaks.tgz gitleaks
+      # Los hallazgos ya revisados están en .gitleaksignore, cada uno con
+      # su motivo.
+      - run: ./gitleaks git . --redact --no-banner --exit-code 1
+
+  dependencias:
+    name: Dependencias con vulnerabilidades conocidas
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit==2.10.1
+      # Sin excepciones: las del backend se actualizan.
+      - run: pip-audit -r backend/requirements.txt --progress-spinner off
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # npm audit lee el lockfile; las excepciones aceptadas (con motivo y
+      # fecha de revisión) están en <carpeta>/audit-aceptadas.json.
+      - run: node scripts/auditar-npm.mjs frontend
+      - run: node scripts/auditar-npm.mjs mobile
+
+  movil:
+    name: App móvil (tipos y colores iguales al panel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      # La app y el panel web tienen que verse como un solo producto.
+      - run: node scripts/verificar-tokens.js
+      - run: npm ci
+      - run: npx tsc --noEmit

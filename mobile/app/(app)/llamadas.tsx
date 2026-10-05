@@ -5,12 +5,14 @@ import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
 import type { CallLogOut } from "@/src/api/types";
 import { useContactos, type ContactoTel } from "@/src/contactos";
 import { useDatos } from "@/src/datos";
+import { SelectorFecha, tiempoCorto } from "@/src/fecha";
 import { useFavoritos } from "@/src/favoritos";
 import { Aviso, AvisoSinConexion, Avatar, Buscador, EstadoVacio, FiltroChips, Fila, Hoja, ListaEsqueleto } from "@/src/gestion";
 import { impacto, toque } from "@/src/haptico";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
-import { colores, radios } from "@/src/tema";
-import { Boton } from "@/src/ui";
+import { Icono } from "@/src/Icono";
+import { useColores } from "@/src/tema";
+import { Boton, BotonIcono, CajaIcono, Segmentado } from "@/src/ui";
 
 type Vista = "recientes" | "contactos" | "favoritos";
 type Tipo = "todas" | "inbound" | "outbound" | "perdidas";
@@ -41,11 +43,13 @@ const numeroContrario = (c: CallLogOut) => (c.direction === "inbound" ? c.caller
 type Item = { tipo: "cab"; clave: string; titulo: string } | { tipo: "llamada"; clave: string; c: CallLogOut };
 
 function Recientes({ llamar }: { llamar: (n: string) => void }) {
+  const col = useColores();
   const router = useRouter();
   const [tipo, setTipo] = useState<Tipo>("todas");
   const [q, setQ] = useState("");
   const [busqueda, setBusqueda] = useState("");
   const [limite, setLimite] = useState(100);
+  const [dia, setDia] = useState("");
 
   // Espera a que la persona deje de escribir para no pedir al servidor en cada tecla.
   useEffect(() => {
@@ -54,7 +58,7 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
   }, [q]);
 
   const direccion = tipo === "inbound" || tipo === "perdidas" ? "&direction=inbound" : tipo === "outbound" ? "&direction=outbound" : "";
-  const path = `/api/calls?limit=${limite}${direccion}${busqueda ? `&search=${encodeURIComponent(busqueda)}` : ""}`;
+  const path = `/api/calls?limit=${limite}${direccion}${busqueda ? `&search=${encodeURIComponent(busqueda)}` : ""}${dia ? `&day=${dia}` : ""}`;
   const { datos, cargando, refrescando, error, sinConexion, recargar } = useDatos<CallLogOut[]>(path, { ttl: 15_000 });
 
   const items = useMemo<Item[]>(() => {
@@ -86,6 +90,7 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
           { valor: "outbound", etiqueta: "Salientes" },
         ]}
       />
+      <SelectorFecha etiqueta="Día" valor={dia} onChange={setDia} conHora={false} opcional />
       {sinConexion ? <AvisoSinConexion /> : null}
       {error && !datos ? <Aviso texto={error} /> : null}
       {cargando && !datos ? <ListaEsqueleto /> : null}
@@ -98,7 +103,7 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
       keyExtractor={(i) => i.clave}
       ListHeaderComponent={cabecera}
       contentContainerStyle={{ padding: 16, paddingBottom: 130, gap: 8 }}
-      refreshControl={<RefreshControl refreshing={refrescando} onRefresh={recargar} tintColor={colores.marca} colors={[colores.marca]} />}
+      refreshControl={<RefreshControl refreshing={refrescando} onRefresh={recargar} tintColor={col.marca} colors={[col.marca]} />}
       initialNumToRender={12}
       windowSize={9}
       removeClippedSubviews
@@ -106,9 +111,9 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
       ListEmptyComponent={
         datos ? (
           <EstadoVacio
-            icono="📞"
-            titulo={busqueda || tipo !== "todas" ? "Sin resultados" : "Aún no hay llamadas"}
-            texto={busqueda || tipo !== "todas" ? "Prueba con otro filtro." : "Aquí aparecerán las llamadas que hagas y recibas."}
+            icono="historial"
+            titulo={busqueda || dia || tipo !== "todas" ? "Sin resultados" : "Aún no hay llamadas"}
+            texto={busqueda || dia || tipo !== "todas" ? "Prueba con otro filtro." : "Aquí aparecerán las llamadas que hagas y recibas."}
           />
         ) : null
       }
@@ -121,29 +126,36 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
       }
       renderItem={({ item }) => {
         if (item.tipo === "cab") {
-          return <Text style={{ fontSize: 12, fontWeight: "700", color: colores.textoSecundario, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 8 }}>{item.titulo}</Text>;
+          return <Text style={{ fontSize: 12, fontWeight: "700", color: col.textoSecundario, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 8 }}>{item.titulo}</Text>;
         }
         const c = item.c;
         const d = aFecha(c.started_at);
         const perdida = esPerdida(c);
         const nombre = (c.direction === "inbound" ? c.caller_name : null) || numeroContrario(c) || "Desconocido";
-        const flecha = c.direction === "inbound" ? "↙" : "↗";
+        const sentido = perdida ? "Perdida" : c.direction === "inbound" ? "Entrante" : "Saliente";
         return (
           <Fila
             titulo={nombre}
-            subtitulo={`${flecha} ${d ? hora(d) : ""}${c.billsec > 0 ? " · " + duracion(c.billsec) : ""}${perdida ? " · Perdida" : ""}`}
-            izquierda={<Avatar nombre={nombre} />}
+            subtitulo={`${sentido} · ${d ? hora(d) : ""}${c.billsec > 0 ? " · " + duracion(c.billsec) : ""}${
+              c.ring_ms !== null && c.ring_ms !== undefined ? " · ring " + tiempoCorto(c.ring_ms / 1000) : ""
+            }`}
+            izquierda={
+              <CajaIcono
+                icono={perdida ? "perdida" : c.direction === "inbound" ? "entrante" : "saliente"}
+                tono={perdida ? "peligro" : c.direction === "inbound" ? "info" : "ok"}
+              />
+            }
             derecha={
-              <Pressable
+              <BotonIcono
+                icono="telefono"
+                etiqueta={`Llamar a ${nombre}`}
+                tono="ok"
+                tam={38}
                 onPress={() => {
                   impacto();
                   llamar(numeroContrario(c));
                 }}
-                hitSlop={10}
-                style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: colores.okSuave, alignItems: "center", justifyContent: "center" }}
-              >
-                <Text style={{ fontSize: 17 }}>📞</Text>
-              </Pressable>
+              />
             }
             onPress={() => router.push({ pathname: "/llamada/[id]", params: { id: String(c.id) } })}
           />
@@ -154,6 +166,7 @@ function Recientes({ llamar }: { llamar: (n: string) => void }) {
 }
 
 function Contactos({ llamar }: { llamar: (n: string) => void }) {
+  const col = useColores();
   const { estado, contactos, pedirPermiso } = useContactos(true);
   const { esFavorito, alternar } = useFavoritos();
   const [q, setQ] = useState("");
@@ -168,7 +181,7 @@ function Contactos({ llamar }: { llamar: (n: string) => void }) {
   if (estado === "sin-permiso" || estado === "denegado") {
     return (
       <EstadoVacio
-        icono="📇"
+        icono="contactos"
         titulo="Llama a tus contactos"
         texto={
           estado === "denegado"
@@ -180,7 +193,7 @@ function Contactos({ llamar }: { llamar: (n: string) => void }) {
     );
   }
   if (estado === "revisando" || estado === "cargando") return <View style={{ padding: 16 }}><ListaEsqueleto filas={6} /></View>;
-  if (estado === "error") return <EstadoVacio icono="⚠️" titulo="No se pudieron leer los contactos" texto="Cierra y vuelve a abrir la app, o revisa el permiso." />;
+  if (estado === "error") return <EstadoVacio icono="alerta" titulo="No se pudieron leer los contactos" texto="Cierra y vuelve a abrir la app, o revisa el permiso." />;
 
   const marcar = (c: ContactoTel) => {
     if (c.numeros.length === 1) llamar(c.numeros[0].numero);
@@ -198,7 +211,7 @@ function Contactos({ llamar }: { llamar: (n: string) => void }) {
         windowSize={9}
         removeClippedSubviews
         keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={<EstadoVacio icono="📇" titulo={q ? "Sin resultados" : "No hay contactos con número"} />}
+        ListEmptyComponent={<EstadoVacio icono="contactos" titulo={q ? "Sin resultados" : "No hay contactos con número"} />}
         renderItem={({ item: c }) => (
           <Fila
             titulo={c.nombre}
@@ -207,12 +220,18 @@ function Contactos({ llamar }: { llamar: (n: string) => void }) {
             derecha={
               <Pressable
                 hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={esFavorito(c.numeros[0].numero) ? "Quitar de favoritos" : "Agregar a favoritos"}
                 onPress={() => {
                   toque();
                   alternar({ numero: c.numeros[0].numero, nombre: c.nombre });
                 }}
               >
-                <Text style={{ fontSize: 20 }}>{esFavorito(c.numeros[0].numero) ? "⭐" : "☆"}</Text>
+                <Icono
+                  nombre={esFavorito(c.numeros[0].numero) ? "favorito" : "noFavorito"}
+                  tam={22}
+                  color={esFavorito(c.numeros[0].numero) ? col.aviso : col.placeholder}
+                />
               </Pressable>
             }
             onPress={() => marcar(c)}
@@ -226,7 +245,7 @@ function Contactos({ llamar }: { llamar: (n: string) => void }) {
               key={n.numero}
               titulo={n.numero}
               subtitulo={n.etiqueta || "Teléfono"}
-              derecha={<Text style={{ fontSize: 18 }}>📞</Text>}
+              derecha={<Icono nombre="telefono" tam={20} color={col.ok} />}
               onPress={() => {
                 setElegido(null);
                 llamar(n.numero);
@@ -240,6 +259,7 @@ function Contactos({ llamar }: { llamar: (n: string) => void }) {
 }
 
 function Favoritos({ llamar }: { llamar: (n: string) => void }) {
+  const col = useColores();
   const { favoritos, alternar } = useFavoritos();
   return (
     <FlatList
@@ -247,14 +267,14 @@ function Favoritos({ llamar }: { llamar: (n: string) => void }) {
       keyExtractor={(f) => f.numero}
       contentContainerStyle={{ padding: 16, paddingBottom: 130, gap: 8 }}
       ListEmptyComponent={
-        <EstadoVacio icono="⭐" titulo="Sin favoritos" texto="En Contactos, toca la estrella de quien llamas seguido y aparecerá aquí para marcar de un toque." />
+        <EstadoVacio icono="favorito" titulo="Sin favoritos" texto="En Contactos, toca la estrella de quien llamas seguido y aparecerá aquí para marcar de un toque." />
       }
       renderItem={({ item: f }) => (
         <Fila
           titulo={f.nombre}
           subtitulo={f.numero}
           izquierda={<Avatar nombre={f.nombre} />}
-          derecha={<Text style={{ fontSize: 18 }}>📞</Text>}
+          derecha={<Icono nombre="telefono" tam={20} color={col.ok} />}
           onPress={() => llamar(f.numero)}
           onLongPress={() => alternar(f)}
         />
@@ -264,6 +284,7 @@ function Favoritos({ llamar }: { llamar: (n: string) => void }) {
 }
 
 export default function Llamadas() {
+  const col = useColores();
   const router = useRouter();
   const { call } = useSoftphone();
   const [vista, setVista] = useState<Vista>("recientes");
@@ -277,28 +298,17 @@ export default function Llamadas() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colores.fondo }}>
+    <View style={{ flex: 1, backgroundColor: col.fondo }}>
       <View style={{ padding: 16, paddingBottom: 4 }}>
-        <View style={{ flexDirection: "row", backgroundColor: colores.superficie3, borderRadius: radios.medio, padding: 3 }}>
-          {(
-            [
-              ["recientes", "Recientes"],
-              ["contactos", "Contactos"],
-              ["favoritos", "Favoritos"],
-            ] as [Vista, string][]
-          ).map(([v, etiqueta]) => (
-            <Pressable
-              key={v}
-              onPress={() => {
-                toque();
-                setVista(v);
-              }}
-              style={{ flex: 1, paddingVertical: 9, borderRadius: radios.chico, alignItems: "center", backgroundColor: vista === v ? colores.superficie : "transparent" }}
-            >
-              <Text style={{ fontSize: 13.5, fontWeight: "700", color: vista === v ? colores.texto : colores.textoSecundario }}>{etiqueta}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <Segmentado<Vista>
+          valor={vista}
+          onChange={setVista}
+          opciones={[
+            { valor: "recientes", etiqueta: "Recientes", icono: "historial" },
+            { valor: "contactos", etiqueta: "Contactos", icono: "contactos" },
+            { valor: "favoritos", etiqueta: "Favoritos", icono: "favorito" },
+          ]}
+        />
       </View>
       {vista === "recientes" ? <Recientes llamar={llamar} /> : vista === "contactos" ? <Contactos llamar={llamar} /> : <Favoritos llamar={llamar} />}
     </View>

@@ -33,6 +33,24 @@ services:
     build: ./freeswitch
     container_name: nspbx_freeswitch
     logging: *logging
+    # FreeSWITCH baja solo al usuario `freeswitch` (uid 10001) al arrancar;
+    # ver freeswitch/Dockerfile y freeswitch/entrypoint.sh.
+    security_opt:
+      - no-new-privileges:true
+    # Solo lo que usa mientras todavía es root: adueñarse de sus carpetas
+    # (CHOWN, DAC_OVERRIDE, FOWNER), bajar de usuario (SETUID, SETGID) y la
+    # prioridad de tiempo real (SYS_NICE). Al bajar de usuario las pierde.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, SYS_NICE]
+    # Prioridad de tiempo real (SCHED_FIFO) para el audio: sin ella, con la
+    # CPU ocupada (una campaña, el voicebot transcribiendo) el audio se
+    # entrecorta. FreeSWITCH la toma al arrancar, todavía como root, y sus
+    # hilos la conservan después de bajar de usuario. Con SYS_NICE alcanza en
+    # la mayoría de los servidores (cgroup v2). En cgroup v1 con
+    # planificación de tiempo real por grupo, además hay que darle
+    # presupuesto: ver «Prioridad de tiempo real» en
+    # docs/seguridad-y-robustez.md. 0 = sin presupuesto propio (lo normal).
+    cpu_rt_runtime: ${FS_CPU_RT_RUNTIME:-0}
     restart: unless-stopped
     environment:
       # Solo para el healthcheck de acá abajo (fs_cli necesita loguearse).
@@ -166,8 +184,33 @@ services:
     logging: *logging
     security_opt:
       - no-new-privileges:true
+    # Corre SIN root, como el usuario 10001 — el mismo que FreeSWITCH: borra
+    # las grabaciones que FreeSWITCH crea (retención, supresión de datos) y
+    # escribe la configuración que FreeSWITCH lee. backend/entrypoint.sh
+    # arranca como root solo para adueñarse de sus carpetas y baja de
+    # usuario; las capacidades de abajo son para ese paso y se pierden al
+    # bajar.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    # La imagen no se puede modificar: solo escribe en los volúmenes y en
+    # /tmp (subidas de audio en curso).
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    # Topes para que un error (una fuga de memoria, un bucle) no se lleve
+    # puesta a la central entera. Valores holgados: ajustarlos a 2× el pico
+    # que muestre `docker stats` en un día de campaña.
+    mem_limit: ${BACKEND_MEM_LIMIT:-1g}
+    cpus: ${BACKEND_CPUS:-2}
+    pids_limit: 512
     restart: unless-stopped
     environment:
+      NSPBX_CORRER_COMO: "10001:10001"
+      # Lo que escribe el backend. De los sonidos, solo bots/ y prompts/:
+      # ai_sessions/ y ambience/ son del voicebot.
+      NSPBX_CARPETAS_PROPIAS: >-
+        /freeswitch-conf /freeswitch-recordings /backups
+        /freeswitch-sounds/bots /freeswitch-sounds/prompts
       TZ: ${TZ:-America/Bogota}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}@postgres:5432/${POSTGRES_DB:-nspbx}
       # Rol restringido con el que se atiende la operación normal. Es lo
@@ -187,12 +230,34 @@ services:
       FS_SOUNDS_DIR: /freeswitch-sounds
       # Debe coincidir con el ?secret= de freeswitch/conf/autoload_configs/xml_curl.conf.xml.
       FS_XML_SECRET: ${FS_XML_SECRET:?Definí FS_XML_SECRET en .env — ver freeswitch/conf/autoload_configs/xml_curl.conf.xml}
-      # Firma los tokens de sesión. Si falta, el backend genera una clave
-      # al azar en cada arranque y todo el mundo queda desconectado al
-      # reiniciar. Se define en .env, nunca acá con un valor por defecto:
-      # una clave fija en el repositorio deja firmar tokens de admin a
-      # cualquiera que lo lea.
+      # Firma los tokens de sesión. Se define en .env, nunca acá con un
+      # valor por defecto: una clave fija en el repositorio deja firmar
+      # tokens de admin a cualquiera que lo lea. En producción el backend
+      # no arranca si falta o es corta (ver app/core/arranque.py).
       AUTH_SECRET: ${AUTH_SECRET:-}
+      # Cifra en la base las claves de proveedores y las contraseñas de
+      # troncales (ver app/core/cifrado.py). Obligatoria en producción.
+      # Guardala junto a la clave de los respaldos: sin ella, una base
+      # restaurada tiene esos secretos ilegibles.
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
+      DATA_ENCRYPTION_KEY_ANTERIOR: ${DATA_ENCRYPTION_KEY_ANTERIOR:-}
+      # produccion | desarrollo. En producción el arranque falla si falta
+      # un secreto que sostiene el aislamiento; en desarrollo solo avisa.
+      ENTORNO: ${ENTORNO:-produccion}
+      # Alertas de tráfico saliente anómalo de todas las empresas (Slack,
+      # Teams, un relay de correo). Vacío = solo en el panel.
+      ALERTAS_WEBHOOK_URL: ${ALERTAS_WEBHOOK_URL:-}
+      # Correo de los reportes programados. Vacío = no se envían.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USUARIO: ${SMTP_USUARIO:-}
+      SMTP_CLAVE: ${SMTP_CLAVE:-}
+      SMTP_REMITENTE: ${SMTP_REMITENTE:-}
+      SMTP_SEGURIDAD: ${SMTP_SEGURIDAD:-starttls}
+      AUDITORIA_RETENCION_DIAS: ${AUDITORIA_RETENCION_DIAS:-365}
+      MFA_OBLIGATORIO: ${MFA_OBLIGATORIO:-plataforma,admin}
+      API_LIMITE_POR_MINUTO: ${API_LIMITE_POR_MINUTO:-120}
+      LOG_FORMATO: ${LOG_FORMATO:-}
       # Solo se usa la primera vez, para crear el usuario "admin". Si se
       # deja vacío, la contraseña se genera y sale en el log del arranque.
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
@@ -305,9 +370,25 @@ services:
     logging: *logging
     security_opt:
       - no-new-privileges:true
+    # Corre SIN root (ver backend/entrypoint.sh): arranca como root solo
+    # para adueñarse de las dos carpetas en las que escribe y baja al
+    # usuario 10002 — distinto del backend y de FreeSWITCH, así no puede
+    # tocar la configuración SIP ni las grabaciones. Es el contenedor que
+    # habla con proveedores externos y procesa audio de llamantes
+    # desconocidos: el más expuesto.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID]
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    mem_limit: ${VOICEBOT_MEM_LIMIT:-2g}
+    cpus: ${VOICEBOT_CPUS:-2}
+    pids_limit: 512
     restart: unless-stopped
     command: ["uvicorn", "app.voicebot_server:app", "--host", "0.0.0.0", "--port", "8090"]
     environment:
+      NSPBX_CORRER_COMO: "10002:10002"
+      NSPBX_CARPETAS_PROPIAS: /freeswitch-sounds/ai_sessions /freeswitch-sounds/ambience
       TZ: ${TZ:-America/Bogota}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nspbx}:${POSTGRES_PASSWORD:?Definí POSTGRES_PASSWORD en .env (bash scripts/setup.sh lo genera)}@postgres:5432/${POSTGRES_DB:-nspbx}
       # Rol restringido con el que se atiende la operación normal. Es lo
@@ -316,6 +397,9 @@ services:
       # las políticas. Sin esta variable el backend arranca igual, avisa
       # por log y NO aísla nada — ver app/core/database.py.
       DATABASE_URL_APP: postgresql+asyncpg://nspbx_app:${POSTGRES_APP_PASSWORD:?Definí POSTGRES_APP_PASSWORD en .env porque sin él el aislamiento por empresa queda apagado}@postgres:5432/${POSTGRES_DB:-nspbx}
+      # Lee las claves de los proveedores de IA, que se guardan cifradas.
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
+      DATA_ENCRYPTION_KEY_ANTERIOR: ${DATA_ENCRYPTION_KEY_ANTERIOR:-}
       FS_SOUNDS_DIR: /freeswitch-sounds
     volumes:
       # Solo el de sonidos: acá se escribe el audio de "tecleo" y las
@@ -347,6 +431,11 @@ services:
     logging: *logging
     security_opt:
       - no-new-privileges:true
+    # Ya corre como el usuario `node` (frontend/Dockerfile); no necesita
+    # ningún poder de root.
+    cap_drop: [ALL]
+    mem_limit: ${FRONTEND_MEM_LIMIT:-1g}
+    pids_limit: 512
     restart: unless-stopped
     ports:
       # Solo desde este servidor. Con Traefik delante ya no hace falta

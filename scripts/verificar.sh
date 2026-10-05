@@ -27,6 +27,47 @@ for c in nspbx_postgres nspbx_backend nspbx_voicebot nspbx_freeswitch nspbx_fron
   esac
 done
 
+# Ninguno de los nuestros corre como root (ver docs/seguridad-y-robustez.md,
+# §5.13). Se mira el proceso principal de la app, no el PID 1 del
+# contenedor (en FreeSWITCH es tini, que sí es root).
+uid_de() { docker exec "$1" sh -c "for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = '$2' ] && awk '/^Uid/ {print \$2; exit}' \$p/status && exit; done" 2>/dev/null; }
+for par in nspbx_backend:uvicorn nspbx_voicebot:uvicorn nspbx_freeswitch:freeswitch nspbx_frontend:node; do
+  c="${par%%:*}"; proc="${par##*:}"
+  u="$(uid_de "$c" "$proc")"
+  case "$u" in
+    "") aviso "$c: no pude ver con qué usuario corre $proc" ;;
+    0)  falla "$c: $proc corre como root" ;;
+    *)  ok "$c: $proc corre sin root (uid $u)" ;;
+  esac
+done
+
+# Prioridad de tiempo real de FreeSWITCH: política de planificación de sus
+# hilos (campo 41 de /proc/<pid>/task/*/stat: 1 = SCHED_FIFO).
+RT=$(docker exec nspbx_freeswitch sh -c 'for p in /proc/[0-9]*; do [ "$(cat $p/comm 2>/dev/null)" = freeswitch ] && pid=${p#/proc/}; done; [ -n "$pid" ] && cat /proc/$pid/task/*/stat | awk "\$41 == 1 {rt++} END {print rt+0 \"/\" NR}"' 2>/dev/null)
+case "$RT" in
+  ""|0/*) aviso "FreeSWITCH sin prioridad de tiempo real ($RT hilos): el audio puede entrecortarse con la CPU ocupada. Ver «Prioridad de tiempo real» en docs/seguridad-y-robustez.md" ;;
+  *)      ok "FreeSWITCH con prioridad de tiempo real ($RT hilos)" ;;
+esac
+
+# Topes de memoria (docker-compose.yml): un contenedor que se pasa lo
+# reinicia Docker. Se mira si ya pasó (OOMKilled, reinicios) y si alguno
+# anda cerca. Para ajustar los topes: bash scripts/medir-recursos.sh
+for c in nspbx_backend nspbx_voicebot nspbx_frontend; do
+  oom=$(docker inspect "$c" --format '{{.State.OOMKilled}}' 2>/dev/null) || continue
+  reinicios=$(docker inspect "$c" --format '{{.RestartCount}}')
+  uso=""
+  [ "$(docker inspect "$c" --format '{{.State.Running}}')" = "true" ] && uso=$(docker stats --no-stream --format '{{.MemPerc}}' "$c" | tr -d '%')
+  if [ "$oom" = "true" ]; then
+    falla "$c: Docker lo mató por pasar su tope de memoria. Medí con scripts/medir-recursos.sh y subí el tope en .env"
+  elif [ "${reinicios:-0}" -gt 0 ]; then
+    aviso "$c se reinició $reinicios vez/veces desde que se creó (docker logs $c para ver por qué)"
+  fi
+  case "$uso" in
+    ""|*[!0-9.]*) ;;
+    *) if [ "${uso%.*}" -ge 80 ]; then aviso "$c usa el ${uso}% de su tope de memoria"; else ok "$c: memoria al ${uso}% de su tope"; fi ;;
+  esac
+done
+
 # coturn solo si está pedido: es opcional y arranca con --profile turn.
 # Se comprueba acá y no en la lista de arriba porque su ausencia es lo
 # normal — el relay hace falta únicamente cuando la red del usuario

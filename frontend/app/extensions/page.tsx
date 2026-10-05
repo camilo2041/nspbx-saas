@@ -30,6 +30,7 @@ const empty: Omit<Extension, "id" | "created_at"> = {
   caller_id_name: "",
   voicemail: true,
   enabled: true,
+  outbound_after_hours: false,
 };
 
 const emptyCall = { destination: "", trunk_id: "" };
@@ -239,7 +240,12 @@ export default function ExtensionsPage() {
       >
         <div className="space-y-4">
           <Input label="Número" value={form.number} onChange={(v) => setForm({ ...form, number: v })} required mono />
-          <Input label="Password" value={form.password} onChange={(v) => setForm({ ...form, password: v })} required />
+          <Input
+            label="Password"
+            value={form.password}
+            onChange={(v) => setForm({ ...form, password: v })}
+            hint="Vacía = se genera una segura. Mínimo 12 caracteres, no solo números ni el número de la extensión."
+          />
           <Input
             label="Nombre (Caller ID)"
             value={form.caller_id_name ?? ""}
@@ -252,6 +258,18 @@ export default function ExtensionsPage() {
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
             <span className="text-sm text-fg-soft">Habilitada</span>
             <Toggle checked={form.enabled} onChange={(v) => setForm({ ...form, enabled: v })} />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+            <div>
+              <div className="text-sm text-fg-soft">Llama afuera fuera de horario</div>
+              <div className="mt-0.5 text-[11px] leading-snug text-faint">
+                Solo cuenta si la empresa limita las salientes al horario laboral (Ajustes). Para guardias.
+              </div>
+            </div>
+            <Toggle
+              checked={form.outbound_after_hours}
+              onChange={(v) => setForm({ ...form, outbound_after_hours: v })}
+            />
           </div>
         </div>
       </Modal>

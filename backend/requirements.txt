@@ -1,14 +1,18 @@
-fastapi==0.115.8
+fastapi==0.142.2
+# Explícito: fastapi solo pide un mínimo, y las versiones viejas tienen
+# vulnerabilidades conocidas (pip-audit en CI).
+starlette==1.7.0
 uvicorn[standard]==0.34.0
 sqlalchemy[asyncio]==2.0.38
 asyncpg==0.30.0
 pydantic==2.10.6
 pydantic-settings==2.7.1
 httpx==0.28.1
-h2==4.1.0
-cryptography==44.0.0
-python-multipart==0.0.20
+h2==4.4.1
+cryptography==50.0.2
+python-multipart==0.0.32
 edge-tts==7.2.8
 websockets==14.1
-PyJWT==2.10.1
+PyJWT==2.15.1
 psutil==6.1.1
+alembic==1.14.1

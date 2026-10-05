@@ -45,6 +45,8 @@ import { detenerTimbre, iniciarTimbre } from "@/src/timbre";
 import type { MiEntorno } from "@/src/api/types";
 import { useAuth } from "@/src/auth/AuthContext";
 import { instalarPolyfillWebRTC } from "@/src/softphone/webrtcPolyfill";
+import * as conexion from "@/modules/conexion-permanente";
+import { guardarModo, leerModo, type ModoConexion } from "@/src/softphone/conexionPermanente";
 
 instalarPolyfillWebRTC();
 
@@ -79,6 +81,14 @@ interface SoftphoneCtx {
   activarDnd: (activar: boolean) => Promise<void>;
   /** ¿El teléfono tiene un token de push para despertar la app con la llamada? */
   pushListo: boolean;
+  /** Conexión permanente con la central (Android, sin push). */
+  conexionPermanente: {
+    disponible: boolean;
+    modo: ModoConexion;
+    cambiarModo: (modo: ModoConexion) => Promise<void>;
+    /** El servicio está corriendo ahora. */
+    activa: boolean;
+  };
 }
 
 const Ctx = createContext<SoftphoneCtx | null>(null);
@@ -114,6 +124,21 @@ async function pedirNotificaciones(): Promise<void> {
 }
 
 const OPCIONES_AUDIO = { sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } };
+// Cuánto se espera a juntar los candidatos ICE antes de mandar el INVITE.
+// 1,5 s (lo del navegador) no alcanzaba en la PRIMERA llamada del teléfono:
+// con todo frío (WebRTC, STUN, TURN por TLS) el INVITE salía solo con los
+// candidatos privados, FreeSWITCH los descarta (apply-candidate-acl
+// public_only), no le queda ninguno y responde 488. Al reintentar ya estaba
+// todo tibio y salía: de ahí el "hay que llamar dos veces".
+const ESPERA_CANDIDATOS_MS = 4000;
+// Las credenciales de TURN que da el backend vencen a la hora
+// (turn_ttl_segundos). Se renuevan antes, y antes de cada llamada si están viejas.
+const RENOVAR_ENTORNO_MS = 30 * 60_000;
+const ENTORNO_VIEJO_MS = 40 * 60_000;
+
+function servidoresIce(env: MiEntorno | null): RTCIceServer[] {
+  return env?.ice_servers?.length ? (env.ice_servers as RTCIceServer[]) : [{ urls: ["stun:stun.l.google.com:19302"] }];
+}
 const RETRASO_MAX_RECONEXION_MS = 60_000;
 // Si la red no vuelve en este tiempo durante una llamada, se da por perdida
 // (sin esto quedaría una llamada "fantasma" sin audio).
@@ -135,6 +160,8 @@ function mensajeRechazo(codigo: number, frase: string): string {
       return "La llamada fue rechazada.";
     case 403:
       return "La central no permite llamar a ese destino.";
+    case 488:
+      return "La central no pudo establecer el audio con este teléfono (488). Revisa la conexión a internet; si pasa siempre, avisa al administrador (relay TURN).";
     default:
       return `La central no completó la llamada (${codigo} ${frase}).`;
   }
@@ -197,6 +224,35 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   const voip = useVoIPPushToken();
 
+  const [modoConexion, setModoConexion] = useState<ModoConexion>("apagada");
+  const modoConexionRef = useRef<ModoConexion>("apagada");
+  modoConexionRef.current = modoConexion;
+  const [conexionActiva, setConexionActiva] = useState(false);
+  useEffect(() => {
+    leerModo().then(setModoConexion);
+  }, []);
+
+  // Cuándo se trajo el entorno (credenciales de TURN incluidas) y el objeto de
+  // opciones que tiene el UserAgent: sip.js lo lee en cada llamada, así que
+  // basta con cambiarle los servidores ICE para que la próxima use los nuevos.
+  const entornoEnRef = useRef(0);
+  const opcionesSdhRef = useRef<{ iceGatheringTimeout: number; peerConnectionConfiguration: RTCConfiguration } | null>(null);
+
+  const refrescarEntorno = useCallback(async (): Promise<MiEntorno | null> => {
+    const env = await peticion<MiEntorno>("/api/auth/mi-entorno");
+    entornoEnRef.current = Date.now();
+    entornoRef.current = env;
+    setEntorno(env);
+    if (opcionesSdhRef.current) opcionesSdhRef.current.peerConnectionConfiguration.iceServers = servidoresIce(env);
+    return env;
+  }, []);
+
+  /** Antes de llamar o contestar: credenciales de TURN vigentes. */
+  const asegurarEntornoFresco = useCallback(async () => {
+    if (Date.now() - entornoEnRef.current < ENTORNO_VIEJO_MS) return;
+    await refrescarEntorno().catch(() => {});
+  }, [refrescarEntorno]);
+
   useEffect(() => {
     // En Android esto lanza si el proyecto no tiene google-services.json
     // (ver SETUP.md); sin el try/catch cerraba la app al abrirla.
@@ -218,12 +274,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!usuario || !puede("softphone:usar")) return;
-    peticion<MiEntorno>("/api/auth/mi-entorno")
-      .then(setEntorno)
-      .catch(() => setEntorno(null));
+    refrescarEntorno().catch(() => setEntorno(null));
     pedirNotificaciones().catch(() => {});
     asegurarMicrofono().catch(() => {});
-  }, [usuario, puede]);
+    const renovar = setInterval(() => refrescarEntorno().catch(() => {}), RENOVAR_ENTORNO_MS);
+    return () => clearInterval(renovar);
+  }, [usuario, puede, refrescarEntorno]);
 
   const stopTimer = () => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -303,6 +359,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
+        await asegurarEntornoFresco();
         prepareAudioSessionForCall(false);
         await inv.accept(OPCIONES_AUDIO);
         if (requestId) fulfillIncomingCallConnected(requestId).catch(() => {});
@@ -311,7 +368,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         abortar("No se pudo contestar la llamada. Inténtalo de nuevo.");
       }
     },
-    [limpiarLlamada]
+    [limpiarLlamada, asegurarEntornoFresco]
   );
 
   // Llega un INVITE por SIP.
@@ -435,6 +492,11 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       const servidorSip = resolverServidorSip(env.sip_ws_url, servidor?.apiBase ?? null);
       if (!servidorSip) throw new Error("No hay dirección del servidor SIP configurada");
 
+      const opcionesSdh = {
+        iceGatheringTimeout: ESPERA_CANDIDATOS_MS,
+        peerConnectionConfiguration: { iceServers: servidoresIce(env) } as RTCConfiguration,
+      };
+      opcionesSdhRef.current = opcionesSdh;
       const options: UserAgentOptions = {
         uri,
         transportOptions: { server: servidorSip },
@@ -442,14 +504,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         authorizationPassword: ext.password,
         displayName: ext.caller_id_name || ext.number,
         logLevel: "error",
-        sessionDescriptionHandlerFactoryOptions: {
-          iceGatheringTimeout: 1500,
-          peerConnectionConfiguration: {
-            iceServers: env.ice_servers?.length
-              ? (env.ice_servers as RTCIceServer[])
-              : [{ urls: ["stun:stun.l.google.com:19302"] }],
-          },
-        },
+        sessionDescriptionHandlerFactoryOptions: opcionesSdh,
         delegate: {
           onInvite: (invitation: Invitation) => manejarInviteRef.current(invitation),
           onDisconnect: () => {
@@ -492,7 +547,10 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
       userAgentRef.current = ua;
 
-      const registerer = new Registerer(ua);
+      // Con la conexión permanente el registro dura 20 min: en reposo el
+      // teléfono solo despierta con el latido (~9 min), y el refresco normal
+      // de sip.js (un temporizador de JS) no corre mientras duerme.
+      const registerer = new Registerer(ua, modoConexionRef.current !== "apagada" && conexion.disponible ? { expires: 1200 } : {});
       registererRef.current = registerer;
       registerer.stateChange.addListener((state) => {
         if (!esVigente()) return;
@@ -525,6 +583,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   const connectRef = useRef<() => void>(() => {});
   connectRef.current = connect;
+  const asegurarEntornoRef = useRef(asegurarEntornoFresco);
+  asegurarEntornoRef.current = asegurarEntornoFresco;
 
   // Apaga todo: al cerrar sesión no debe quedar nada vivo (registro SIP,
   // reintentos, llamada, temporizador) ni datos del usuario anterior.
@@ -561,12 +621,80 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   // segundo plano: se reconecta en vez de esperar al próximo reintento.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (estado) => {
-      if (estado === "active" && entornoRef.current && !apagadoRef.current && connStateRef.current !== "registered") {
+      if (estado === "active" && entornoRef.current && !apagadoRef.current) {
+        asegurarEntornoRef.current();
+        if (connStateRef.current !== "registered") {
+          intentosRef.current = 0;
+          connectRef.current();
+        }
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // ---- Conexión permanente (Android) ----------------------------------
+  // El servicio arranca cuando la extensión queda registrada con la app en
+  // pantalla (Android 12+ no deja arrancarlo desde atrás) y mantiene viva la
+  // app con la pantalla apagada. Al cerrar sesión o apagarlo, se detiene.
+  const extensionNumero = entorno?.extension?.number;
+  useEffect(() => {
+    if (!conexion.disponible) return;
+    if (modoConexion === "apagada" || !usuario || !extensionNumero) {
+      conexion.detener();
+      setConexionActiva(false);
+      return;
+    }
+    const titulo = `Central conectada · Ext. ${extensionNumero}`;
+    if (connState === "registered") {
+      if (AppState.currentState === "active") {
+        // También con el servicio ya activo: aplica un cambio de modo.
+        setConexionActiva(conexion.iniciar(titulo, "Lista para recibir llamadas", modoConexion === "maxima"));
+      } else {
+        conexion.actualizar(titulo, "Lista para recibir llamadas");
+      }
+    } else if (conexion.activa()) {
+      conexion.actualizar(`Ext. ${extensionNumero} · reconectando…`, "Sin conexión con la central: reintentando");
+    }
+  }, [connState, modoConexion, usuario, extensionNumero]);
+
+  // Si no se pudo arrancar (la app no estaba en pantalla), al volver.
+  useEffect(() => {
+    if (!conexion.disponible) return;
+    const sub = AppState.addEventListener("change", (estado) => {
+      if (estado !== "active" || modoConexionRef.current === "apagada" || conexion.activa()) return;
+      const ext = entornoRef.current?.extension?.number;
+      if (ext && connStateRef.current === "registered") {
+        setConexionActiva(conexion.iniciar(`Central conectada · Ext. ${ext}`, "Lista para recibir llamadas", modoConexionRef.current === "maxima"));
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Latido (~9 min, también en reposo): renueva el registro o reconecta.
+  useEffect(() => {
+    const sub = conexion.alLatido(() => {
+      if (apagadoRef.current || !entornoRef.current) return;
+      if (connStateRef.current === "registered" && registererRef.current) {
+        registererRef.current.register().catch(() => {
+          intentosRef.current = 0;
+          connectRef.current();
+        });
+      } else if (connStateRef.current !== "connecting") {
         intentosRef.current = 0;
         connectRef.current();
       }
     });
     return () => sub.remove();
+  }, []);
+
+  const cambiarModoConexion = useCallback(async (modo: ModoConexion) => {
+    await guardarModo(modo);
+    setModoConexion(modo);
+    // El registro nuevo toma la duración que corresponde al modo.
+    if (connStateRef.current === "registered" && !hayLlamadaActiva()) {
+      intentosRef.current = 0;
+      connectRef.current();
+    }
   }, []);
 
   // ---- Eventos de CallKit/Telecom ------------------------------------
@@ -641,19 +769,25 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   // evento del sistema o, si éste no llega, el temporizador de respaldo.
   const iniciarSaliente = (id: string) => {
     const pendiente = salientePendienteRef.current;
-    const env = entornoRef.current;
-    const ua = userAgentRef.current;
-    if (!pendiente || pendiente.id !== id || !env?.fs_domain) return;
+    if (!pendiente || pendiente.id !== id || !entornoRef.current?.fs_domain) return;
     salientePendienteRef.current = null;
     idNativoRef.current = id;
+    enviarInvite(id, pendiente.destino, false);
+  };
+
+  // `reintento`: segundo intento tras un 488 (ver ESPERA_CANDIDATOS_MS). Si la
+  // central igual no acepta el audio, se muestra el error como siempre.
+  const enviarInvite = (id: string, destino: string, reintento: boolean) => {
+    const env = entornoRef.current;
+    const ua = userAgentRef.current;
     try {
-      if (!ua) throw new Error("Sin conexión con la central");
-      const target = UserAgent.makeURI(`sip:${pendiente.destino}@${env.fs_domain}`);
+      if (!ua || !env?.fs_domain) throw new Error("Sin conexión con la central");
+      const target = UserAgent.makeURI(`sip:${destino}@${env.fs_domain}`);
       if (!target) throw new Error("Destino inválido");
       // earlyMedia: sin esto sip.js descarta el audio previo a la respuesta (el tono
       // de "llamando" de la central o del proveedor) y se oye silencio hasta que contestan.
       const inviter = new Inviter(ua, target, { ...OPCIONES_AUDIO, earlyMedia: true });
-      bindSession(inviter, pendiente.destino, false);
+      bindSession(inviter, destino, false);
       inviter.stateChange.addListener((state) => {
         if (state === SessionState.Established) reportOutgoingCallConnected(id).catch(() => {});
       });
@@ -666,6 +800,20 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
               // 487 = la llamada se canceló (colgaste tú, o el otro lado antes de
               // contestar): no es un fallo de la central y no debe mostrarse como tal.
               if (statusCode === 487) return;
+              // 488 = la central no aceptó el audio que ofrecimos (sin candidatos
+              // ICE utilizables). Se reintenta UNA vez, con credenciales de TURN
+              // recién pedidas, sin que el usuario tenga que volver a marcar. Se
+              // suelta la sesión vieja ANTES de que termine, para que su cierre
+              // no cuelgue la llamada nativa que sigue en pantalla.
+              if (statusCode === 488 && !reintento && sessionRef.current === inviter && idNativoRef.current === id) {
+                sessionRef.current = null;
+                refrescarEntorno()
+                  .catch(() => null)
+                  .finally(() => {
+                    if (idNativoRef.current === id) enviarInvite(id, destino, true);
+                  });
+                return;
+              }
               setConnError(mensajeRechazo(statusCode ?? 0, reasonPhrase ?? ""));
             },
           },
@@ -697,6 +845,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       setConnError("Sin permiso de micrófono: actívalo en Ajustes del teléfono para llamar.");
       return;
     }
+    await asegurarEntornoFresco();
     try {
       prepareAudioSessionForCall(false);
       const id = await startOutgoingCall(
@@ -713,7 +862,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       setConnError(`El teléfono no permitió iniciar la llamada: ${e instanceof Error ? e.message : String(e)}`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, phase, temporizarLlamada]);
+  }, [destination, phase, temporizarLlamada, asegurarEntornoFresco]);
 
   // Contestar desde los botones de la app. Con UI nativa activa se pasa por
   // el sistema (que emite el evento de respuesta); si éste no llega, se
@@ -805,6 +954,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         sendDtmf,
         activarDnd,
         pushListo: !!voip,
+        conexionPermanente: {
+          disponible: conexion.disponible,
+          modo: modoConexion,
+          cambiarModo: cambiarModoConexion,
+          activa: conexionActiva,
+        },
       }}
     >
       {children}

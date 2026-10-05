@@ -31,6 +31,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
+# Usuario sin privilegios para el voicebot (ver entrypoint.sh). Sin shell
+# ni home: no hace falta para correr Python.
+RUN groupadd --system --gid 10001 nspbx \
+    && useradd --system --uid 10001 --gid nspbx --no-create-home --shell /usr/sbin/nologin nspbx
+COPY entrypoint.sh /entrypoint.sh
+
 EXPOSE 8000
+
+ENTRYPOINT ["/entrypoint.sh"]
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

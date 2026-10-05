@@ -21,7 +21,7 @@ from starlette.requests import HTTPConnection
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import permissions
+from app.core import claves_api, mfa, permissions
 from app.core.config import settings
 from app.core.database import async_session, fijar_tenant, get_session
 from app.core.security import leer_token
@@ -65,7 +65,25 @@ def verificar_secreto_fs(secret: str | None = None) -> None:
 # /refresh y /logout se autentican con el refresh token del cuerpo, no con
 # el JWT: si exigieran un JWT vigente, el refresh no serviría justo cuando
 # hace falta (JWT vencido).
-_ABIERTAS = ("/api/auth/login", "/api/auth/refresh", "/api/auth/logout")
+_ABIERTAS = (
+    "/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/api/auth/mfa/verificar",
+    # Lo manda el navegador, sin token (ver app/api/csp.py).
+    "/api/csp-report",
+    # Wallboard de una TV sin usuario: token de solo lectura en la cabecera
+    # X-Wallboard-Token, que vence y se revoca (ver app/api/supervision.py).
+    "/api/wallboard",
+)
+
+# Lo único que puede hacer una sesión de un rol que exige MFA y todavía no
+# lo activó (ver core/mfa.py): activarlo, saber quién es y cambiar la
+# contraseña.
+_PERMITIDAS_SIN_MFA = (
+    "/api/auth/me",
+    "/api/auth/password",
+    "/api/auth/mfa",
+    "/api/auth/mfa/iniciar",
+    "/api/auth/mfa/activar",
+)
 _ABIERTAS_PREFIJO = ("/api/appointments/agent/", "/api/webcall/")
 
 _NO_AUTENTICADO = HTTPException(
@@ -98,6 +116,11 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
     app/api/logs_ws.py). `HTTPConnection` es la base común a los dos y
     trae `.headers`/`.url`; `.method` es solo de HTTP, de ahí el getattr."""
     if getattr(request, "method", None) == "OPTIONS" or _es_abierta(request.url.path):
+        return
+    # API pública: solo claves de API, nunca un token de sesión (ver
+    # core/claves_api.py).
+    if request.url.path.startswith("/api/v1/"):
+        await claves_api.autenticar(request, session)
         return
 
     cabecera = request.headers.get("Authorization", "")
@@ -144,12 +167,21 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
     # cambio hace efecto ya, sin esperar a que venza su sesión.
     if not usuario or not usuario.enabled:
         raise _NO_AUTENTICADO
+    # La empresa del token tiene que ser la del usuario. RLS ya lo garantiza
+    # (con `tid` de otra empresa la consulta no lo encuentra); se repite acá
+    # para que no dependa solo de la base.
+    if usuario.tenant_id != tid:
+        raise _NO_AUTENTICADO
     # Contraseña cambiada / sesiones cerradas: un JWT anterior a ese instante ya
     # no vale, aunque no haya vencido. Sin `iat` (token de antes de este cambio)
     # se trata como el más viejo posible.
+    # Se compara en milisegundos (`iatm`): con `iat`, en segundos, un token
+    # emitido en el mismo segundo del cierre seguía valiendo. Un token sin
+    # `iatm` (de antes de este cambio) se toma al principio de su segundo.
     if usuario.sesiones_desde is not None:
-        corte = int(usuario.sesiones_desde.replace(tzinfo=timezone.utc).timestamp())
-        if int(datos.get("iat") or 0) < corte:
+        corte = int(usuario.sesiones_desde.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        emitido = int(datos.get("iatm") or int(datos.get("iat") or 0) * 1000)
+        if emitido < corte:
             raise _NO_AUTENTICADO
 
     # Desactivar una empresa tiene que cortar el acceso de TODOS sus usuarios
@@ -160,7 +192,18 @@ async def sesion_obligatoria(request: HTTPConnection, session: AsyncSession = De
         if not empresa or not empresa.enabled:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La empresa está desactivada")
 
+    if mfa.le_falta_mfa(usuario) and request.url.path not in _PERMITIDAS_SIN_MFA:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Activa la verificación en dos pasos para continuar",
+            headers={"X-MFA-Requerido": "1"},
+        )
+
     request.state.usuario = usuario
+    # Copia para la auditoría, que corre DESPUÉS de la petición: si el
+    # endpoint hizo rollback (un nombre duplicado), el objeto del ORM queda
+    # vencido y sin sesión, y leerlo ahí convertía un 400 en un 500.
+    request.state.auditoria_actor = (usuario.tenant_id, usuario.id, f"{usuario.username} ({usuario.role})")
 
 
 async def usuario_actual(request: Request) -> User:

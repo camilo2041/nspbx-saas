@@ -27,6 +27,23 @@
 
   <!-- Profiles are collections of settings you can reference by name. -->
   <profiles>
+    <!-- Sala del agente del contact center (backend/app/services/agentes.py):
+         el agente queda acá toda la jornada y el cliente entra al contestar.
+         Sin música, sin avisos de entrada/salida ni de "estás solo": el
+         agente no tiene que oír nada entre llamada y llamada, y el cliente
+         no tiene que oír que entró a una conferencia. 16 kHz para el
+         softphone WebRTC (opus); la troncal se transcodifica sola. -->
+    <profile name="nspbx_agente">
+      <param name="domain" value="$${domain}"/>
+      <param name="rate" value="16000"/>
+      <param name="interval" value="20"/>
+      <param name="energy-level" value="100"/>
+      <param name="comfort-noise" value="false"/>
+      <param name="auto-gain-level" value="0"/>
+      <param name="caller-id-name" value="$${outbound_caller_name}"/>
+      <param name="caller-id-number" value="$${outbound_caller_id}"/>
+      <param name="max-members" value="4"/>
+    </profile>
     <!--If no profile is specified it will default to "default"-->
     <profile name="default">
       <!-- Directory to drop CDR's 

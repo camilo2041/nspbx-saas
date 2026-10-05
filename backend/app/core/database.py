@@ -1,9 +1,11 @@
 import logging
+from contextlib import asynccontextmanager
 
-from sqlalchemy import event, text
+from sqlalchemy import event, false, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Session as SyncSession
+from sqlalchemy.orm import with_loader_criteria
 
 from app.core.config import settings
 
@@ -53,6 +55,39 @@ def _aplicar_tenant(session, transaction, connection):
     )
 
 
+_MODELOS_CON_EMPRESA: list | None = None
+
+
+def _modelos_con_empresa() -> list:
+    global _MODELOS_CON_EMPRESA
+    if _MODELOS_CON_EMPRESA is None:
+        _MODELOS_CON_EMPRESA = [
+            m.class_ for m in Base.registry.mappers if "tenant_id" in m.class_.__table__.columns
+        ]
+    return _MODELOS_CON_EMPRESA
+
+
+@event.listens_for(SyncSession, "do_orm_execute")
+def _filtrar_por_empresa(estado):
+    """Segunda capa de aislamiento, en la aplicación: toda consulta ORM de
+    una sesión atada a una empresa lleva `tenant_id = <esa empresa>` en cada
+    tabla que tenga la columna, aunque quien la escribió se haya olvidado.
+
+    Es lo mismo que hace RLS en la base, repetido acá para que el
+    aislamiento no dependa de una sola pieza (ver `filtro_empresa`). Las
+    sesiones del dueño (sin empresa: workers, voizbot, FreeSWITCH) no se
+    tocan."""
+    tid = estado.session.info.get("tenant_id")
+    if tid is None or not (estado.is_select or estado.is_update or estado.is_delete):
+        return
+    for modelo in _modelos_con_empresa():
+        estado.statement = estado.statement.options(
+            # lambda: la forma que el caché de sentencias de SQLAlchemy
+            # entiende; `tid` viaja como parámetro, no dentro del SQL.
+            with_loader_criteria(modelo, lambda cls: cls.tenant_id == tid, include_aliases=True)
+        )
+
+
 @event.listens_for(SyncSession, "before_flush")
 def _rellenar_tenant(session, flush_context, instances):
     """Completa `tenant_id` en los INSERT que no lo traen.
@@ -82,14 +117,71 @@ def _rellenar_tenant(session, flush_context, instances):
 
 
 def fijar_tenant(session, tenant_id: int | None) -> None:
-    """Ata una sesión asíncrona a una empresa. Ver `_aplicar_tenant`."""
+    """Ata una sesión asíncrona a una empresa. Ver `_aplicar_tenant`.
+
+    También deja la empresa en el contexto de la tarea: los comandos a
+    FreeSWITCH la usan para ir al servidor de esa empresa (core/contexto.py)."""
     session.sync_session.info["tenant_id"] = tenant_id
+    from app.core.contexto import empresa_actual
+
+    empresa_actual.set(tenant_id)
+
+
+@asynccontextmanager
+async def sesion_de_empresa(tenant_id: int):
+    """Sesión de la aplicación atada a UNA empresa, para los workers.
+
+    El marcador recorre las campañas de todas las empresas con la sesión del
+    dueño (tiene que verlas todas), pero lo que hace con cada una —tomar sus
+    números, leer su troncal y su bot, anotar el resultado— va por acá: RLS y
+    el filtro de la aplicación, igual que una petición de la API. Un id que
+    apunte a otra empresa no se resuelve, en vez de depender de que cada
+    consulta del worker se acuerde de filtrar."""
+    from app.core.contexto import empresa_actual
+
+    anterior = empresa_actual.set(tenant_id)
+    try:
+        async with app_session() as session:
+            fijar_tenant(session, tenant_id)
+            yield session
+    finally:
+        empresa_actual.reset(anterior)
 
 
 def tenant_de_sesion(session) -> int | None:
     """La empresa a la que está atada esta sesión (lo que puso
     `fijar_tenant`), o None si es una sesión del dueño."""
     return session.sync_session.info.get("tenant_id")
+
+
+# --- Segunda capa de aislamiento -----------------------------------------
+# RLS ya impide que una sesión de la API vea filas de otra empresa. Estas
+# dos funciones repiten esa regla en el código, para que el aislamiento no
+# dependa de una sola pieza: si la base quedara mal configurada (el rol
+# dueño en DATABASE_URL_APP, una política borrada), la API seguiría sin
+# mezclar empresas. backend/tests corre la suite de la API también sin RLS
+# (NSPBX_TEST_SIN_RLS=1) para comprobarlo.
+
+
+def filtro_empresa(session, modelo):
+    """`modelo.tenant_id == <empresa de la sesión>`, para los WHERE de la API.
+
+    Sin empresa atada (usuario de la plataforma) no hay datos propios: la
+    condición es siempre falsa, igual que lo que haría RLS."""
+    tid = tenant_de_sesion(session)
+    if tid is None:
+        return false()
+    return modelo.tenant_id == tid
+
+
+async def traer_propio(session, modelo, id_):
+    """`session.get(modelo, id_)`, pero solo si es de la empresa de la sesión.
+
+    Devuelve None si no existe o es de otra: quien llama responde 404 en los
+    dos casos, sin confirmar que el id existe."""
+    return (
+        await session.execute(select(modelo).where(modelo.id == id_, filtro_empresa(session, modelo)))
+    ).unique().scalar_one_or_none()
 
 
 async def get_session():

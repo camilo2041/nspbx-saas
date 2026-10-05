@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from "react";
 
 import { api, setToken } from "@/lib/api";
-import { Sesion, Usuario } from "@/lib/types";
+import { MfaRequerido, Sesion, Usuario } from "@/lib/types";
 
 const CLAVE = "nspbx-token";
 
@@ -14,7 +14,14 @@ interface Estado {
   /** Módulos habilitados de la empresa (voicebot/pbx). */
   modulos: string[];
   cargando: boolean;
-  entrar: (username: string, password: string) => Promise<void>;
+  /** El rol exige MFA y falta activarlo: solo se puede usar /mfa. */
+  mfaPendiente: boolean;
+  /** Devuelve el token del segundo paso si la cuenta tiene MFA; si no, entra. */
+  entrar: (username: string, password: string) => Promise<string | null>;
+  /** Segundo paso del login: el código de la app o uno de recuperación. */
+  verificarMfa: (mfaToken: string, codigo: string) => Promise<void>;
+  /** Aplica una sesión nueva (p. ej. la que devuelve activar MFA). */
+  aplicar: (s: Sesion) => void;
   salir: () => void;
   /** ¿El rol actual tiene este permiso? Ver backend/app/core/permissions.py */
   puede: (permiso: string) => boolean;
@@ -35,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [permisos, setPermisos] = useState<string[]>([]);
   const [modulos, setModulos] = useState<string[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [mfaPendiente, setMfaPendiente] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -49,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsuario(s.usuario);
     setPermisos(s.permisos);
     setModulos(s.modulos ?? []);
+    setMfaPendiente(!!s.mfa_pendiente);
   }, []);
 
   const salir = useCallback(() => {
@@ -114,9 +123,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // (ver app/webcall/page.tsx y components/layout.tsx). Nunca hay sesión
     // de panel ahí, así que no debe rebotar a /login.
     if (pathname === "/webcall") return;
+    // /wallboard: la TV de la sala entra con su token de pantalla, sin
+    // sesión; sin token, la página misma ofrece entrar (app/wallboard).
+    if (pathname === "/wallboard" && !usuario) return;
     if (!usuario && pathname !== "/login") router.replace("/login");
-    if (usuario && pathname === "/login") router.replace("/");
-  }, [cargando, usuario, pathname, router]);
+    if (usuario && pathname === "/login") router.replace(mfaPendiente ? "/mfa" : "/");
+    // El backend rechaza todo lo demás hasta activarlo (ver core/mfa.py).
+    if (usuario && mfaPendiente && pathname !== "/mfa") router.replace("/mfa");
+  }, [cargando, usuario, mfaPendiente, pathname, router]);
 
   const entrar = useCallback(
     async (username: string, password: string) => {
@@ -133,7 +147,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           subdomain = primero;
         }
       }
-      aplicar(await api.post<Sesion>("/api/auth/login", { username, password, subdomain }));
+      const r = await api.post<Sesion | MfaRequerido>("/api/auth/login", {
+        username,
+        password,
+        subdomain,
+        // El panel no usa refresh token: así el servidor no le entrega uno.
+        plataforma: "web",
+      });
+      if ("mfa_requerido" in r) return r.mfa_token;
+      aplicar(r);
+      router.replace(r.mfa_pendiente ? "/mfa" : "/");
+      return null;
+    },
+    [aplicar, router]
+  );
+
+  const verificarMfa = useCallback(
+    async (mfaToken: string, codigo: string) => {
+      const s = await api.post<Sesion>("/api/auth/mfa/verificar", { mfa_token: mfaToken, codigo, plataforma: "web" });
+      aplicar(s);
       router.replace("/");
     },
     [aplicar, router]
@@ -143,7 +175,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const tieneModulo = useCallback((modulo: string) => modulos.includes(modulo), [modulos]);
 
   return (
-    <Ctx.Provider value={{ usuario, permisos, modulos, cargando, entrar, salir, puede, tieneModulo }}>
+    <Ctx.Provider
+      value={{ usuario, permisos, modulos, cargando, mfaPendiente, entrar, verificarMfa, aplicar, salir, puede, tieneModulo }}
+    >
       {children}
     </Ctx.Provider>
   );

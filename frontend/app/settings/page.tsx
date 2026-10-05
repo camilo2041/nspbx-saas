@@ -17,9 +17,10 @@ import {
   Skeleton,
   Toggle,
 } from "@/components/ui";
+import { ConsumoMensual } from "@/components/consumo-mensual";
 import { WebcallEmbed } from "@/components/webcall-embed";
 import { api } from "@/lib/api";
-import { DetectedIp, Diagnostics, MaintenanceStatus, Queue, SystemSettings, TtsVoice } from "@/lib/types";
+import { DetectedIp, Diagnostics, EstadoSalientes, MaintenanceStatus, Queue, SystemSettings, TtsVoice } from "@/lib/types";
 
 function fecha(iso: string | null) {
   if (!iso) return "Nunca";
@@ -65,6 +66,15 @@ const empty: SystemSettings = {
   deepgram_api_key: "",
   record_all_calls: false,
   allow_international: false,
+  international_countries: "",
+  outbound_paused: false,
+  campaign_hours_weekdays: "07:00-19:00",
+  campaign_hours_saturday: "08:00-15:00",
+  campaign_sundays_holidays: false,
+  outbound_hours_enabled: false,
+  outbound_hours_weekdays: "07:00-19:00",
+  outbound_hours_saturday: "08:00-13:00",
+  outbound_hours_sundays_holidays: false,
   ai_stt_provider: "elevenlabs",
   ai_voice_provider: "elevenlabs",
   ai_voice_id: "",
@@ -108,6 +118,24 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [colgando, setColgando] = useState(false);
+  const [colgadas, setColgadas] = useState(false);
+
+  // Control de emergencia: cuelga las salientes EN CURSO de la empresa (ver
+  // backend/app/services/emergencia.py).
+  async function colgarSalientes() {
+    if (!confirm("¿Colgar ahora todas las llamadas salientes en curso de la empresa?")) return;
+    setColgando(true);
+    setError("");
+    try {
+      await api.post("/api/system/salientes/colgar");
+      setColgadas(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudieron colgar las llamadas en curso");
+    } finally {
+      setColgando(false);
+    }
+  }
   const [saved, setSaved] = useState(false);
   const [voices, setVoices] = useState<TtsVoice[]>([]);
   const [voicesError, setVoicesError] = useState("");
@@ -123,6 +151,7 @@ export default function SettingsPage() {
   const [errorDiag, setErrorDiag] = useState("");
 
   const [queues, setQueues] = useState<Queue[]>([]);
+  const [salientes, setSalientes] = useState<EstadoSalientes | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,6 +162,9 @@ export default function SettingsPage() {
       ]);
       setForm(st);
       setQueues(qs);
+      // Estado en vivo de las salientes (interruptores y cupo del día). Si
+      // falla no bloquea la pantalla: es informativo.
+      api.get<EstadoSalientes>("/api/system/salientes").then(setSalientes).catch(() => setSalientes(null));
       // Respaldos y diagnóstico son de TODA la plataforma: el backend los
       // rechaza (403) cuando la instalación tiene varias empresas.
       if (st.puede_infraestructura !== false) {
@@ -393,11 +425,122 @@ export default function SettingsPage() {
               <div>
                 <div className="text-sm text-fg-soft">Permitir llamadas internacionales</div>
                 <div className="mt-0.5 text-[11px] leading-snug text-faint">
-                  Apagado, solo se marcan números nacionales (hasta 10 dígitos, sin prefijos 00/011). Actívalo solo si lo necesitas: es el destino habitual del fraude telefónico.
+                  Apagado, solo se marcan números nacionales (hasta 10 dígitos, sin prefijos 00/011/+). Actívalo solo si lo necesitas: es el destino habitual del fraude telefónico.
                 </div>
               </div>
               <Toggle checked={form.allow_international} onChange={(v) => set("allow_international", v)} />
             </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div>
+                <div className="text-sm text-fg-soft">Pausar llamadas salientes</div>
+                <div className="mt-0.5 text-[11px] leading-snug text-faint">
+                  Corta en el acto toda llamada nueva hacia afuera (teléfonos, clic para llamar y campañas). Úsalo si sospechas que alguien está llamando sin permiso.
+                </div>
+              </div>
+              <Toggle checked={form.outbound_paused} onChange={(v) => set("outbound_paused", v)} />
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div>
+                <div className="text-sm text-fg-soft">Colgar las salientes en curso</div>
+                <div className="mt-0.5 text-[11px] leading-snug text-faint">
+                  Pausar frena las llamadas nuevas; esto corta las que ya están hablando hacia afuera. Las internas y las entrantes no se tocan.
+                </div>
+              </div>
+              <Button variant="danger" size="sm" onClick={colgarSalientes} loading={colgando}>
+                Colgar
+              </Button>
+            </div>
+            {colgadas && <Note tone="warn">Salientes en curso colgadas. Pueden tardar unos segundos en cortarse.</Note>}
+            <div className="rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm text-fg-soft">Salientes de los teléfonos solo en horario laboral</div>
+                  <div className="mt-0.5 text-[11px] leading-snug text-faint">
+                    Fuera de esta franja solo llaman afuera las extensiones marcadas para guardias (Extensiones). Una
+                    extensión robada se usa de noche y en fin de semana. Los desvíos del menú a un celular de guardia
+                    no se cortan.
+                  </div>
+                </div>
+                <Toggle checked={form.outbound_hours_enabled} onChange={(v) => set("outbound_hours_enabled", v)} />
+              </div>
+              {form.outbound_hours_enabled && (
+                <div className="mt-2 space-y-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input
+                      label="Lunes a viernes"
+                      value={form.outbound_hours_weekdays}
+                      onChange={(v) => set("outbound_hours_weekdays", v)}
+                      placeholder="07:00-19:00"
+                      mono
+                    />
+                    <Input
+                      label="Sábados"
+                      value={form.outbound_hours_saturday}
+                      onChange={(v) => set("outbound_hours_saturday", v)}
+                      placeholder="08:00-13:00"
+                      hint="Vacío o - = ese día no."
+                      mono
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-fg-soft">Domingos y festivos (con la franja del sábado)</span>
+                    <Toggle
+                      checked={form.outbound_hours_sundays_holidays}
+                      onChange={(v) => set("outbound_hours_sundays_holidays", v)}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+              <div className="text-sm text-fg-soft">Horario de marcación de campañas</div>
+              <div className="mt-0.5 mb-2 text-[11px] leading-snug text-faint">
+                Fuera de esta franja las campañas esperan, sin marcar ni dar números por fallidos. Las de cobranza
+                nunca salen de la franja de la Ley 2300 de 2023 (lunes a viernes 7:00-19:00, sábados 8:00-15:00, sin
+                domingos ni festivos), aunque acá se amplíe.
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Lunes a viernes"
+                  value={form.campaign_hours_weekdays}
+                  onChange={(v) => set("campaign_hours_weekdays", v)}
+                  placeholder="07:00-19:00"
+                  mono
+                />
+                <Input
+                  label="Sábados"
+                  value={form.campaign_hours_saturday}
+                  onChange={(v) => set("campaign_hours_saturday", v)}
+                  placeholder="08:00-15:00"
+                  hint="Vacío o - = no se marca ese día."
+                  mono
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <span className="text-xs text-fg-soft">Domingos y festivos (con la franja del sábado; no aplica a cobranza)</span>
+                <Toggle
+                  checked={form.campaign_sundays_holidays}
+                  onChange={(v) => set("campaign_sundays_holidays", v)}
+                />
+              </div>
+            </div>
+            {salientes && (
+              <Note tone={salientes.bloqueo ? "warn" : "muted"}>
+                {salientes.bloqueo ? <>Salientes cortadas: {salientes.bloqueo}.</> : <>Salientes habilitadas.</>}{" "}
+                Hoy: {salientes.minutos_hoy} min por troncal
+                {salientes.cupo_diario != null ? ` de ${salientes.cupo_diario} del cupo diario` : " (sin cupo diario)"}.
+              </Note>
+            )}
+            {form.allow_international && (
+              <Input
+                label="Países permitidos"
+                value={form.international_countries}
+                onChange={(v) => set("international_countries", v)}
+                placeholder="57, 1, 34"
+                hint="Códigos de país separados por coma. Vacío = ningún internacional. Satelitales y tarifas premium (+870, +881, +882, +883, +979, +808, +1 900) quedan bloqueados siempre."
+                mono
+              />
+            )}
           </CardBody>
         </Card>
 
@@ -836,6 +979,7 @@ export default function SettingsPage() {
         </Button>
         {saved && <span className="animate-fade-soft text-sm text-ok-text">Guardado correctamente</span>}
       </div>
+      <ConsumoMensual />
     </div>
   );
 }

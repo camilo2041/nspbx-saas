@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
+import { BackHandler, Pressable, Text, View } from "react-native";
 
 import { useAuth } from "@/src/auth/AuthContext";
-import { colores } from "@/src/tema";
+import { Icono } from "@/src/Icono";
+import { crearEstilos, useColores } from "@/src/tema";
 import { Boton, Logo } from "@/src/ui";
 
 /**
@@ -11,6 +12,8 @@ import { Boton, Logo } from "@/src/ui";
  * decide quién puede VER y usar la pantalla.
  */
 export function Bloqueo() {
+  const estilos = useEstilos();
+  const c = useColores();
   const { cargando, bloqueada, usuario, nombreBio, desbloquear, omitirBloqueo, logout } = useAuth();
   const [mensaje, setMensaje] = useState("");
   const [verificando, setVerificando] = useState(false);
@@ -57,7 +60,7 @@ export function Bloqueo() {
         <Text style={estilos.detalle}>Confirma que eres tú para entrar a NSPBX</Text>
 
         <Pressable onPress={pedir} style={({ pressed }) => [estilos.huella, pressed && { opacity: 0.8 }]} disabled={verificando}>
-          <Text style={{ fontSize: 44 }}>🔒</Text>
+          <Icono nombre="huella" tam={48} color={c.marca} />
         </Pressable>
         <Text style={estilos.ayuda}>{verificando ? "Verificando…" : "Toca para usar tu huella"}</Text>
 
@@ -84,25 +87,25 @@ export function Bloqueo() {
   );
 }
 
-const estilos = StyleSheet.create({
-  pantalla: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colores.fondo, zIndex: 1000, padding: 24, justifyContent: "space-between" },
+const useEstilos = crearEstilos((c) => ({
+  pantalla: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: c.fondo, zIndex: 1000, padding: 24, justifyContent: "space-between" },
   centro: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
-  saludo: { fontSize: 26, fontWeight: "800", color: colores.texto, marginTop: 12 },
-  detalle: { fontSize: 14, color: colores.textoSecundario, textAlign: "center" },
+  saludo: { fontSize: 26, fontWeight: "800", color: c.texto, marginTop: 12 },
+  detalle: { fontSize: 14, color: c.textoSecundario, textAlign: "center" },
   huella: {
     width: 104,
     height: 104,
     borderRadius: 52,
-    backgroundColor: colores.marcaSuave,
+    backgroundColor: c.marcaSuave,
     borderWidth: 2,
-    borderColor: colores.marca,
+    borderColor: c.marca,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 28,
   },
-  ayuda: { fontSize: 13, color: colores.textoSecundario },
-  error: { backgroundColor: colores.peligroSuave, borderRadius: 10, padding: 12, marginTop: 14, maxWidth: 320 },
-  errorTexto: { color: colores.peligroTexto, fontSize: 13, textAlign: "center" },
+  ayuda: { fontSize: 13, color: c.textoSecundario },
+  error: { backgroundColor: c.peligroSuave, borderRadius: 10, padding: 12, marginTop: 14, maxWidth: 320 },
+  errorTexto: { color: c.peligroTexto, fontSize: 13, textAlign: "center" },
   pie: { gap: 16, alignItems: "stretch", paddingBottom: 12 },
-  enlace: { textAlign: "center", color: colores.marcaTexto, fontWeight: "600", fontSize: 14 },
-});
+  enlace: { textAlign: "center", color: c.marcaTexto, fontWeight: "600", fontSize: 14 },
+}));

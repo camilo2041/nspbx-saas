@@ -84,6 +84,25 @@ export function resolverServidorSip(configurado: string | null | undefined): str
   return v;
 }
 
+// Token de la sesión de agente en curso (la consola lo fija al entrar; ver
+// backend/app/services/agentes.py). La llamada de la sesión trae la
+// cabecera X-NSPBX-Agente con este valor y se contesta sola. Con cualquier
+// otro valor se rechaza: es alguien intentando abrir el micrófono del agente.
+let tokenSesionAgente: string | null = null;
+
+export function esperarSesionAgente(token: string | null) {
+  tokenSesionAgente = token;
+}
+
+// Igual para el monitoreo del supervisor (escuchar, susurrar, intervenir;
+// ver backend/app/services/supervision.py): la pantalla de supervisión fija
+// el token de la escucha en curso y esa llamada se contesta sola.
+let tokenMonitoreo: string | null = null;
+
+export function esperarMonitoreo(token: string | null) {
+  tokenMonitoreo = token;
+}
+
 export function useSoftphone() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useSoftphone debe usarse dentro de <SoftphoneProvider>");
@@ -172,6 +191,13 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   const { usuario, puede, cargando: cargandoAuth } = useAuth();
 
   const [entorno, setEntorno] = useState<MiEntorno | null>(null);
+  // Las credenciales de TURN del entorno vencen a la hora
+  // (backend turn_ttl_segundos). Con la pestaña abierta más de eso, el relay
+  // se rechazaba y una red con NAT estricto se quedaba sin audio (o con 488).
+  // Se renuevan cada 30 min y antes de llamar/contestar si están viejas; el
+  // UserAgent lee las opciones en cada llamada, así que basta con cambiarlas.
+  const entornoEnRef = useRef(0);
+  const opcionesSdhRef = useRef<{ iceGatheringTimeout: number; peerConnectionConfiguration: RTCConfiguration } | null>(null);
   const [loadError, setLoadError] = useState("");
   const [dndCambiando, setDndCambiando] = useState(false);
   const [dndError, setDndError] = useState("");
@@ -359,7 +385,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
         authorizationPassword: ext.password,
         displayName: ext.caller_id_name || ext.number,
         logLevel: "error",
-        sessionDescriptionHandlerFactoryOptions: {
+        sessionDescriptionHandlerFactoryOptions: (opcionesSdhRef.current = {
           iceGatheringTimeout: 1500,
           peerConnectionConfiguration: {
             // Los manda el backend (ver app/services/turn.py): STUN
@@ -371,9 +397,23 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
               ? settings.ice_servers
               : [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }],
           },
-        },
+        }),
         delegate: {
           onInvite(invitation: Invitation) {
+            const token = invitation.request.getHeader("X-NSPBX-Agente");
+            if (token) {
+              const esAgente = !!tokenSesionAgente && token === tokenSesionAgente;
+              const esMonitoreo = !!tokenMonitoreo && token === tokenMonitoreo;
+              if (!esAgente && !esMonitoreo) {
+                invitation.reject().catch(() => {});
+                return;
+              }
+              bindSession(invitation, esAgente ? "Sesión de agente" : "Monitoreo", false);
+              invitation
+                .accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } })
+                .catch(() => {});
+              return;
+            }
             bindSession(invitation, invitation.remoteIdentity.uri.user ?? "desconocido", true);
           },
           onDisconnect() {
@@ -469,16 +509,32 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   // en la página /softphone, así que solo se conocía si la persona pasaba
   // por ahí. Ahora la conexión SIP debe existir en TODA la app, no solo
   // en esa pantalla.
+  const refrescarEntorno = useCallback(async () => {
+    const env = await api.get<MiEntorno>("/api/auth/mi-entorno");
+    entornoEnRef.current = Date.now();
+    setEntorno(env);
+    if (opcionesSdhRef.current && env.ice_servers?.length) {
+      opcionesSdhRef.current.peerConnectionConfiguration.iceServers = env.ice_servers;
+    }
+  }, []);
+
+  const asegurarEntornoFresco = useCallback(async () => {
+    if (Date.now() - entornoEnRef.current < 40 * 60_000) return;
+    await refrescarEntorno().catch(() => {});
+  }, [refrescarEntorno]);
+
   useEffect(() => {
     if (cargandoAuth || !usuario || !puede(PERMISOS.softphone)) return;
     (async () => {
       try {
-        setEntorno(await api.get<MiEntorno>("/api/auth/mi-entorno"));
+        await refrescarEntorno();
       } catch (e) {
         setLoadError(e instanceof Error ? e.message : "Error al cargar");
       }
     })();
-  }, [cargandoAuth, usuario, puede]);
+    const renovar = setInterval(() => refrescarEntorno().catch(() => {}), 30 * 60_000);
+    return () => clearInterval(renovar);
+  }, [cargandoAuth, usuario, puede, refrescarEntorno]);
 
   // Se desconecta si la sesión termina (logout), y se limpia al desmontar
   // el provider (solo pasa al cerrar/recargar la pestaña, dado que vive en
@@ -549,6 +605,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
 
   const call = useCallback(async () => {
     if (!userAgentRef.current || !entorno?.fs_domain || !destination) return;
+    await asegurarEntornoFresco();
     try {
       const target = UserAgent.makeURI(`sip:${destination}@${entorno.fs_domain}`);
       if (!target) throw new Error("Destino inválido");
@@ -561,13 +618,14 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       setConnError(e instanceof Error ? e.message : "Error al llamar");
       setPhase("idle");
     }
-  }, [entorno, destination, bindSession]);
+  }, [entorno, destination, bindSession, asegurarEntornoFresco]);
 
   const answer = useCallback(async () => {
     const session = sessionRef.current;
     if (!session || !(session instanceof Invitation)) return;
+    await asegurarEntornoFresco();
     await session.accept({ sessionDescriptionHandlerOptions: { constraints: { audio: true, video: false } } });
-  }, []);
+  }, [asegurarEntornoFresco]);
 
   const reject = useCallback(async () => {
     const session = sessionRef.current;

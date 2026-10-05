@@ -24,23 +24,41 @@ TRIAL_DAYS = 15
 
 # Presets de cada plan: límites por defecto (None = sin límite).
 PLANES: dict[str, dict[str, int | None]] = {
+    # La prueba solo trae tope de minutos: el resto de sus límites sigue
+    # como estaba (sin tope), para no cambiar a las empresas que ya la usan.
+    "trial": {
+        "max_outbound_minutes_day": 60,
+        "max_outbound_cps": 1,
+    },
     "free": {
         "max_extensions": 5,
         "max_trunks": 1,
         "max_concurrent_calls": 1,
         "max_campaigns": 1,
+        "max_outbound_minutes_day": 120,
+        "max_outbound_cps": 1,
     },
     "pro": {
         "max_extensions": 25,
         "max_trunks": 5,
         "max_concurrent_calls": 10,
         "max_campaigns": 5,
+        # 10 canales x 8 h de campaña, con margen. Un fraude típico supera
+        # esto en pocas horas de madrugada; una operación normal, no.
+        "max_outbound_minutes_day": 5000,
+        "max_outbound_cps": 5,
     },
     "enterprise": {
         "max_extensions": None,
         "max_trunks": None,
         "max_concurrent_calls": None,
         "max_campaigns": None,
+        "max_outbound_minutes_day": None,
+        # Llamadas salientes nuevas por segundo (teléfonos y clic para
+        # llamar). Es freno de fraude, no límite comercial: también lo tiene
+        # enterprise. Un fraude típico son cientos de llamadas cortas por
+        # minuto a destinos premium; una oficina, unas pocas.
+        "max_outbound_cps": 10,
     },
 }
 
@@ -52,7 +70,10 @@ ETIQUETAS_PLAN = {
     "custom": "Personalizado",
 }
 
-RECURSOS = ("max_extensions", "max_trunks", "max_concurrent_calls", "max_campaigns")
+RECURSOS = (
+    "max_extensions", "max_trunks", "max_concurrent_calls", "max_campaigns", "max_outbound_minutes_day",
+    "max_outbound_cps",
+)
 
 
 async def obtener(session: AsyncSession, tenant_id: int) -> License:

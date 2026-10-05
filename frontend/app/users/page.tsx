@@ -159,6 +159,29 @@ export default function UsersPage() {
     }
   };
 
+  // Para quien perdió el teléfono y los códigos de recuperación (ver
+  // backend POST /api/users/{id}/mfa/reset). Cierra sus sesiones.
+  const restablecerMfa = async (u: Usuario) => {
+    if (!confirm(`¿Restablecer la verificación en dos pasos de ${u.full_name}? Tendrá que configurarla de nuevo al entrar.`)) return;
+    try {
+      await api.post(`/api/users/${u.id}/mfa/reset`, {});
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo restablecer");
+    }
+  };
+
+  // Celular de la empresa perdido, alguien que se va: lo saca de todos sus
+  // equipos sin cambiarle la contraseña (POST /api/users/{id}/cerrar-sesiones).
+  const cerrarSesiones = async (u: Usuario) => {
+    if (!confirm(`¿Cerrar todas las sesiones de ${u.full_name}, en la app y en el panel? Podrá volver a entrar con su contraseña.`)) return;
+    try {
+      await api.post(`/api/users/${u.id}/cerrar-sesiones`, {});
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudieron cerrar las sesiones");
+    }
+  };
+
   const borrar = async () => {
     if (!aBorrar) return;
     try {
@@ -231,12 +254,27 @@ export default function UsersPage() {
                   <Badge color={u.enabled ? "green" : "slate"} dot>
                     {u.enabled ? "Activo" : "Desactivado"}
                   </Badge>
+                  {u.mfa_enabled && (
+                    <span className="ml-1.5">
+                      <Badge color="blue">2 pasos</Badge>
+                    </span>
+                  )}
                 </Td>
                 <Td>
                   <RowActions>
                     <Button size="sm" variant="ghost" onClick={() => abrirEditar(u)}>
                       Editar
                     </Button>
+                    {u.mfa_enabled && u.id !== yo?.id && (
+                      <Button size="sm" variant="ghost" onClick={() => restablecerMfa(u)} title="Perdió el teléfono">
+                        Restablecer 2 pasos
+                      </Button>
+                    )}
+                    {u.id !== yo?.id && (
+                      <Button size="sm" variant="ghost" onClick={() => cerrarSesiones(u)} title="Lo saca de todos sus equipos">
+                        Cerrar sesiones
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="ghost"

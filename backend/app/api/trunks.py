@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session, tenant_de_sesion
+from app.core import cifrado
+from app.core.database import get_session, tenant_de_sesion, traer_propio
 from app.models import Tenant, Trunk
 from app.schemas import TrunkCreate, TrunkOut, TrunkUpdate
 from app.services import licensing
@@ -10,6 +11,14 @@ from app.services.esl import gateway_status, rescan_profile
 from app.services.gateways import nombre_gateway, remove_gateway_file, write_gateway_file
 
 router = APIRouter(prefix="/api/trunks", tags=["trunks"])
+
+
+async def _nodo_de(tenant_id: int) -> str | None:
+    """Carpeta de gateways del servidor FreeSWITCH de la empresa (None = principal)."""
+    from app.services.nodos import directorio
+
+    nid = await directorio.nodo_de(tenant_id)
+    return directorio.nombre(nid) if nid is not None else None
 
 
 async def _slug_de(session: AsyncSession, tenant_id: int) -> str:
@@ -41,7 +50,7 @@ async def create_trunk(payload: TrunkCreate, session: AsyncSession = Depends(get
         await session.rollback()
         raise HTTPException(status_code=400, detail="Nombre de troncal duplicado")
     await session.refresh(trunk)
-    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id))
+    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id), await _nodo_de(trunk.tenant_id))
     try:
         await rescan_profile("external")
     except Exception:
@@ -51,7 +60,7 @@ async def create_trunk(payload: TrunkCreate, session: AsyncSession = Depends(get
 
 @router.get("/{trunk_id}", response_model=TrunkOut)
 async def get_trunk(trunk_id: int, session: AsyncSession = Depends(get_session)):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     return trunk
@@ -61,14 +70,18 @@ async def get_trunk(trunk_id: int, session: AsyncSession = Depends(get_session))
 async def update_trunk(
     trunk_id: int, payload: TrunkUpdate, session: AsyncSession = Depends(get_session)
 ):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    cambios = payload.model_dump(exclude_unset=True)
+    # El panel reenvía la contraseña enmascarada que recibió: no se cambió.
+    if cifrado.es_mascara(cambios.get("password")):
+        cambios.pop("password")
+    for field, value in cambios.items():
         setattr(trunk, field, value)
     await session.commit()
     await session.refresh(trunk)
-    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id))
+    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id), await _nodo_de(trunk.tenant_id))
     try:
         await rescan_profile("external")
     except Exception:
@@ -78,12 +91,12 @@ async def update_trunk(
 
 @router.delete("/{trunk_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_trunk(trunk_id: int, session: AsyncSession = Depends(get_session)):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     await session.delete(trunk)
     await session.commit()
-    remove_gateway_file(nombre_gateway(trunk.name, await _slug_de(session, trunk.tenant_id)))
+    remove_gateway_file(nombre_gateway(trunk.name, await _slug_de(session, trunk.tenant_id)), await _nodo_de(trunk.tenant_id))
     try:
         await rescan_profile("external")
     except Exception:
@@ -92,7 +105,7 @@ async def delete_trunk(trunk_id: int, session: AsyncSession = Depends(get_sessio
 
 @router.post("/{trunk_id}/rescan")
 async def trunk_rescan(trunk_id: int, session: AsyncSession = Depends(get_session)):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     try:
@@ -104,7 +117,7 @@ async def trunk_rescan(trunk_id: int, session: AsyncSession = Depends(get_sessio
 
 @router.get("/{trunk_id}/status")
 async def trunk_status(trunk_id: int, session: AsyncSession = Depends(get_session)):
-    trunk = await session.get(Trunk, trunk_id)
+    trunk = await traer_propio(session, Trunk, trunk_id)
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     try:

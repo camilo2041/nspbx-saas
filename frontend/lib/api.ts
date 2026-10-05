@@ -72,7 +72,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // Token vencido o cuenta desactivada a media jornada: se avisa para que
   // la aplicación devuelva a la pantalla de entrada en vez de dejar
   // errores sueltos por toda la interfaz.
-  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/api/auth/login")) {
+  // El login y su segundo paso (código de MFA) responden 401 por una
+  // contraseña o un código mal escritos: eso no es una sesión vencida.
+  if (
+    res.status === 401 &&
+    typeof window !== "undefined" &&
+    !path.startsWith("/api/auth/login") &&
+    !path.startsWith("/api/auth/mfa/verificar")
+  ) {
     window.dispatchEvent(new Event("nspbx:sesion-expirada"));
   }
 
@@ -117,6 +124,8 @@ export const api = {
   del: <T = void>(path: string) => request<T>(path, { method: "DELETE", headers: jsonHeaders }),
   patch: <T>(path: string, data: unknown) =>
     request<T>(path, { method: "PATCH", headers: jsonHeaders, body: JSON.stringify(data) }),
+  /** Formulario con archivos y campos (multipart). */
+  form: <T>(path: string, datos: FormData) => request<T>(path, { method: "POST", body: datos }),
   upload: <T>(path: string, file: File, method: "POST" | "PUT" = "POST") => {
     const form = new FormData();
     form.append("file", file);

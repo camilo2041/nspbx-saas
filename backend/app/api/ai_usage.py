@@ -11,12 +11,12 @@ se reparte bien sin tener que tocar código.
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import Integer, func, select
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import Integer, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_local
-from app.core.database import get_session
+from app.core.database import filtro_empresa, get_session
 from app.models import AiCallUsage
 from app.services.ajustes import ajustes_de
 
@@ -76,8 +76,48 @@ class Tarifas:
         }
 
 
+# Ventana de días de los resúmenes. Sin tope, `daily?days=1000000000` armaba
+# un diccionario de mil millones de días: una sola petición dejaba al
+# backend sin memoria (y con eso, sin dialplan para FreeSWITCH).
+_DIAS = Query(default=30, ge=1, le=366)
+
+
 async def _tarifas(session: AsyncSession) -> Tarifas:
     return Tarifas(await ajustes_de(session))
+
+
+async def agregado(session, *condiciones, por_dia: bool = False, de_la_sesion: bool = True) -> list:
+    """Consumo sumado en la base, una fila por combinación de proveedores (y
+    por día si `por_dia`). Cada fila tiene los mismos nombres que una
+    AiCallUsage, así que `Tarifas` y `_agrupar_por_proveedor` la usan igual.
+
+    Antes se traían TODAS las conversaciones del período a Python: con un
+    año de una empresa grande (300.000 conversaciones) el resumen tardaba 10
+    segundos y usaba 780 MB, y dos a la vez pasaban el tope de memoria del
+    backend. Los costos son lineales (unidades × tarifa del proveedor), así
+    que sumar primero da lo mismo —sin redondear fila por fila— con unas
+    pocas filas.
+
+    `de_la_sesion=False` solo para quien ya filtra por una empresa explícita
+    (el consumo mensual, que la plataforma pide con la sesión del dueño)."""
+    columnas = [
+        AiCallUsage.tts_provider, AiCallUsage.stt_provider,
+        func.count(AiCallUsage.id).label("calls"),
+        func.count(case((AiCallUsage.resolved.is_(True), 1))).label("resolved"),
+        *(func.coalesce(func.sum(getattr(AiCallUsage, c)), 0).label(c) for c in (
+            "turns", "duration_seconds", "tts_chars", "stt_seconds", "llm_calls",
+            "llm_prompt_tokens", "llm_completion_tokens",
+        )),
+    ]
+    grupo = [AiCallUsage.tts_provider, AiCallUsage.stt_provider]
+    if por_dia:
+        dia = func.date(AiCallUsage.started_at).label("dia")
+        columnas.insert(0, dia)
+        grupo.insert(0, dia)
+    if de_la_sesion:
+        condiciones = (filtro_empresa(session, AiCallUsage), *condiciones)
+    consulta = select(*columnas).where(*condiciones).group_by(*grupo)
+    return (await session.execute(consulta)).all()
 
 
 def _agrupar_por_proveedor(filas, t: Tarifas) -> list[dict]:
@@ -131,15 +171,13 @@ def _agrupar_por_proveedor(filas, t: Tarifas) -> list[dict]:
 
 
 @router.get("/summary")
-async def summary(days: int = 30, session: AsyncSession = Depends(get_session)):
+async def summary(days: int = _DIAS, session: AsyncSession = Depends(get_session)):
     desde = now_local() - timedelta(days=days)
     t = await _tarifas(session)
-    filas = (
-        await session.execute(select(AiCallUsage).where(AiCallUsage.started_at >= desde))
-    ).scalars().all()
+    filas = await agregado(session, AiCallUsage.started_at >= desde)
 
-    llamadas = len(filas)
-    resueltas = sum(1 for f in filas if f.resolved)
+    llamadas = sum(f.calls for f in filas)
+    resueltas = sum(f.resolved for f in filas)
     turnos = sum(f.turns for f in filas)
     dur_s = sum(f.duration_seconds for f in filas)
     proveedores = _agrupar_por_proveedor(filas, t)
@@ -166,22 +204,20 @@ async def summary(days: int = 30, session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/daily")
-async def daily(days: int = 14, session: AsyncSession = Depends(get_session)):
+async def daily(days: int = Query(default=14, ge=1, le=366), session: AsyncSession = Depends(get_session)):
     """Serie por día, con los días sin llamadas rellenos en cero — si no,
     la gráfica junta días separados y miente sobre la tendencia."""
     t = await _tarifas(session)
     hoy = now_local().date()
     desde = hoy - timedelta(days=days - 1)
 
-    filas = (
-        await session.execute(select(AiCallUsage).where(AiCallUsage.started_at >= desde))
-    ).scalars().all()
+    filas = await agregado(session, AiCallUsage.started_at >= desde, por_dia=True)
 
     por_dia: dict[str, dict] = {}
     for f in filas:
-        d = f.started_at.date().isoformat()
+        d = f.dia.isoformat()
         b = por_dia.setdefault(d, {"calls": 0, "tts_chars": 0, "stt_seconds": 0, "tokens": 0, "cost_voz": 0.0, "cost_modelo": 0.0})
-        b["calls"] += 1
+        b["calls"] += f.calls
         b["tts_chars"] += f.tts_chars
         b["stt_seconds"] += f.stt_seconds
         b["tokens"] += (f.llm_prompt_tokens or 0) + (f.llm_completion_tokens or 0)

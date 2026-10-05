@@ -18,6 +18,7 @@ import {
   Pantalla,
 } from "@/src/gestion";
 import { exito } from "@/src/haptico";
+import { useColores } from "@/src/tema";
 import { Boton, Pildora } from "@/src/ui";
 
 interface Usuario {
@@ -52,6 +53,7 @@ function ultimoAcceso(iso: string | null): string {
 }
 
 export default function Usuarios() {
+  const c = useColores();
   const { usuario: yo } = useAuth();
   const u = useDatos<Usuario[]>("/api/users");
   const r = useDatos<Rol[]>("/api/users/roles", { ttl: 5 * 60_000 });
@@ -151,10 +153,30 @@ export default function Usuarios() {
     ]);
   };
 
+  // Celular de la empresa perdido, alguien que se va: lo saca de todos sus
+  // equipos (app y panel) sin cambiarle la contraseña.
+  const cerrarSesiones = (u: { id: number; full_name: string }) =>
+    Alert.alert("Cerrar sus sesiones", `${u.full_name} tendrá que volver a entrar en todos sus equipos.`, [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Cerrar sesiones",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await peticion(`/api/users/${u.id}/cerrar-sesiones`, { method: "POST" });
+            exito();
+            Alert.alert("Listo", `Se cerraron las sesiones de ${u.full_name}.`);
+          } catch (err) {
+            Alert.alert("No se pudo", err instanceof Error ? err.message : "Error");
+          }
+        },
+      },
+    ]);
+
   return (
     <>
       <Pantalla refrescando={u.refrescando} onRefrescar={u.recargar}>
-        <Boton titulo="+ Nuevo usuario" onPress={() => setEditando("nuevo")} deshabilitado={!r.datos} />
+        <Boton titulo="Nuevo usuario" icono="agregar" onPress={() => setEditando("nuevo")} deshabilitado={!r.datos} />
         <Buscador valor={q} onChange={setQ} placeholder="Buscar por nombre o usuario" />
         <FiltroChips
           valor={filtro}
@@ -168,7 +190,7 @@ export default function Usuarios() {
         {u.sinConexion ? <AvisoSinConexion /> : null}
         {u.error && !u.datos ? <Aviso texto={u.error} /> : null}
         {u.cargando && !u.datos ? <ListaEsqueleto /> : null}
-        {u.datos && lista.length === 0 ? <EstadoVacio icono="👥" titulo="Sin resultados" texto="Prueba con otro nombre o quita el filtro." /> : null}
+        {u.datos && lista.length === 0 ? <EstadoVacio icono="usuarios" titulo="Sin resultados" texto="Prueba con otro nombre o quita el filtro." /> : null}
         {lista.map((x) => (
           <Fila
             key={x.id}
@@ -177,7 +199,7 @@ export default function Usuarios() {
             izquierda={<Avatar nombre={x.full_name} />}
             derecha={
               x.enabled ? (
-                <Text style={{ fontSize: 11, color: "#64748b" }}>{ultimoAcceso(x.last_login_at)}</Text>
+                <Text style={{ fontSize: 11, color: c.textoSecundario }}>{ultimoAcceso(x.last_login_at)}</Text>
               ) : (
                 <Pildora texto="Desactivada" tono="neutro" />
               )
@@ -208,6 +230,11 @@ export default function Usuarios() {
         onGuardar={guardar}
         onCerrar={() => setEditando(null)}
         onEliminar={editando && editando !== "nuevo" && editando.id !== yo?.id ? eliminar : undefined}
+        extra={() =>
+          editando && editando !== "nuevo" && editando.id !== yo?.id ? (
+            <Boton titulo="Cerrar todas sus sesiones" icono="salir" variante="contorno" onPress={() => cerrarSesiones(editando)} />
+          ) : null
+        }
       />
     </>
   );

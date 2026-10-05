@@ -3,9 +3,7 @@ import { useRouter } from "expo-router";
 import { useAuth } from "@/src/auth/AuthContext";
 import { useDatos } from "@/src/datos";
 import { Aviso, AvisoSinConexion, EstadoVacio, Fila, ListaEsqueleto, Pantalla } from "@/src/gestion";
-import { Pildora } from "@/src/ui";
-import { Text, View } from "react-native";
-import { colores } from "@/src/tema";
+import { CajaIcono, Pildora } from "@/src/ui";
 
 interface Bot {
   id: number;
@@ -31,7 +29,7 @@ export default function Bots() {
       {error && !datos ? <Aviso texto={error} /> : null}
       {cargando && !datos ? <ListaEsqueleto filas={3} /> : null}
       {datos && datos.length === 0 ? (
-        <EstadoVacio icono="🤖" titulo="Aún no hay bots" texto="Créalos desde el panel web; aquí podrás probarlos." />
+        <EstadoVacio icono="bot" titulo="Aún no hay bots" texto="Créalos desde el panel web; aquí podrás probarlos." />
       ) : null}
       {(datos ?? []).map((b) => (
         <Fila
@@ -39,9 +37,7 @@ export default function Bots() {
           titulo={b.name}
           subtitulo={b.welcome_message ? b.welcome_message.slice(0, 70) : b.bot_type === "ai" ? "Asistente con IA" : "Menú de voz"}
           izquierda={
-            <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: colores.marcaSuave, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ fontSize: 20 }}>{b.bot_type === "ai" ? "🧠" : "🔢"}</Text>
-            </View>
+            <CajaIcono icono={b.bot_type === "ai" ? "asistente" : "teclado"} tono={b.bot_type === "ai" ? "marca" : "info"} />
           }
           derecha={<Pildora texto={b.enabled ? (b.bot_type === "ai" ? "IA" : "Menú") : "Apagado"} tono={b.enabled ? "ok" : "neutro"} />}
           onPress={() => {

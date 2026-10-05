@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import alcance
+from app.core import alcance, cifrado
 from app.core.auth import usuario_actual
-from app.core.database import get_session
+from app.core.database import get_session, traer_propio
 from app.core.runtime_settings import runtime_settings
 from app.models import Queue, SystemSettings, User
 from app.schemas import SystemSettingsOut, SystemSettingsUpdate
-from app.services import esl
+from app.services import esl, salientes
 from app.services.ajustes import get_or_create_settings
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -55,8 +55,24 @@ def apply_to_runtime(row: SystemSettings):
     runtime_settings.fs_http_base = row.fs_http_base or runtime_settings.fs_http_base
 
 
+# Claves que la API nunca devuelve completas (ver core/cifrado.enmascarar):
+# el panel muestra que hay una cargada y sus últimos caracteres. Si las
+# reenvía tal cual, no se tocan.
+_SECRETOS = (
+    "fs_esl_password",
+    "elevenlabs_api_key",
+    "agent_webhook_secret",
+    "ai_llm_api_key",
+    "deepgram_api_key",
+    "ari_password",
+    "webcall_turnstile_secret",
+)
+
+
 def _salida(row: SystemSettings, puede_infra: bool) -> SystemSettingsOut:
     out = SystemSettingsOut.model_validate(row)
+    for campo in _SECRETOS:
+        setattr(out, campo, cifrado.enmascarar(getattr(out, campo)))
     out.puede_infraestructura = puede_infra
     if not puede_infra:
         # Lo global no se muestra a una empresa: incluía la contraseña REAL del
@@ -90,6 +106,9 @@ async def update_settings(
     row = await get_or_create_settings(session)
     puede_infra = await alcance.instalacion_unica(session)
     cambios = payload.model_dump(exclude_unset=True)
+    for campo in _SECRETOS:
+        if cifrado.es_mascara(cambios.get(campo)):
+            cambios.pop(campo)
 
     if not puede_infra:
         # El panel manda el formulario completo, así que no se rechaza: se
@@ -104,8 +123,13 @@ async def update_settings(
     # La cola del widget de llamada web tiene que ser de ESTA empresa: el id
     # se valida con la sesión atada a la empresa (RLS), que no ve las ajenas.
     cola = cambios.get("webcall_queue_id")
-    if cola and not await session.get(Queue, cola):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="La cola indicada no existe")
+    if cola and not await traer_propio(session, Queue, cola):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="La cola indicada no existe")
+
+    # Se guarda normalizado ("57,1,34") para que el dialplan y el panel lean
+    # lo mismo que va a aplicar la política de salientes.
+    if "international_countries" in cambios:
+        cambios["international_countries"] = ",".join(salientes.paises_desde_texto(cambios["international_countries"]))
 
     cambio_esl = any(k in cambios for k in ("fs_esl_host", "fs_esl_port", "fs_esl_password", "fs_http_base"))
     for field, value in cambios.items():
@@ -119,9 +143,45 @@ async def update_settings(
     # (ver config_generator.build_dialplan_xml). Se sirve en vivo por
     # xml_curl, pero un reloadxml purga el árbol cacheado para que el
     # próximo lookup traiga el nuevo.
-    if any(k.startswith("webcall_") for k in cambios):
+    if any(k.startswith("webcall_") for k in cambios) or "outbound_paused" in cambios:
         try:
             await esl.reloadxml()
         except Exception:
             pass
     return _salida(row, puede_infra)
+
+
+@router.post("/salientes/colgar")
+async def colgar_salientes_propias(usuario: User = Depends(usuario_actual)):
+    """Cuelga las salientes EN CURSO de la empresa del usuario, nunca de
+    otra: la empresa sale de la sesión, no de la petición."""
+    from app.services import emergencia
+
+    if usuario.tenant_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo para usuarios de una empresa")
+    try:
+        await emergencia.colgar_salientes([usuario.tenant_id])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"FreeSWITCH no respondió; no se pudo colgar: {exc}")
+    return {"empresas": 1}
+
+
+@router.get("/salientes")
+async def estado_salientes(session: AsyncSession = Depends(get_session), usuario: User = Depends(usuario_actual)):
+    """Si la empresa puede llamar afuera ahora, y cuánto lleva del cupo de
+    hoy. Es lo que el administrador mira cuando "no salen las llamadas"."""
+    from app.services import licensing
+
+    tid = usuario.tenant_id
+    if tid is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo para usuarios de una empresa")
+    politica = await salientes.politica_de(session, tid)
+    lic = await licensing.obtener(session, tid)
+    usados = (await salientes.minutos_salientes_hoy(session, [tid])).get(tid, 0)
+    return {
+        "bloqueo": politica.bloqueo,
+        "minutos_hoy": round(usados, 1),
+        "cupo_diario": licensing.limite(lic, "max_outbound_minutes_day"),
+        "permitir_internacional": politica.permitir_internacional,
+        "paises": list(politica.paises),
+    }

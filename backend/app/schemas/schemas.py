@@ -2,9 +2,10 @@ import re
 from datetime import datetime
 from typing import Annotated, Optional
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 from app.core import urls, validacion as val
+from app.core.cifrado import enmascarar
 from app.core.clock import a_hora_local
 
 
@@ -127,13 +128,22 @@ class TrunkOut(BaseModel):
     enabled: bool = True
     created_at: datetime
 
+    # La contraseña del proveedor no sale completa (ver core/cifrado.py): con
+    # ella se hacen llamadas facturadas a la empresa. Si el panel reenvía la
+    # máscara al guardar, no se cambia.
+    @field_serializer("password")
+    def _ocultar_password(self, v: Optional[str]) -> Optional[str]:
+        return enmascarar(v)
+
 
 class ExtensionBase(BaseModel):
     number: Extension
-    password: TextoSinControl
+    # Vacía o ausente = la genera el sistema (ver validacion.generar_clave_sip).
+    password: Optional[TextoSinControl] = None
     caller_id_name: Optional[NombreVisible] = None
     voicemail: bool = True
     enabled: bool = True
+    outbound_after_hours: bool = False
 
 
 class ExtensionCreate(ExtensionBase):
@@ -146,6 +156,7 @@ class ExtensionUpdate(BaseModel):
     caller_id_name: Optional[NombreVisible] = None
     voicemail: Optional[bool] = None
     enabled: Optional[bool] = None
+    outbound_after_hours: Optional[bool] = None
 
 
 class ExtensionOut(BaseModel):
@@ -157,6 +168,7 @@ class ExtensionOut(BaseModel):
     caller_id_name: Optional[str] = None
     voicemail: bool = True
     enabled: bool = True
+    outbound_after_hours: bool = False
     created_at: datetime
 
 
@@ -233,17 +245,60 @@ class VoiceBotOut(VoiceBotBase):
     flow_json: Optional[str] = None
 
 
+def _plantilla_crm(v):
+    if v is None or not str(v).strip():
+        return None
+    from app.core import urls
+    from app.services.integraciones import validar_plantilla_crm
+
+    try:
+        return validar_plantilla_crm(v)
+    except urls.UrlNoPermitida as exc:
+        raise ValueError(str(exc))
+
+
 class CampaignBase(BaseModel):
     name: str
     trunk_id: Optional[int] = None
     voicebot_id: Optional[int] = None
     max_concurrency: int = Field(default=5, ge=1, le=100)
     retries: int = Field(default=0, ge=0, le=10)
+    # Topes diarios: llamadas lanzadas y minutos por troncal. Vacío = sin tope.
+    max_calls_per_day: Optional[int] = Field(default=None, ge=1, le=1_000_000)
+    max_minutes_per_day: Optional[int] = Field(default=None, ge=1, le=1_000_000)
     message_template: Optional[str] = None
     # Intención del voizbot para las llamadas de esta campaña (ver
     # app/services/ai_intents.py). Vacío/None = "confirmar" (compatibilidad
     # con las campañas viejas, que eran todas de confirmación).
     ai_intent: Optional[str] = None
+    # Minutos de espera antes de volver a marcar según el resultado anterior
+    # (busy, noanswer, failed). Ver services/hopper.py.
+    reglas_reciclaje: Optional[dict[str, int]] = None
+    # Con agentes (services/agentes.py) o con el voizbot (lo de antes).
+    metodo: str = Field(default="voizbot", pattern="^(voizbot|manual|vista_previa|progresivo|proporcional|predictivo)$")
+    guion: Optional[str] = Field(default=None, max_length=10000)
+    grabacion: str = Field(default="todas", pattern="^(todas|ninguna)$")
+    # Proporcional y predictivo (services/predictivo.py).
+    nivel_marcacion: float = Field(default=1.0, ge=1.0, le=5.0)
+    nivel_max: float = Field(default=3.0, ge=1.0, le=5.0)
+    abandono_objetivo: float = Field(default=3.0, ge=0.5, le=10.0)
+    temporizador_abandono: int = Field(default=2, ge=1, le=10)
+    mensaje_abandono: Optional[str] = Field(default=None, max_length=500)
+    # CRM externo: la consola del agente abre esta URL con las {variables}
+    # del lead, firmada (services/integraciones.py).
+    crm_url: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("reglas_reciclaje")
+    @classmethod
+    def _reglas(cls, v):
+        from app.services.hopper import validar_reglas
+
+        return validar_reglas(v)
+
+    @field_validator("crm_url")
+    @classmethod
+    def _crm(cls, v):
+        return _plantilla_crm(v)
 
 
 class CampaignCreate(CampaignBase):
@@ -256,8 +311,32 @@ class CampaignUpdate(BaseModel):
     voicebot_id: Optional[int] = None
     max_concurrency: Optional[int] = Field(default=None, ge=1, le=100)
     retries: Optional[int] = Field(default=None, ge=0, le=10)
+    max_calls_per_day: Optional[int] = Field(default=None, ge=1, le=1_000_000)
+    max_minutes_per_day: Optional[int] = Field(default=None, ge=1, le=1_000_000)
     message_template: Optional[str] = None
     ai_intent: Optional[str] = None
+    reglas_reciclaje: Optional[dict[str, int]] = None
+    metodo: Optional[str] = Field(default=None, pattern="^(voizbot|manual|vista_previa|progresivo|proporcional|predictivo)$")
+    guion: Optional[str] = Field(default=None, max_length=10000)
+    grabacion: Optional[str] = Field(default=None, pattern="^(todas|ninguna)$")
+    nivel_marcacion: Optional[float] = Field(default=None, ge=1.0, le=5.0)
+    nivel_max: Optional[float] = Field(default=None, ge=1.0, le=5.0)
+    abandono_objetivo: Optional[float] = Field(default=None, ge=0.5, le=10.0)
+    temporizador_abandono: Optional[int] = Field(default=None, ge=1, le=10)
+    mensaje_abandono: Optional[str] = Field(default=None, max_length=500)
+    crm_url: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("reglas_reciclaje")
+    @classmethod
+    def _reglas(cls, v):
+        from app.services.hopper import validar_reglas
+
+        return validar_reglas(v)
+
+    @field_validator("crm_url")
+    @classmethod
+    def _crm(cls, v):
+        return _plantilla_crm(v)
 
 
 class CampaignOut(CampaignBase):
@@ -265,6 +344,9 @@ class CampaignOut(CampaignBase):
 
     id: int
     status: str
+    nivel_actual: Optional[float] = None
+    # Si ya hay audio para el mensaje de abandono.
+    audio_abandono: Optional[str] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
@@ -290,6 +372,15 @@ class SystemSettingsOut(BaseModel):
     deepgram_api_key: Optional[str] = None
     record_all_calls: bool = False
     allow_international: bool = False
+    international_countries: str = ""
+    outbound_paused: bool = False
+    campaign_hours_weekdays: str = "07:00-19:00"
+    campaign_hours_saturday: str = "08:00-15:00"
+    campaign_sundays_holidays: bool = False
+    outbound_hours_enabled: bool = False
+    outbound_hours_weekdays: str = "07:00-19:00"
+    outbound_hours_saturday: str = "08:00-13:00"
+    outbound_hours_sundays_holidays: bool = False
     ai_stt_provider: str = "elevenlabs"
     ai_voice_provider: str = "elevenlabs"
     ai_voice_id: str = "Xb7hH8MSUJpSbSDYk0k2"
@@ -362,6 +453,29 @@ class SystemSettingsUpdate(BaseModel):
 
     record_all_calls: Optional[bool] = None
     allow_international: Optional[bool] = None
+    outbound_paused: Optional[bool] = None
+    # "HH:MM-HH:MM"; vacío o "-" = ese día no se marca.
+    campaign_hours_weekdays: Optional[str] = Field(default=None, max_length=11)
+    campaign_hours_saturday: Optional[str] = Field(default=None, max_length=11)
+    campaign_sundays_holidays: Optional[bool] = None
+    outbound_hours_enabled: Optional[bool] = None
+    outbound_hours_weekdays: Optional[str] = Field(default=None, max_length=11)
+    outbound_hours_saturday: Optional[str] = Field(default=None, max_length=11)
+    outbound_hours_sundays_holidays: Optional[bool] = None
+
+    @field_validator("campaign_hours_weekdays", "campaign_hours_saturday", "outbound_hours_weekdays", "outbound_hours_saturday")
+    @classmethod
+    def _franja_valida(cls, v):
+        if v is None:
+            return v
+        from app.services.horario_marcacion import leer_franja
+
+        leer_franja(v)  # lanza ValueError con el motivo
+        return v.strip() or "-"
+    # Códigos de país separados por coma ("57, 1, 34"); se guardan normalizados.
+    international_countries: Optional[str] = Field(
+        default=None, max_length=200, pattern=r"^[0-9+,;\s]*$"
+    )
     ai_stt_provider: Optional[str] = Field(default=None, pattern="^(elevenlabs|deepgram)$")
     ai_voice_provider: Optional[str] = Field(default=None, pattern="^(edge|elevenlabs|deepgram)$")
     ai_voice_id: Optional[str] = None
@@ -423,6 +537,10 @@ class CallLogOut(BaseModel):
     started_at: Optional[datetime] = None
     answered_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
+    setup_ms: Optional[int] = None
+    ring_ms: Optional[int] = None
+    espera_ms: Optional[int] = None
+    colgo: Optional[str] = None
 
 
 class CampaignNumberRow(BaseModel):
@@ -691,6 +809,16 @@ class QueueOut(BaseModel):
     created_at: datetime
 
 
+class AgentesCampanaIn(BaseModel):
+    user_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
+class ListaUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    activa: Optional[bool] = None
+    prioridad: Optional[int] = Field(default=None, ge=-100, le=100)
+
+
 class CampaignStats(BaseModel):
     total: int = 0
     pending: int = 0
@@ -700,7 +828,18 @@ class CampaignStats(BaseModel):
     noanswer: int = 0
     failed: int = 0
     done: int = 0
+    # En la lista de no llamar: no se marcan.
+    no_llamar: int = 0
+    # Pendientes que esperan su próximo intento (reciclaje) o cuya lista
+    # está pausada: todavía no se pueden marcar.
+    en_espera: int = 0
     active_calls: int = 0
+    # Consumo de hoy contra los topes diarios de la campaña.
+    llamadas_hoy: int = 0
+    minutos_hoy: float = 0
+    tope_alcanzado: Optional[str] = None
+    # Proporcional y predictivo: lo de hoy y el nivel que lleva.
+    predictivo: Optional[dict] = None
 
 
 # ---------- Empresas (tenants) ----------
@@ -765,6 +904,7 @@ class TenantUpdate(BaseModel):
     business_type: Optional[str] = Field(default=None, pattern="^(general|clinica|cobranza)$")
     modules: Optional[list[str]] = None
     enabled: Optional[bool] = None
+    outbound_blocked: Optional[bool] = None
 
 
 class TenantOut(BaseModel):
@@ -778,6 +918,9 @@ class TenantOut(BaseModel):
     business_type: str = "general"
     modules: list[str] = Field(default_factory=lambda: ["voicebot", "pbx"])
     enabled: bool
+    outbound_blocked: bool = False
+    # Servidor FreeSWITCH donde vive (None = el principal).
+    nodo_id: Optional[int] = None
     created_at: datetime
     users_count: int = 0
     extensions_count: int = 0
@@ -795,6 +938,8 @@ class LicenseOut(BaseModel):
     max_trunks: Optional[int] = None
     max_concurrent_calls: Optional[int] = None
     max_campaigns: Optional[int] = None
+    max_outbound_minutes_day: Optional[int] = None
+    max_outbound_cps: Optional[int] = None
 
 
 class LicenseUpdate(BaseModel):
@@ -805,6 +950,8 @@ class LicenseUpdate(BaseModel):
     max_trunks: Optional[int] = Field(default=None, ge=0)
     max_concurrent_calls: Optional[int] = Field(default=None, ge=0)
     max_campaigns: Optional[int] = Field(default=None, ge=0)
+    max_outbound_minutes_day: Optional[int] = Field(default=None, ge=0)
+    max_outbound_cps: Optional[int] = Field(default=None, ge=1, le=1000)
 
 
 class TenantCreatedOut(TenantOut):
@@ -849,6 +996,13 @@ class DebtOut(BaseModel):
     notes: Optional[str] = None
     status: str
     created_at: datetime
+
+
+class PaymentPromiseUpdate(BaseModel):
+    """Lo que se marca a mano según el cobro real: si pagó o no, y una nota."""
+
+    status: Optional[str] = Field(default=None, pattern="^(pending|completed|missed)$")
+    notes: Optional[str] = None
 
 
 class PaymentPromiseOut(BaseModel):
@@ -932,11 +1086,25 @@ class UserOut(BaseModel):
     # la lista de extensiones solo para mostrar un número.
     extension_number: Optional[str] = None
     enabled: bool
+    # Si tiene la verificación en dos pasos activa (nunca el secreto).
+    mfa_enabled: bool = False
     last_login_at: Optional[datetime] = None
     created_at: datetime
 
 
-class LoginRequest(BaseModel):
+class ClienteSesion(BaseModel):
+    """De dónde entra la persona. La app móvil recibe un refresh token (su
+    sesión dura semanas y se renueva); el panel web no lo usa, así que no se
+    le entrega: un token largo que nadie guarda es solo exposición. Sin
+    `plataforma` (apps viejas) se entrega igual, por compatibilidad."""
+
+    plataforma: Optional[str] = Field(default=None, pattern="^(web|android|ios)$")
+    # "Samsung SM-A515F · Android 13": para que la persona reconozca el
+    # equipo en Mi cuenta → Sesiones.
+    dispositivo: Optional[str] = Field(default=None, max_length=150)
+
+
+class LoginRequest(ClienteSesion):
     username: str
     password: str
     # Subdominio del panel desde el que se entra (ej. "consultorio-andino"
@@ -960,6 +1128,33 @@ class SesionOut(BaseModel):
     # la misma seguridad que un almacén de llavero del sistema operativo, y
     # no lo necesita: su sesión dura lo que dura la pestaña abierta).
     refresh_token: Optional[str] = None
+    # Verificación en dos pasos (ver core/mfa.py): si está activa, y si el
+    # rol la exige y falta activarla (la interfaz lleva a activarla).
+    mfa_activo: bool = False
+    mfa_pendiente: bool = False
+
+
+class MfaRequeridoOut(BaseModel):
+    """Respuesta del login cuando la contraseña es correcta pero falta el
+    código: `mfa_token` se canjea en /api/auth/mfa/verificar."""
+
+    mfa_requerido: bool = True
+    mfa_token: str
+
+
+class MfaVerificarRequest(ClienteSesion):
+    mfa_token: str = Field(..., max_length=2000)
+    # 6 dígitos de la app, o un código de recuperación ("abcd-efgh").
+    codigo: str = Field(..., min_length=6, max_length=20)
+
+
+class MfaCodigoRequest(ClienteSesion):
+    codigo: str = Field(..., min_length=6, max_length=20)
+
+
+class MfaDesactivarRequest(BaseModel):
+    password: str = Field(..., max_length=128)
+    codigo: str = Field(..., min_length=6, max_length=20)
 
 
 class RefreshRequest(BaseModel):
@@ -977,6 +1172,71 @@ class DeviceTokenIn(BaseModel):
     token: str
 
 
-class CambiarPasswordRequest(BaseModel):
+class CambiarPasswordRequest(ClienteSesion):
     password_actual: str
     password_nueva: str = Field(min_length=8, max_length=128)
+
+
+# ---------- CRM (contactos, campos propios, no llamar) ----------
+
+
+class TelefonoExtra(BaseModel):
+    numero: Telefono
+    tipo: str = Field(default="movil", max_length=20)
+
+
+class ContactoIn(BaseModel):
+    nombre: str = Field(default="", max_length=150)
+    documento: Optional[str] = Field(default=None, max_length=30)
+    telefono: Telefono
+    telefonos: list[TelefonoExtra] = Field(default_factory=list, max_length=5)
+    email: Optional[str] = Field(default=None, max_length=150)
+    direccion: Optional[str] = Field(default=None, max_length=255)
+    ciudad: Optional[str] = Field(default=None, max_length=100)
+    campos: dict = Field(default_factory=dict)
+
+
+class ContactoUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, max_length=150)
+    documento: Optional[str] = Field(default=None, max_length=30)
+    telefono: Optional[Telefono] = None
+    telefonos: Optional[list[TelefonoExtra]] = Field(default=None, max_length=5)
+    email: Optional[str] = Field(default=None, max_length=150)
+    direccion: Optional[str] = Field(default=None, max_length=255)
+    ciudad: Optional[str] = Field(default=None, max_length=100)
+    campos: Optional[dict] = None
+
+
+class NotaIn(BaseModel):
+    texto: str = Field(..., min_length=1, max_length=4000)
+
+
+class CampoContactoIn(BaseModel):
+    clave: str = Field(..., pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    nombre: str = Field(..., min_length=1, max_length=80)
+    tipo: str = Field(default="texto", pattern="^(texto|numero|fecha|opciones|si_no)$")
+    opciones: Optional[list[Annotated[str, Field(min_length=1, max_length=60)]]] = Field(default=None, max_length=50)
+    obligatorio: bool = False
+    visible_agente: bool = True
+    orden: int = Field(default=0, ge=0, le=1000)
+
+    @model_validator(mode="after")
+    def _opciones(self):
+        if self.tipo == "opciones" and not self.opciones:
+            raise ValueError("Un campo de opciones necesita al menos una opción")
+        return self
+
+
+class CampoContactoUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    tipo: Optional[str] = Field(default=None, pattern="^(texto|numero|fecha|opciones|si_no)$")
+    opciones: Optional[list[Annotated[str, Field(min_length=1, max_length=60)]]] = Field(default=None, max_length=50)
+    obligatorio: Optional[bool] = None
+    visible_agente: Optional[bool] = None
+    orden: Optional[int] = Field(default=None, ge=0, le=1000)
+
+
+class NoLlamarIn(BaseModel):
+    telefono: Telefono
+    motivo: Optional[str] = Field(default=None, max_length=255)
+    hasta: Optional[datetime] = None

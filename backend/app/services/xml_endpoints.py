@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import verificar_secreto_fs as _verificar_secreto
 from app.core.database import get_admin_session
 from app.models import DeviceToken, Extension, InboundRoute, OutboundRoute, Queue, SystemSettings, Tenant, Trunk, VoiceBot
-from app.services import webcall
+from app.services import salientes, webcall
 from app.services.ajustes import dominios_tenants
 from app.services.config_generator import build_dialplan_xml, build_directory_xml, build_guest_directory_xml
 
@@ -29,6 +29,7 @@ def _tenantes(
     colas_por_tenant: dict[int, list],
     push_por_tenant: dict[int, set] | None = None,
     salientes_por_tenant: dict[int, list] | None = None,
+    politicas: dict[int, salientes.Politica] | None = None,
 ) -> list[dict]:
     """Los bloques por empresa que consumen los generadores XML.
 
@@ -62,7 +63,9 @@ def _tenantes(
                 "queues": colas,
                 "record_all": bool(ajustes.record_all_calls) if ajustes else False,
                 "max_call_minutes": ajustes.max_call_duration_minutes if ajustes else 60,
-                "allow_international": bool(ajustes.allow_international) if ajustes else False,
+                # Qué números pueden salir (ver services/salientes.py). Sin
+                # política calculada, la más restrictiva.
+                "politica": (politicas or {}).get(t.id) or salientes.Politica(),
                 "max_concurrent": ajustes.max_concurrent_calls if ajustes else 20,
                 # Números con la app móvil registrada (ver DeviceToken) —
                 # solo a esos se les dispara el push de aviso antes de
@@ -175,6 +178,7 @@ async def fs_dialplan(session: AsyncSession = Depends(get_admin_session)):
         _agrupar(queues),
         push_por_tenant,
         _agrupar(outbound_routes),
+        await salientes.politicas(session, [t.id for t in tenantes_rows]),
     )
     xml = build_dialplan_xml(tenantes, inbound_routes, contextos, dominios, slugs)
     return Response(content=xml, media_type="text/xml")

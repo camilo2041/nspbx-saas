@@ -1,69 +1,141 @@
 import { useRouter } from "expo-router";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { useAuth } from "@/src/auth/AuthContext";
-import { EstadoVacio, Pantalla } from "@/src/gestion";
+import { Avatar, Pantalla } from "@/src/gestion";
 import { toque } from "@/src/haptico";
-import { colores, radios, sombra } from "@/src/tema";
+import { NombreIcono } from "@/src/Icono";
+import { crearEstilos } from "@/src/tema";
+import { FilaMenu, Pildora, Seccion, Tarjeta, Tono } from "@/src/ui";
 
-interface Modulo {
-  ruta: string;
-  icono: string;
+interface Entrada {
   titulo: string;
   detalle: string;
-  permiso: string;
+  icono: NombreIcono;
+  tono: Tono;
+  /** null = cualquiera con sesión. */
+  permiso: string | string[] | null;
+  /** Paquete que tiene que tener la empresa (igual que el panel). */
+  modulo?: "pbx" | "voicebot";
+  ruta: string;
 }
 
-const MODULOS: Modulo[] = [
-  { ruta: "/administrar/troncales", icono: "🔌", titulo: "Troncales", detalle: "Conexión con tu proveedor: estado, prueba y edición", permiso: "telefonia:gestionar" },
-  { ruta: "/administrar/extensiones", icono: "☎️", titulo: "Extensiones", detalle: "Teléfonos y contraseñas SIP", permiso: "telefonia:gestionar" },
-  { ruta: "/administrar/usuarios", icono: "👥", titulo: "Usuarios", detalle: "Crear, editar roles y desactivar cuentas", permiso: "usuarios:gestionar" },
-  { ruta: "/administrar/bots", icono: "🤖", titulo: "Voizbots", detalle: "Prueba tus bots como lo haría un cliente", permiso: "voizbots:ver" },
+/**
+ * Las mismas secciones y en el mismo orden que la barra lateral del panel
+ * web (frontend/components/layout.tsx), para que quien usa los dos no tenga
+ * que aprender dos organizaciones.
+ */
+const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
+  {
+    titulo: "Operación",
+    entradas: [
+      { titulo: "Citas", detalle: "Agenda y confirmaciones del voizbot", icono: "calendario", tono: "info", permiso: "citas:gestionar", modulo: "voicebot", ruta: "/administrar/citas" },
+      { titulo: "Supervisión", detalle: "Agentes y campañas en vivo; escuchar y susurrar", icono: "ver", tono: "marca", permiso: "supervision:ver", ruta: "/administrar/supervision" },
+      { titulo: "Reportes", detalle: "Agentes, campañas, disposiciones y cumplimiento", icono: "metricas", tono: "info", permiso: "reportes:ver", ruta: "/administrar/reportes" },
+      { titulo: "Contactos", detalle: "Clientes, su historial, notas y no llamar", icono: "contactos", tono: "marca", permiso: "crm:ver", ruta: "/administrar/contactos" },
+      { titulo: "Cobranza", detalle: "Cartera, promesas de pago y resultados", icono: "dinero", tono: "ok", permiso: "campanas:gestionar", modulo: "voicebot", ruta: "/administrar/cobranza" },
+    ],
+  },
+  {
+    titulo: "Telefonía",
+    entradas: [
+      { titulo: "Extensiones", detalle: "Teléfonos, contraseñas SIP y desvíos", icono: "extension", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/extensiones" },
+      { titulo: "Troncales", detalle: "Conexión con tu proveedor: estado y prueba", icono: "troncal", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/troncales" },
+      { titulo: "Rutas entrantes", detalle: "A dónde va cada número que te llaman", icono: "entrante", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/rutas-entrantes" },
+      { titulo: "Rutas salientes", detalle: "Por qué troncal sale cada llamada", icono: "saliente", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/rutas-salientes" },
+      { titulo: "Colas", detalle: "Grupos de atención y sus agentes", icono: "cola", tono: "marca", permiso: "colas:gestionar", modulo: "pbx", ruta: "/administrar/colas" },
+    ],
+  },
+  {
+    titulo: "Automatización",
+    entradas: [
+      { titulo: "Voizbots", detalle: "Prueba tus bots como lo haría un cliente", icono: "bot", tono: "info", permiso: "voizbots:ver", modulo: "voicebot", ruta: "/administrar/bots" },
+      { titulo: "Campañas", detalle: "Llamadas masivas, avance y topes del día", icono: "campana", tono: "info", permiso: "campanas:gestionar", modulo: "voicebot", ruta: "/administrar/campanas" },
+      { titulo: "Pausas y disposiciones", detalle: "Lo que eligen los agentes al pausar y al colgar", icono: "pausa", tono: "info", permiso: "campanas:gestionar", ruta: "/administrar/pausas-disposiciones" },
+      { titulo: "Consumo IA", detalle: "Minutos y costo de los voizbots", icono: "tendencia", tono: "info", permiso: "consumo_ia:ver", modulo: "voicebot", ruta: "/administrar/consumo" },
+    ],
+  },
+  {
+    titulo: "Sistema",
+    entradas: [
+      { titulo: "Usuarios", detalle: "Crear, editar roles y desactivar cuentas", icono: "usuario", tono: "neutro", permiso: "usuarios:gestionar", ruta: "/administrar/usuarios" },
+      { titulo: "Roles y permisos", detalle: "Qué puede hacer cada rol", icono: "llave", tono: "neutro", permiso: "usuarios:gestionar", ruta: "/administrar/roles" },
+      { titulo: "Seguridad", detalle: "Bloqueos, alertas y auditoría", icono: "seguridad", tono: "neutro", permiso: "ajustes:gestionar", ruta: "/administrar/seguridad" },
+      { titulo: "Ajustes", detalle: "Horarios, emergencias y datos de la empresa", icono: "ajustes", tono: "neutro", permiso: "ajustes:gestionar", ruta: "/administrar/ajustes" },
+      { titulo: "Empresas", detalle: "Clientes de la plataforma y sus licencias", icono: "servidor", tono: "neutro", permiso: "empresas:gestionar", ruta: "/administrar/empresas" },
+    ],
+  },
 ];
 
-export default function AdministrarHub() {
+const ROLES: Record<string, string> = {
+  admin: "Administrador",
+  supervisor: "Supervisor",
+  coordinador: "Coordinador",
+  asesor: "Asesor",
+  plataforma: "Plataforma",
+};
+
+export default function Menu() {
   const router = useRouter();
-  const { puede } = useAuth();
-  const visibles = MODULOS.filter((m) => puede(m.permiso));
+  const e = useEstilos();
+  const { usuario, puede, tieneModulo } = useAuth();
+
+  const permitido = (x: Entrada) =>
+    (x.permiso === null || (Array.isArray(x.permiso) ? x.permiso.some(puede) : puede(x.permiso))) &&
+    (!x.modulo || tieneModulo(x.modulo));
+  const grupos = GRUPOS.map((g) => ({ ...g, entradas: g.entradas.filter(permitido) })).filter((g) => g.entradas.length);
+
+  const abrir = (x: Entrada) => {
+    toque();
+    router.push(x.ruta as never);
+  };
 
   return (
     <Pantalla>
-      {visibles.length === 0 ? (
-        <EstadoVacio icono="🔒" titulo="Nada para administrar" texto="Tu rol no incluye estas secciones. Pídele a un administrador que revise tus permisos." />
-      ) : (
-        visibles.map((m) => (
-          <Pressable
-            key={m.ruta}
-            onPress={() => {
-              toque();
-              router.push(m.ruta as never);
-            }}
-            style={({ pressed }) => [
-              {
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 14,
-                backgroundColor: colores.superficie,
-                borderRadius: radios.grande,
-                borderWidth: 1,
-                borderColor: colores.borde,
-                padding: 16,
-                ...sombra,
-              },
-              pressed && { transform: [{ scale: 0.985 }] },
-            ]}
-          >
-            <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: colores.marcaSuave, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ fontSize: 24 }}>{m.icono}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: "700", color: colores.texto }}>{m.titulo}</Text>
-              <Text style={{ fontSize: 12.5, color: colores.textoSecundario, marginTop: 2, lineHeight: 17 }}>{m.detalle}</Text>
-            </View>
-            <Text style={{ fontSize: 20, color: colores.placeholder }}>›</Text>
-          </Pressable>
-        ))
-      )}
+      <Tarjeta onPress={() => router.push("/administrar/cuenta")} style={e.perfil}>
+        <Avatar nombre={usuario?.full_name || usuario?.username || "?"} tam={52} />
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={e.nombre} numberOfLines={1}>
+            {usuario?.full_name || usuario?.username}
+          </Text>
+          <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+            <Pildora texto={ROLES[usuario?.role ?? ""] ?? usuario?.role ?? ""} tono="marca" />
+            {usuario?.extension_number ? <Pildora texto={`Ext. ${usuario.extension_number}`} tono="neutro" icono="extension" /> : null}
+          </View>
+        </View>
+      </Tarjeta>
+
+      {grupos.map((g) => (
+        <Seccion key={g.titulo} titulo={g.titulo}>
+          {g.entradas.map((x, i) => (
+            <FilaMenu
+              key={x.titulo}
+              titulo={x.titulo}
+              detalle={x.detalle}
+              icono={x.icono}
+              tono={x.tono}
+              onPress={() => abrir(x)}
+              ultima={i === g.entradas.length - 1}
+            />
+          ))}
+        </Seccion>
+      ))}
+
+      <Seccion titulo="Cuenta">
+        <FilaMenu titulo="Mi cuenta" detalle="Contraseña, huella, apariencia y notificaciones" icono="cuenta" onPress={() => router.push("/administrar/cuenta")} />
+        <FilaMenu
+          titulo="Diagnóstico de llamadas"
+          detalle="Revisa por qué no te entran las llamadas"
+          icono="diagnostico"
+          onPress={() => router.push("/diagnostico")}
+          ultima
+        />
+      </Seccion>
     </Pantalla>
   );
 }
+
+const useEstilos = crearEstilos((c) => ({
+  perfil: { flexDirection: "row", alignItems: "center", gap: 14 },
+  nombre: { fontSize: 18, fontWeight: "700", color: c.texto },
+}));
