@@ -496,6 +496,8 @@ export interface Empresa {
   enabled: boolean;
   /** Salientes cortadas por la plataforma (la empresa no puede deshacerlo). */
   outbound_blocked: boolean;
+  /** Servidor FreeSWITCH donde vive (null = el principal). */
+  nodo_id: number | null;
   created_at: string;
   users_count: number;
   extensions_count: number;
@@ -1030,4 +1032,24 @@ export interface EntregaWebhook {
   ultimo_error: string | null;
   entregado_at: string | null;
   created_at: string;
+}
+
+/** Un servidor FreeSWITCH de la plataforma (backend/app/api/nodos.py). */
+export interface NodoFreeswitch {
+  /** null = el principal (FS_ESL_HOST), que no se edita desde el panel. */
+  id: number | null;
+  nombre: string;
+  esl_host: string;
+  esl_port: number;
+  sip_host: string | null;
+  capacidad_agentes: number | null;
+  activo: boolean;
+  principal: boolean;
+  empresas: number;
+  agentes_conectados: number;
+  conectado?: boolean;
+  error?: string;
+  canales?: number | null;
+  pico?: number | null;
+  version?: string | null;
 }

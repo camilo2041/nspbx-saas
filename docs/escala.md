@@ -54,6 +54,7 @@ espera (`pg_advisory_xact_lock` en `main.migrar`).
 | `permisos` | Caché de permisos personalizados: la réplica que guarda avisa y las demás releen. |
 | `pred` | Foto del predictivo (llamadas timbrando, clientes esperando, métricas de 15 min), cada 2 s, para las cifras en vivo de cualquier réplica. |
 | `webhooks` | Invalidar la caché de suscriptores al crear, editar o borrar un webhook. |
+| `nodos` | Invalidar el directorio de servidores FreeSWITCH al cambiar un servidor o mover una empresa (§4). |
 
 Las escuchas del supervisor (escuchar, susurrar, intervenir) están en la
 tabla `monitoreos`: la petición la atiende cualquier réplica y los eventos los
@@ -117,27 +118,101 @@ DATABASE_URL=postgresql+asyncpg://…/nspbx_carga python -m carga.prueba_carga -
 En CI corre una versión liviana (`tests/test_carga.py`, 40 agentes) que
 comprueba la corrección bajo carga y atrapa regresiones de orden de magnitud.
 
-## 4. Varios FreeSWITCH (pendiente de decisión)
+## 4. Varios FreeSWITCH (opción A: cada empresa en un servidor)
 
-Lo que sí se midió arriba es el backend y la base. FreeSWITCH no se pudo medir
+### Capacidad de un servidor
+
+Lo que se midió arriba es el backend y la base. FreeSWITCH no se pudo medir
 acá (no hay uno real en este ambiente). Estimación para 200 agentes en
 predictivo: hasta unos 600 canales de clientes en el pico (nivel 3) + 200 de
 agentes en conferencia + 200 grabaciones. Un FreeSWITCH en un servidor de 8
 núcleos lo soporta; hay que confirmarlo con `scripts/medir-recursos.sh` en una
-prueba con llamadas reales antes del piloto.
+prueba con llamadas reales antes del piloto. **Objetivo: 200 agentes por
+servidor** (`capacidad_agentes`, editable por servidor).
 
-Para pasar de un FreeSWITCH hay dos caminos, con costos distintos:
+Para pasar de un servidor se eligió la opción A:
 
-| | A. Empresas repartidas por servidor | B. Proxy SIP delante de varios FreeSWITCH |
+| | A. Empresas repartidas por servidor (**implementada**) | B. Proxy SIP delante de varios FreeSWITCH |
 |---|---|---|
-| Cómo | Cada empresa vive en un FreeSWITCH; el backend elige el nodo por empresa | Kamailio u OpenSIPS recibe todo y reparte; los FreeSWITCH comparten registros |
-| Escala | Por empresas (una empresa no puede pasar de un servidor) | Dentro de una empresa también |
-| Cambios | Registro de nodos, conexión ESL por nodo, archivos de troncales por nodo, DNS por empresa | Lo anterior más el proxy, registros compartidos y conferencias entre nodos |
+| Cómo | Cada empresa vive en un FreeSWITCH; el backend elige el servidor por empresa | Kamailio u OpenSIPS recibe todo y reparte; los FreeSWITCH comparten registros |
+| Escala | Por empresas (una empresa no puede pasar de un servidor: 200 agentes) | Dentro de una empresa también |
 | Esfuerzo | Medio | Alto |
 
-Recomendación: A, cuando una empresa o el total de empresas pase de lo que
-soporta un servidor. Antes hay que definir el objetivo (agentes simultáneos
-por empresa y en total) y medir un FreeSWITCH real.
+Si algún día una sola empresa pasa de 200 agentes, ahí toca B.
+
+### Cómo funciona
+
+- **Principal y adicionales.** El principal es el de siempre (`FS_ESL_HOST`
+  o Ajustes). Los adicionales se dan de alta en **Empresas → Servidores
+  FreeSWITCH** (panel y app; solo la plataforma), con su ESL (la clave se
+  guarda cifrada) y su dirección SIP. Sin adicionales nada cambia.
+- **Cada empresa en uno** (`tenants.nodo_id`; vacío = el principal). Cada
+  comando a FreeSWITCH va al servidor de la empresa: el marcador, clic para
+  llamar, la consola del agente, la supervisión, colgar las salientes de una
+  empresa, las colas. `services/nodos.py` guarda el directorio en memoria
+  (30 s; al cambiar algo se invalida en todas las réplicas por el bus).
+- **Eventos.** La réplica líder abre una conexión de eventos con cada
+  servidor. Lo que se hace al procesar un evento va al servidor que lo mandó.
+  Si se cae la conexión con uno, el tablero en vivo descarta solo sus
+  llamadas; los demás siguen.
+- **Lo de la plataforma llega a todos**: recargar la configuración
+  (`reloadxml`), colgar las huérfanas del predictivo al tomar el liderazgo,
+  cortar una extensión. Un servidor caído no impide que los demás lo reciban.
+- **El tope de canales de la plataforma** (`MAX_CONCURRENT_CALLS_GLOBAL`)
+  protege la troncal compartida, así que se compara con la suma de canales de
+  todos los servidores. Si el principal no responde no se marca (como antes);
+  un adicional caído no suma (sus empresas tampoco pueden marcar).
+- **Desactivar un servidor** lo saca de servicio: sus empresas pasan a usar el
+  principal en el acto (para mantenimiento o si se cae del todo).
+
+### Mover una empresa de servidor
+
+Empresas → la columna **Servidor** (en la app: la empresa → Servidor
+FreeSWITCH). Al mover:
+
+1. Si tiene agentes conectados, pide confirmar: sus sesiones se cierran en el
+   servidor anterior (sus llamadas en curso se cuelgan) y vuelven a entrar.
+   Hacerlo fuera de la jornada.
+2. Sus troncales pasan a la carpeta del servidor nuevo y se recargan los dos
+   (`sofia profile external rescan`).
+3. **Falta a mano:** el DNS del dominio SIP de la empresa tiene que apuntar a
+   la dirección SIP del servidor nuevo, para que sus teléfonos y softphones se
+   registren ahí. Mientras el DNS no cambie, sus teléfonos siguen en el
+   anterior y no reciben llamadas del nuevo.
+
+Un servidor con empresas no se puede borrar: primero se mueven.
+
+### Desplegar un servidor adicional
+
+Todos los FreeSWITCH usan la misma configuración; lo único propio de cada uno
+son sus troncales.
+
+1. **Configuración compartida.** `freeswitch/conf` (la que escribe el
+   backend) se monta en el servidor nuevo por NFS, de solo lectura salvo la
+   carpeta de troncales. El dialplan, los usuarios y las colas ya los sirve el
+   backend por `xml_curl`: el `xml_curl.conf.xml` del servidor nuevo apunta al
+   mismo backend con el mismo `FS_XML_SECRET`.
+2. **Troncales del servidor.** Las del principal están en
+   `sip_profiles/external/`; las de un adicional en
+   `FS_CONF/nodos/<nombre>/sip_profiles/external/`. En el servidor nuevo se
+   monta esa carpeta como su `sip_profiles/external`. El backend la crea al
+   dar de alta el servidor y la reconcilia al arrancar.
+3. **Grabaciones y sonidos compartidos.** `freeswitch/recordings` también va
+   por NFS al mismo lugar (`/var/lib/freeswitch/recordings`): el backend las
+   sirve, las retiene y las borra desde una sola carpeta. Igual los audios de
+   los voizbots y las colas.
+4. **ESL.** `event_socket.conf.xml` con la clave que se carga en el panel y
+   un ACL que solo acepte al backend. El puerto 8021 nunca abierto a
+   internet.
+5. **CDR.** `xml_cdr` apunta al mismo `/fs/cdr` del backend, como el
+   principal.
+6. **Alta en el panel.** Empresas → Servidores FreeSWITCH → + Servidor. Con
+   **Probar** se verifica la conexión antes de mover empresas.
+7. **Mover empresas** y cambiar su DNS (arriba).
+
+Repartir: llenar cada servidor hasta unos 160 agentes (80 %) y dejar margen
+para que crezcan sin moverlas en plena operación. El panel marca en rojo un
+servidor que pasa del 90 %.
 
 ## 5. Particionar `estados_agente` y `call_logs` (no hace falta todavía)
 

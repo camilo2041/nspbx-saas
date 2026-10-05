@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import validacion
 from app.core.database import get_admin_session
 from app.models import AgenteVivo, NodoFreeswitch, Tenant, Trunk
-from app.services import esl, gateways
+from app.services import agentes, esl, gateways
 from app.services.nodos import directorio
 
 logger = logging.getLogger(__name__)
@@ -191,7 +191,11 @@ async def asignar(tenant_id: int, payload: AsignarIn, session: AsyncSession = De
         return {"ok": True, "cambio": False}
     conectados = (await session.execute(select(func.count()).select_from(AgenteVivo).where(AgenteVivo.tenant_id == tenant_id))).scalar_one()
     if conectados and not payload.forzar:
-        raise HTTPException(status_code=409, detail=f"La empresa tiene {conectados} agente(s) conectados: muévela fuera de la jornada o confirma")
+        raise HTTPException(status_code=409, detail=f"La empresa tiene {conectados} agente(s) conectados: muévela fuera de la jornada o confirma (se cerrarán sus sesiones)")
+    if conectados:
+        # Antes de cambiar el servidor: sus llamadas y su audio están en el
+        # anterior, y ahí hay que colgarlos. Vuelven a entrar en el nuevo.
+        await agentes.cerrar_todas("servidor", tenant_id=tenant_id)
     anterior = await session.get(NodoFreeswitch, empresa.nodo_id) if empresa.nodo_id else None
     nombre_ant, nombre_nuevo = (anterior.nombre if anterior else None), (destino.nombre if destino else None)
     troncales = (await session.execute(select(Trunk).where(Trunk.tenant_id == tenant_id))).scalars().all()

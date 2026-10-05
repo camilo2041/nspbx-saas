@@ -23,8 +23,9 @@ import {
 import { AuditTable } from "@/components/audit-table";
 import { AvisosCsp } from "@/components/avisos-csp";
 import { ConsumoMensual } from "@/components/consumo-mensual";
+import { MoverEmpresa, ServidoresFreeswitch, nombreServidor } from "@/components/servidores-freeswitch";
 import { api } from "@/lib/api";
-import { AlertaTrafico, Empresa, EmpresaCreada } from "@/lib/types";
+import { AlertaTrafico, Empresa, EmpresaCreada, NodoFreeswitch } from "@/lib/types";
 
 const vacio = { name: "", slug: "", sip_domain: "", subdomain: "", business_type: "general", modules: ["voicebot", "pbx"] as string[] };
 
@@ -101,6 +102,9 @@ export default function EmpresasPage() {
   const [bloqueados, setBloqueados] = useState<{ prefijos: string; fijos: string[] } | null>(null);
   const [textoBloqueados, setTextoBloqueados] = useState("");
   const [guardandoBloqueados, setGuardandoBloqueados] = useState(false);
+  // Servidores FreeSWITCH (docs/escala.md §4).
+  const [nodos, setNodos] = useState<NodoFreeswitch[]>([]);
+  const [moverEmpresa, setMoverEmpresa] = useState<Empresa | null>(null);
 
   const abrirLicencia = (e: Empresa) => {
     const lic = e.licencia;
@@ -142,6 +146,14 @@ export default function EmpresasPage() {
     }
   };
 
+  const cargarNodos = useCallback(async () => {
+    try {
+      setNodos(await api.get<NodoFreeswitch[]>("/api/plataforma/nodos"));
+    } catch {
+      setNodos([]);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -153,6 +165,7 @@ export default function EmpresasPage() {
       setGlobalCortado(global.outbound_blocked);
       // Informativo: si falla, la lista de empresas igual se muestra.
       api.get<AlertaTrafico[]>("/api/plataforma/alertas").then(setAlertas).catch(() => setAlertas([]));
+      cargarNodos();
       api
         .get<{ prefijos: string; fijos: string[] }>("/api/plataforma/destinos-bloqueados")
         .then((d) => {
@@ -166,7 +179,7 @@ export default function EmpresasPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cargarNodos]);
 
   useEffect(() => {
     load();
@@ -416,14 +429,16 @@ export default function EmpresasPage() {
         </Card>
       )}
 
+      {nodos.length > 0 && <ServidoresFreeswitch nodos={nodos} onCambio={load} />}
+
       <Card>
         <CardHeader title="Empresas" subtitle={`${items.length} en la plataforma`} />
         {loading ? (
-          <TableSkeleton cols={6} />
+          <TableSkeleton cols={8} />
         ) : items.length === 0 ? (
           <EmptyState title="No hay empresas" hint="Crea la primera para empezar a operar." action={<Button onClick={abrirCrear}>+ Nueva empresa</Button>} />
         ) : (
-          <Table head={["Nombre", "Tipo", "Módulos", "Licencia", "Subdominio", "Usuarios", "Estado"]}>
+          <Table head={["Nombre", "Tipo", "Módulos", "Licencia", "Subdominio", "Servidor", "Usuarios", "Estado"]}>
             {items.map((e) => {
               const url = urlPanel(e.subdomain);
               const tipo = TIPO_ETIQUETA[e.business_type] ?? TIPO_ETIQUETA.general;
@@ -467,6 +482,16 @@ export default function EmpresasPage() {
                     ) : (
                       <span className="text-faint">—</span>
                     )}
+                  </Td>
+                  <Td>
+                    <button
+                      type="button"
+                      onClick={() => setMoverEmpresa(e)}
+                      className="rounded-full border border-line px-2 py-0.5 font-mono text-xs text-fg-soft transition-colors hover:border-line-strong hover:bg-surface-2"
+                      title="Cambiar de servidor FreeSWITCH"
+                    >
+                      {nombreServidor(nodos, e.nodo_id)}
+                    </button>
                   </Td>
                   <Td>{e.users_count}</Td>
                   <Td>
@@ -655,6 +680,7 @@ export default function EmpresasPage() {
           </div>
         </div>
       </Modal>
+      <MoverEmpresa empresa={moverEmpresa} nodos={nodos} onCerrar={() => setMoverEmpresa(null)} onCambio={load} />
       <ConsumoMensual plataforma />
       <AvisosCsp />
       <AuditTable

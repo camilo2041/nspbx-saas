@@ -4,6 +4,7 @@ import { Alert, ScrollView, Share, Text, View } from "react-native";
 import { peticion } from "@/src/api/client";
 import { Auditoria, fechaUtc } from "@/src/Auditoria";
 import { ConsumoMensual } from "@/src/ConsumoMensual";
+import { MoverEmpresa, ServidoresFreeswitch, nombreServidor, useNodos } from "@/src/ServidoresFreeswitch";
 import { invalidar, useDatos } from "@/src/datos";
 import { Aviso, AvisoSinConexion, Avatar, CampoDef, EstadoVacio, Fila, Hoja, HojaFormulario, ListaEsqueleto, Pantalla } from "@/src/gestion";
 import { exito, fallo } from "@/src/haptico";
@@ -29,6 +30,8 @@ interface Empresa {
   modules: string[];
   enabled: boolean;
   outbound_blocked: boolean;
+  /** Servidor FreeSWITCH donde vive (null = el principal). */
+  nodo_id: number | null;
   users_count: number;
   extensions_count: number;
   licencia: Licencia | null;
@@ -134,6 +137,8 @@ export default function Empresas() {
   const [aviso, setAviso] = useState("");
   const bloqueados = useDatos<{ prefijos: string; fijos: string[] }>("/api/plataforma/destinos-bloqueados", { ttl: 30_000 });
   const [editandoBloqueados, setEditandoBloqueados] = useState(false);
+  const nodos = useNodos();
+  const [moviendo, setMoviendo] = useState<Empresa | null>(null);
 
   const todo = () => {
     invalidar("/api/tenants");
@@ -141,6 +146,7 @@ export default function Empresas() {
     recargar();
     global.recargar();
     alertas.recargar();
+    nodos.recargar();
   };
 
   const guardar = async (v: Record<string, unknown>) => {
@@ -337,6 +343,8 @@ export default function Empresas() {
           </Seccion>
         ) : null}
 
+        <ServidoresFreeswitch onCambio={todo} />
+
         <Boton titulo="Nueva empresa" icono="agregar" onPress={() => setEditando("nueva")} />
         {sinConexion ? <AvisoSinConexion /> : null}
         {error && !datos ? <Aviso texto={error} /> : null}
@@ -388,13 +396,28 @@ export default function Empresas() {
         <Auditoria endpoint="/api/plataforma/auditoria" titulo="Auditoría de la plataforma" />
       </Pantalla>
 
-      <Hoja visible={!!abierta && !editando && !licencia} titulo={abierta?.name ?? ""} onCerrar={() => setAbierta(null)}>
+      <MoverEmpresa
+        empresa={moviendo}
+        onCerrar={() => {
+          setMoviendo(null);
+          setAbierta(null);
+        }}
+        onCambio={todo}
+      />
+
+      <Hoja visible={!!abierta && !editando && !licencia && !moviendo} titulo={abierta?.name ?? ""} onCerrar={() => setAbierta(null)}>
         {abierta ? (
           <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 4, gap: 14 }}>
             <Seccion>
               <FilaMenu titulo="Tipo" icono="ajustes" valor={TIPOS.find((t) => t.valor === abierta.business_type)?.etiqueta ?? abierta.business_type} />
               <FilaMenu titulo="Dominio SIP" icono="servidor" valor={abierta.sip_domain} />
               <FilaMenu titulo="Subdominio" icono="mundo" valor={abierta.subdomain ?? "—"} />
+              <FilaMenu
+                titulo="Servidor FreeSWITCH"
+                icono="servidor"
+                valor={nombreServidor(nodos.datos, abierta.nodo_id)}
+                onPress={() => setMoviendo(abierta)}
+              />
               <FilaMenu titulo="Usuarios / extensiones" icono="usuarios" valor={`${abierta.users_count} / ${abierta.extensions_count}`} />
               <FilaMenu
                 titulo="Licencia"

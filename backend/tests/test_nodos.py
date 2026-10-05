@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 
 from app.core import permissions
 from app.core.config import settings
@@ -283,6 +283,10 @@ async def test_mover_una_empresa(cliente, mundo, fs):
     assert r.status_code == 409 and "conectados" in r.json()["detail"]
     r = await cliente.put(url, json={"nodo_id": nid, "forzar": True}, headers=cab)
     assert r.status_code == 200 and r.json()["cambio"] is True
+    # Sus agentes salieron (en el servidor anterior); vuelven a entrar en el nuevo.
+    async with async_session() as s:
+        assert (await s.execute(select(AgenteVivo).where(AgenteVivo.tenant_id == mundo.alfa.id))).first() is None
+        assert (await s.get(SesionAgente, ses.id)).motivo_fin == "servidor"
     assert any("sip.fs2.test" in a for a in r.json()["avisos"])
     assert (_carpeta("nodo2") / f"gw_{nombre}.xml").exists()
     assert not (_carpeta(None) / f"gw_{nombre}.xml").exists()

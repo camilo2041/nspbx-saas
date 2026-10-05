@@ -857,11 +857,15 @@ class Motor:
 motor = Motor()
 
 
-async def cerrar_todas(motivo: str = "reinicio") -> None:
+async def cerrar_todas(motivo: str = "reinicio", tenant_id: int | None = None) -> None:
     """Al arrancar el backend: las sesiones de antes ya no tienen audio ni
-    eventos confiables. El agente vuelve a entrar."""
+    eventos confiables. El agente vuelve a entrar. Con `tenant_id`, solo las
+    de esa empresa (al moverla de servidor: su audio queda en el anterior)."""
+    consulta = select(AgenteVivo.tenant_id, AgenteVivo.user_id)
+    if tenant_id is not None:
+        consulta = consulta.where(AgenteVivo.tenant_id == tenant_id)
     async with async_session() as dueno:
-        vivos = (await dueno.execute(select(AgenteVivo.tenant_id, AgenteVivo.user_id))).all()
+        vivos = (await dueno.execute(consulta)).all()
     for tenant_id, user_id in vivos:
         async with sesion_de_empresa(tenant_id) as session:
             vivo = await vivo_de(session, user_id)
