@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 /* ------------------------------------------------------------------
@@ -547,6 +547,26 @@ const MODAL_SIZES = {
   xl: "max-w-4xl",
 };
 
+/* Los errores de las páginas se guardan en un estado de la página y se
+   pintan arriba de ella con <ErrorBanner>. Con un modal abierto eso queda
+   DETRÁS del fondo borroso: «Guardar» fallaba y no se veía por qué. Cada
+   modal abierto ofrece un hueco arriba de su contenido y los ErrorBanner se
+   pintan ahí (en el de más arriba) mientras haya uno abierto. */
+const huecosDeModal: HTMLElement[] = [];
+const avisosHuecos = new Set<() => void>();
+function cambiaronHuecos() {
+  avisosHuecos.forEach((f) => f());
+}
+function suscribirHuecos(f: () => void) {
+  avisosHuecos.add(f);
+  return () => {
+    avisosHuecos.delete(f);
+  };
+}
+function huecoActual(): HTMLElement | null {
+  return huecosDeModal[huecosDeModal.length - 1] ?? null;
+}
+
 export function Modal({
   open,
   onClose,
@@ -575,6 +595,17 @@ export function Modal({
   // dejando solo el fondo borroso. Con el portal queda fuera de su alcance.
   const [montado, setMontado] = useState(false);
   useEffect(() => setMontado(true), []);
+
+  const huecoErrores = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    huecosDeModal.push(el);
+    cambiaronHuecos();
+    return () => {
+      const i = huecosDeModal.indexOf(el);
+      if (i >= 0) huecosDeModal.splice(i, 1);
+      cambiaronHuecos();
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -617,7 +648,10 @@ export function Modal({
             </IconButton>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div ref={huecoErrores} className="empty:hidden mb-4 space-y-2" />
+          {children}
+        </div>
         {footer && (
           <div className="flex justify-end gap-2 border-t border-line bg-surface-2 px-5 py-3.5">{footer}</div>
         )}
@@ -663,8 +697,15 @@ export function TableSkeleton({ cols = 5, rows = 4 }: { cols?: number; rows?: nu
 }
 
 export function ErrorBanner({ message, onClose }: { message: string; onClose?: () => void }) {
-  return (
-    <div className="animate-fade-up flex items-start gap-2.5 rounded-xl border border-danger/25 bg-danger-soft px-4 py-3 text-sm text-danger-text">
+  const hueco = useSyncExternalStore(suscribirHuecos, huecoActual, () => null);
+  const ref = useRef<HTMLDivElement>(null);
+  // En un formulario largo el hueco puede haber quedado arriba, fuera de vista.
+  useEffect(() => {
+    if (hueco) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [hueco, message]);
+
+  const banner = (
+    <div ref={ref} role="alert" className="animate-fade-up flex items-start gap-2.5 rounded-xl border border-danger/25 bg-danger-soft px-4 py-3 text-sm text-danger-text">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5 h-4 w-4 shrink-0">
         <circle cx="12" cy="12" r="9" />
         <path strokeLinecap="round" d="M12 8v5M12 16h.01" />
@@ -679,6 +720,7 @@ export function ErrorBanner({ message, onClose }: { message: string; onClose?: (
       )}
     </div>
   );
+  return hueco ? createPortal(banner, hueco) : banner;
 }
 
 export function EmptyState({
