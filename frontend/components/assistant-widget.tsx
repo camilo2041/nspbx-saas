@@ -181,7 +181,7 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
             inset-x-3 bottom-24 h-[min(70vh,560px)] sm:inset-x-auto sm:right-5 ${ancho ? "sm:h-[min(82vh,720px)] sm:w-[560px]" : "sm:h-[min(70vh,560px)] sm:w-[380px]"}`}
         >
           <header className="flex items-center gap-3 border-b border-line bg-gradient-to-r from-brand-soft to-info-soft/60 px-4 py-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-[var(--shadow-brand)]">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-marca text-white shadow-[var(--shadow-brand)]">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4L12 3zM18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9L18 15z" />
               </svg>
@@ -244,7 +244,7 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
                   <div
                     className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
                       m.role === "user"
-                        ? "rounded-br-md bg-gradient-to-br from-orange-500 to-amber-500 text-white"
+                        ? "rounded-br-md bg-marca text-white"
                         : m.error
                         ? "rounded-bl-md bg-danger-soft text-danger-text"
                         : "rounded-bl-md bg-surface-2 text-fg-soft"
@@ -343,7 +343,7 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
         }}
         aria-label={abierto ? "Cerrar asistente" : "Abrir asistente"}
         aria-expanded={abierto}
-        className="press group fixed bottom-5 right-5 z-[90] flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-[var(--shadow-brand)] transition-transform duration-200 hover:scale-105"
+        className="press group fixed bottom-5 right-5 z-[90] flex h-14 w-14 items-center justify-center rounded-full bg-marca text-white shadow-[var(--shadow-brand)] transition-transform duration-200 hover:scale-105"
       >
         {sinLeer && !abierto && <span className="absolute right-1 top-1 h-3 w-3 rounded-full border-2 border-white bg-info" />}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={`h-6 w-6 transition-transform duration-300 ${abierto ? "rotate-90 scale-0 absolute" : ""}`}>

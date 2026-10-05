@@ -8,7 +8,7 @@ import { radios, useColores } from "@/src/tema";
 import { Boton, FilaMenu, Metrica, Pildora, Seccion, Segmentado, Tarjeta, Tono } from "@/src/ui";
 
 // Mismos colores de serie que el panel (validados para daltonismo en claro y oscuro).
-const C_VOZ = "#ea580c";
+const C_VOZ = "#ff8a00";
 const C_MODELO = "#0284c7";
 
 interface Proveedor {

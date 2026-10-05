@@ -88,8 +88,8 @@ export function PageHeader({
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
         <div className="flex items-center gap-2.5">
-          <span className="h-6 w-1 shrink-0 rounded-full bg-gradient-to-b from-brand to-accent" />
-          <h1 className="bg-gradient-to-br from-fg via-fg to-brand bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-[1.7rem]">
+          <span className="bg-marca h-6 w-1 shrink-0 rounded-full" />
+          <h1 className="font-title text-2xl font-bold uppercase tracking-tight text-fg sm:text-[1.7rem]">
             {title}
           </h1>
         </div>
@@ -107,7 +107,7 @@ type Variant = "primary" | "secondary" | "danger" | "success" | "ghost";
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-gradient-to-r from-brand to-accent text-on-brand shadow-[var(--shadow-brand)] hover:from-brand-hover hover:to-brand hover:shadow-[0_10px_26px_-8px_rgb(234_88_12/0.55)]",
+    "bg-marca text-on-brand shadow-[var(--shadow-brand)] hover:brightness-110 hover:shadow-[0_10px_26px_-8px_rgb(31_94_255/0.55)]",
   secondary:
     "border border-line bg-surface text-fg-soft hover:border-line-strong hover:bg-surface-2 hover:text-fg",
   danger: "bg-danger text-white shadow-[0_6px_18px_-8px_var(--danger)] hover:brightness-110",
@@ -787,9 +787,9 @@ export function RowActions({ children }: { children: ReactNode }) {
 const STAT_TONES: Record<string, { chip: string; bar: string }> = {
   sky: { chip: "bg-info-soft text-info-text", bar: "from-sky-400 to-cyan-400" },
   emerald: { chip: "bg-ok-soft text-ok-text", bar: "from-emerald-400 to-teal-400" },
-  violet: { chip: "bg-violet-soft text-violet-text", bar: "from-orange-400 to-amber-400" },
+  violet: { chip: "bg-violet-soft text-violet-text", bar: "from-violet-500 to-fuchsia-400" },
   amber: { chip: "bg-warn-soft text-warn-text", bar: "from-amber-400 to-orange-400" },
-  indigo: { chip: "bg-brand-soft text-brand-text", bar: "from-orange-400 to-amber-500" },
+  indigo: { chip: "bg-brand-soft text-brand-text", bar: "from-blue-500 to-violet-500" },
   rose: { chip: "bg-danger-soft text-danger-text", bar: "from-rose-400 to-pink-400" },
 };
 
@@ -897,7 +897,7 @@ export function ProgressBar({
         ? "from-amber-500 to-orange-400"
         : tone === "danger"
           ? "from-rose-600 to-red-500"
-          : "from-orange-500 to-amber-400";
+          : "from-blue-600 to-violet-500";
   return (
     <div className={`h-1.5 overflow-hidden rounded-full bg-surface-3 ${className}`}>
       <div

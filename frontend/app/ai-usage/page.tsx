@@ -28,7 +28,7 @@ const POR_PAGINA = 25;
    ΔE 23.4 en protanopía y 33.3 en visión normal, muy por encima del piso.
    El mismo par sirve en ambos temas, así que no hay que cambiarlo al
    alternar modo oscuro. */
-const C_VOZ = "#ea580c"; // voz + transcripción (sea quien sea el proveedor)
+const C_VOZ = "#ff8a00"; // voz + transcripción (sea quien sea el proveedor)
 const C_MODELO = "#0284c7"; // el modelo de lenguaje
 
 type Summary = {

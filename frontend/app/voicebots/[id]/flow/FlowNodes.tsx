@@ -38,7 +38,7 @@ function NodeShell({
 export function MenuNodeView({ data, selected }: { data: FlowNodeData; selected?: boolean }) {
   return (
     <NodeShell
-      color="bg-gradient-to-r from-orange-600 to-amber-600"
+      color="bg-marca"
       icon="🔊"
       title={data.label || "Menú de audio"}
       selected={selected}

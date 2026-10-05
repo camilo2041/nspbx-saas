@@ -114,7 +114,7 @@ export function Aviso({ texto, tono = "peligro" }: { texto: string; tono?: "peli
   );
 }
 
-const PALETA_AVATAR = ["#ea580c", "#0284c7", "#059669", "#7c3aed", "#db2777", "#0d9488", "#d97706"];
+const PALETA_AVATAR = ["#1f5eff", "#7b3fe4", "#ff8a00", "#0b9be0", "#059669", "#db2777", "#0d9488"];
 
 export function Avatar({ nombre, tam = 40 }: { nombre: string; tam?: number }) {
   const limpio = (nombre || "?").trim();

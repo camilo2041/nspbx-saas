@@ -8,117 +8,123 @@
    nombres semánticos (surface, line, muted, brand…), nunca `slate-800`
    suelto: así el modo claro y el oscuro se mantienen coherentes y se
    pueden retocar sin tocar los componentes.
+
+   Marca NSIT (la de nspbxdevelop.com): azul #1f5eff, morado #7b3fe4,
+   naranja #ff8a00, celeste #19b8ff, ámbar #ffb400; marino #0b1a4a para el
+   texto, «mist» #eef3ff de fondo claro y noche #050b1f / #081233 en oscuro.
+   El degradado de marca (azul → morado → naranja) está en .bg-marca y
+   .text-marca, más abajo.
 ------------------------------------------------------------------ */
 :root {
   color-scheme: light;
 
-  --bg: #f2f5fb;
-  --bg-tint-a: rgb(249 115 22 / 0.16);
-  --bg-tint-b: rgb(14 165 233 / 0.12);
-  --bg-tint-c: rgb(139 92 246 / 0.09);
+  --bg: #f3f6ff;
+  --bg-tint-a: rgb(31 94 255 / 0.12);
+  --bg-tint-b: rgb(123 63 228 / 0.08);
+  --bg-tint-c: rgb(255 138 0 / 0.08);
 
   --surface: #ffffff;
-  --surface-2: #f8fafc;
-  --surface-3: #eff3f9;
+  --surface-2: #f6f8ff;
+  --surface-3: #eef3ff;
   --sidebar: #ffffff;
 
-  --line: #e5e9f0;
-  --line-strong: #cdd5e1;
+  --line: #e1e7f5;
+  --line-strong: #c8d2ea;
 
-  --fg: #0f172a;
-  --fg-soft: #334155;
-  --muted: #64748b;
-  --faint: #94a3b8;
+  --fg: #0b1a4a;
+  --fg-soft: #1d2750;
+  --muted: #56608a;
+  --faint: #8c95b8;
 
-  --brand: #ea580c;
-  --brand-hover: #c2410c;
-  --brand-soft: #fff7ed;
-  --brand-text: #c2410c;
+  --brand: #1f5eff;
+  --brand-hover: #1749d6;
+  --brand-soft: #eef3ff;
+  --brand-text: #1a4fe0;
   --on-brand: #ffffff;
-  --accent: #f97316;
+  --accent: #ff8a00;
 
-  --ok: #059669;
+  --ok: #009767;
   --ok-soft: #ecfdf5;
-  --ok-text: #047857;
+  --ok-text: #007956;
 
-  --warn: #d97706;
-  --warn-soft: #fffbeb;
-  --warn-text: #b45309;
+  --warn: #dd7400;
+  --warn-soft: #fff8eb;
+  --warn-text: #b75000;
 
   --danger: #e11d48;
   --danger-soft: #fff1f2;
   --danger-text: #be123c;
 
-  --info: #0284c7;
-  --info-soft: #f0f9ff;
-  --info-text: #0369a1;
+  --info: #0b9be0;
+  --info-soft: #ebf8ff;
+  --info-text: #0877b0;
 
-  --violet: #ea580c;
-  --violet-soft: #fff7ed;
-  --violet-text: #c2410c;
+  --violet: #7b3fe4;
+  --violet-soft: #f3edff;
+  --violet-text: #6230c4;
 
-  --ring: #f97316;
+  --ring: #1f5eff;
 
-  --shadow-1: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 3px rgb(15 23 42 / 0.04);
-  --shadow-2: 0 6px 16px -6px rgb(15 23 42 / 0.12), 0 2px 6px -2px rgb(15 23 42 / 0.06);
-  --shadow-3: 0 24px 48px -16px rgb(15 23 42 / 0.25), 0 8px 20px -12px rgb(15 23 42 / 0.14);
-  --shadow-brand: 0 6px 18px -6px rgb(234 88 12 / 0.45);
+  --shadow-1: 0 1px 2px rgb(11 26 74 / 0.05), 0 1px 3px rgb(11 26 74 / 0.04);
+  --shadow-2: 0 6px 16px -6px rgb(11 26 74 / 0.12), 0 2px 6px -2px rgb(11 26 74 / 0.06);
+  --shadow-3: 0 24px 48px -16px rgb(11 26 74 / 0.25), 0 8px 20px -12px rgb(11 26 74 / 0.14);
+  --shadow-brand: 0 6px 18px -6px rgb(31 94 255 / 0.45);
 }
 
 .dark {
   color-scheme: dark;
 
-  --bg: #080b14;
-  --bg-tint-a: rgb(251 146 60 / 0.22);
-  --bg-tint-b: rgb(56 189 248 / 0.16);
-  --bg-tint-c: rgb(167 139 250 / 0.12);
+  --bg: #050b1f;
+  --bg-tint-a: rgb(31 94 255 / 0.2);
+  --bg-tint-b: rgb(123 63 228 / 0.16);
+  --bg-tint-c: rgb(255 138 0 / 0.1);
 
-  --surface: #0f1524;
-  --surface-2: #141b2d;
-  --surface-3: #1a2338;
-  --sidebar: #0b1120;
+  --surface: #081233;
+  --surface-2: #0c173e;
+  --surface-3: #111f4d;
+  --sidebar: #060d26;
 
-  --line: #1e2739;
-  --line-strong: #2d3a52;
+  --line: #1d2750;
+  --line-strong: #2c3a6e;
 
-  --fg: #e8edf7;
-  --fg-soft: #cbd5e1;
-  --muted: #94a3b8;
-  --faint: #64748b;
+  --fg: #eef3ff;
+  --fg-soft: #c9d4f2;
+  --muted: #8f9cc6;
+  --faint: #5f6b98;
 
-  --brand: #fb923c;
-  --brand-hover: #fdba74;
-  --brand-soft: rgb(251 146 60 / 0.14);
-  --brand-text: #fdba74;
-  --on-brand: #1a0f00;
-  --accent: #fdba74;
+  --brand: #4d7dff;
+  --brand-hover: #7a9cff;
+  --brand-soft: rgb(31 94 255 / 0.18);
+  --brand-text: #9fb6ff;
+  --on-brand: #ffffff;
+  --accent: #ff8a00;
 
   --ok: #10b981;
   --ok-soft: rgb(16 185 129 / 0.14);
   --ok-text: #34d399;
 
-  --warn: #f59e0b;
-  --warn-soft: rgb(245 158 11 / 0.14);
-  --warn-text: #fbbf24;
+  --warn: #ffb400;
+  --warn-soft: rgb(255 180 0 / 0.14);
+  --warn-text: #ffd236;
 
   --danger: #f43f5e;
   --danger-soft: rgb(244 63 94 / 0.14);
   --danger-text: #fb7185;
 
-  --info: #38bdf8;
-  --info-soft: rgb(56 189 248 / 0.14);
+  --info: #19b8ff;
+  --info-soft: rgb(25 184 255 / 0.14);
   --info-text: #7dd3fc;
 
-  --violet: #fb923c;
-  --violet-soft: rgb(251 146 60 / 0.14);
-  --violet-text: #fdba74;
+  --violet: #9b6bff;
+  --violet-soft: rgb(123 63 228 / 0.2);
+  --violet-text: #c4a8ff;
 
-  --ring: #fdba74;
+  --ring: #7a9cff;
 
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
   --shadow-2: 0 8px 20px -8px rgb(0 0 0 / 0.6);
   --shadow-3: 0 28px 56px -20px rgb(0 0 0 / 0.75);
-  --shadow-brand: 0 6px 20px -8px rgb(251 146 60 / 0.6);
+  --shadow-brand: 0 6px 20px -8px rgb(31 94 255 / 0.6);
 }
 
 @theme inline {
@@ -167,6 +173,8 @@
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* Títulos como en el sitio de NSIT (que usa Lemon Milk con Montserrat de respaldo). */
+  --font-title: var(--font-montserrat);
 }
 
 /* ------------------------------------------------------------------
@@ -193,8 +201,8 @@
 
   /* Luz ambiental de fondo: manchas suaves que dan profundidad sin
      interferir con el contenido (fixed + sin eventos de puntero). Tres
-     focos de color (naranja, celeste, violeta) para que el panel no se
-     sienta plano. */
+     focos con los colores de la marca (azul, morado y naranja) para que el
+     panel no se sienta plano. */
   body::before {
     content: "";
     position: fixed;
@@ -438,6 +446,17 @@
     animation: nspbx-ping-ring 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
   }
 
+  /* Degradado de la marca NSIT: azul → morado → naranja (como el de
+     nspbxdevelop.com). Para botones principales, el logo y acentos. */
+  .bg-marca {
+    background-image: linear-gradient(100deg, #1f5eff, #7b3fe4 55%, #ff8a00);
+  }
+  .text-marca {
+    background-image: linear-gradient(90deg, #1f5eff, #7b3fe4 55%, #ff8a00);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
   .glass {
     backdrop-filter: blur(12px) saturate(150%);
     -webkit-backdrop-filter: blur(12px) saturate(150%);
