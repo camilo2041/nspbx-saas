@@ -919,6 +919,8 @@ class TenantOut(BaseModel):
     modules: list[str] = Field(default_factory=lambda: ["voicebot", "pbx"])
     enabled: bool
     outbound_blocked: bool = False
+    # Servidor FreeSWITCH donde vive (None = el principal).
+    nodo_id: Optional[int] = None
     created_at: datetime
     users_count: int = 0
     extensions_count: int = 0

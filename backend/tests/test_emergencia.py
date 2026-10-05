@@ -27,11 +27,11 @@ def fs(monkeypatch):
     """Comandos que recibiría FreeSWITCH."""
     enviados: list[str] = []
 
-    async def api(cmd):
+    async def api(cmd, **_kw):
         enviados.append(cmd)
         return "+OK"
 
-    async def bgapi(cmd):
+    async def bgapi(cmd, **_kw):
         enviados.append(cmd)
         return "+OK Job-UUID: x"
 

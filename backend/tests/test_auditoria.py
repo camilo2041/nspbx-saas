@@ -203,7 +203,7 @@ async def test_acciones_de_fraude_quedan_registradas(cliente, mundo, monkeypatch
     controles de emergencia, con quién lo hizo."""
     from app.services import esl
 
-    async def api(cmd):
+    async def api(cmd, **_kw):
         return "+OK"
 
     monkeypatch.setattr(esl, "api", api)

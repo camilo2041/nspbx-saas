@@ -95,7 +95,7 @@ async def test_sin_licencia_se_usa_el_tope_de_la_prueba(mundo):
 
 
 async def test_clic_para_llamar_respeta_el_tope(cliente, mundo, foxtrot, monkeypatch):
-    async def bgapi(cmd):
+    async def bgapi(cmd, **_kw):
         return "+OK Job-UUID: x"
 
     monkeypatch.setattr(esl, "bgapi", bgapi)

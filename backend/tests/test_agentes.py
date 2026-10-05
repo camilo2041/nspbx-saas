@@ -48,11 +48,11 @@ class FS:
         self.api: list[str] = []
         self.no_existe: set[str] = set()
 
-        async def bgapi(cmd):
+        async def bgapi(cmd, **_kw):
             self.bgapi.append(cmd)
             return "+OK Job-UUID: x"
 
-        async def api(cmd):
+        async def api(cmd, **_kw):
             self.api.append(cmd)
             uuid = cmd.split(" ", 1)[1] if cmd.startswith("uuid_kill ") else ""
             return "-ERR No such channel!" if uuid in self.no_existe else "+OK"

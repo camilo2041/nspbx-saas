@@ -131,8 +131,8 @@ class CampaignDialer:
             lanzados_por_tenant: dict[int, int] = {}
 
             try:
-                estado = await esl.status()
-                margen_global = tope_global - estado.get("current_sessions", 0)
+                # Canales en curso en TODOS los servidores (services/nodos.py).
+                margen_global = tope_global - await esl.sesiones_en_curso()
             except Exception:
                 # Si no se puede consultar FreeSWITCH, mejor no marcar
                 # nada este ciclo que arriesgarse a pasar el tope a ciegas.
@@ -332,6 +332,7 @@ class CampaignDialer:
                 wait_timeout=30 * len(tramos) + 15,
                 extra_vars=extra_vars or None,
                 contexto=contexto,
+                tenant_id=campaign.tenant_id,
             )
             async with sesion_de_empresa(campaign.tenant_id) as s:
                 await s.execute(

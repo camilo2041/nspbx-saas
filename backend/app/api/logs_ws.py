@@ -116,9 +116,14 @@ async def logs_websocket(websocket: WebSocket, session: AsyncSession = Depends(g
         return
 
     level = websocket.query_params.get("level", "info")
+    # Con varios FreeSWITCH (services/nodos.py), de cuál: ?nodo=<id>; sin él, el principal.
+    try:
+        nodo = int(websocket.query_params["nodo"]) if websocket.query_params.get("nodo") else None
+    except ValueError:
+        nodo = None
     await websocket.accept()
     try:
-        async for linea in esl.stream_logs(level):
+        async for linea in esl.stream_logs(level, nodo=nodo):
             await websocket.send_text(_ocultar_secretos(linea))
     except WebSocketDisconnect:
         pass

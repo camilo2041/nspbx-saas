@@ -88,7 +88,7 @@ async def test_en_horario_o_sin_limite_no_hay_regla(cliente, india, valores):
 
 
 async def test_clic_para_llamar_respeta_el_horario(cliente, india, monkeypatch):
-    async def bgapi(cmd):
+    async def bgapi(cmd, **_kw):
         return "+OK Job-UUID: x"
 
     monkeypatch.setattr(esl, "bgapi", bgapi)

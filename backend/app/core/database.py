@@ -117,8 +117,14 @@ def _rellenar_tenant(session, flush_context, instances):
 
 
 def fijar_tenant(session, tenant_id: int | None) -> None:
-    """Ata una sesión asíncrona a una empresa. Ver `_aplicar_tenant`."""
+    """Ata una sesión asíncrona a una empresa. Ver `_aplicar_tenant`.
+
+    También deja la empresa en el contexto de la tarea: los comandos a
+    FreeSWITCH la usan para ir al servidor de esa empresa (core/contexto.py)."""
     session.sync_session.info["tenant_id"] = tenant_id
+    from app.core.contexto import empresa_actual
+
+    empresa_actual.set(tenant_id)
 
 
 @asynccontextmanager
@@ -131,9 +137,15 @@ async def sesion_de_empresa(tenant_id: int):
     el filtro de la aplicación, igual que una petición de la API. Un id que
     apunte a otra empresa no se resuelve, en vez de depender de que cada
     consulta del worker se acuerde de filtrar."""
-    async with app_session() as session:
-        fijar_tenant(session, tenant_id)
-        yield session
+    from app.core.contexto import empresa_actual
+
+    anterior = empresa_actual.set(tenant_id)
+    try:
+        async with app_session() as session:
+            fijar_tenant(session, tenant_id)
+            yield session
+    finally:
+        empresa_actual.reset(anterior)
 
 
 def tenant_de_sesion(session) -> int | None:

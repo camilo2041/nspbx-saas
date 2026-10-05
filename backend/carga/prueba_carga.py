@@ -57,11 +57,11 @@ def freeswitch_simulado():
     contador = {"bgapi": 0, "api": 0}
     originales = (esl.bgapi, esl.api)
 
-    async def bgapi(cmd):
+    async def bgapi(cmd, **_kw):
         contador["bgapi"] += 1
         return "+OK Job-UUID: x"
 
-    async def api(cmd):
+    async def api(cmd, **_kw):
         contador["api"] += 1
         return "+OK"
 

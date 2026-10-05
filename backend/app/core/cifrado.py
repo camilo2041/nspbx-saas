@@ -150,6 +150,7 @@ COLUMNAS = [
     ("users", "mfa_secret"),
     ("webhooks", "secreto"),
     ("campaigns", "crm_secreto"),
+    ("nodos_freeswitch", "esl_password"),
 ]
 
 

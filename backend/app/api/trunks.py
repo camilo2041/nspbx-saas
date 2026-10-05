@@ -13,6 +13,14 @@ from app.services.gateways import nombre_gateway, remove_gateway_file, write_gat
 router = APIRouter(prefix="/api/trunks", tags=["trunks"])
 
 
+async def _nodo_de(tenant_id: int) -> str | None:
+    """Carpeta de gateways del servidor FreeSWITCH de la empresa (None = principal)."""
+    from app.services.nodos import directorio
+
+    nid = await directorio.nodo_de(tenant_id)
+    return directorio.nombre(nid) if nid is not None else None
+
+
 async def _slug_de(session: AsyncSession, tenant_id: int) -> str:
     ten = await session.get(Tenant, tenant_id)
     return ten.slug if ten else "x"
@@ -42,7 +50,7 @@ async def create_trunk(payload: TrunkCreate, session: AsyncSession = Depends(get
         await session.rollback()
         raise HTTPException(status_code=400, detail="Nombre de troncal duplicado")
     await session.refresh(trunk)
-    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id))
+    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id), await _nodo_de(trunk.tenant_id))
     try:
         await rescan_profile("external")
     except Exception:
@@ -73,7 +81,7 @@ async def update_trunk(
         setattr(trunk, field, value)
     await session.commit()
     await session.refresh(trunk)
-    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id))
+    write_gateway_file(trunk, await _slug_de(session, trunk.tenant_id), await _nodo_de(trunk.tenant_id))
     try:
         await rescan_profile("external")
     except Exception:
@@ -88,7 +96,7 @@ async def delete_trunk(trunk_id: int, session: AsyncSession = Depends(get_sessio
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     await session.delete(trunk)
     await session.commit()
-    remove_gateway_file(nombre_gateway(trunk.name, await _slug_de(session, trunk.tenant_id)))
+    remove_gateway_file(nombre_gateway(trunk.name, await _slug_de(session, trunk.tenant_id)), await _nodo_de(trunk.tenant_id))
     try:
         await rescan_profile("external")
     except Exception:

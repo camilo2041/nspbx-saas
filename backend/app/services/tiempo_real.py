@@ -40,6 +40,7 @@ EVENTOS = (
 # Un canal del que no llegó el cuelgue (se cortó la conexión de eventos en
 # ese momento) no puede quedar en el tablero para siempre.
 _VIDA_MAXIMA_S = 6 * 3600
+_TODOS = object()
 _COLA_POR_SUSCRIPTOR = 500
 
 
@@ -146,8 +147,12 @@ class TiempoReal:
             elif uuid:
                 self._canales[uuid] = {**llamada, "tenant_id": tenant_id, "_visto": time.monotonic()}
         elif mensaje.get("tipo") == "reinicio":
+            # Trae las llamadas que siguen vigentes (las de los otros servidores).
             for u in [u for u, c in self._canales.items() if c["tenant_id"] == tenant_id]:
                 self._canales.pop(u, None)
+            for llamada in mensaje.get("llamadas") or []:
+                if llamada.get("uuid"):
+                    self._canales[llamada["uuid"]] = {**llamada, "tenant_id": tenant_id, "_visto": time.monotonic()}
         self._entregar(tenant_id, mensaje)
 
     def _entregar(self, tenant_id: int, mensaje: dict) -> None:
@@ -165,12 +170,16 @@ class TiempoReal:
         self._purgar()
         return [self._publico(c) for c in self._canales.values() if c["tenant_id"] == tenant_id]
 
-    def reiniciar(self) -> None:
-        """Se perdió la conexión de eventos: lo que había ya no es confiable."""
-        empresas = {c["tenant_id"] for c in self._canales.values()}
-        self._canales.clear()
+    def reiniciar(self, nodo=_TODOS) -> None:
+        """Se perdió la conexión de eventos de un servidor (o de todos): sus
+        llamadas ya no son confiables. Las de los demás servidores siguen."""
+        quitar = [u for u, c in self._canales.items() if nodo is _TODOS or c.get("nodo") == nodo]
+        empresas = {self._canales[u]["tenant_id"] for u in quitar}
+        for u in quitar:
+            self._canales.pop(u, None)
         for tid in empresas:
-            self.publicar(tid, {"tipo": "reinicio", "llamadas": []})
+            if tid is not None:
+                self.publicar(tid, {"tipo": "reinicio", "llamadas": self.llamadas(tid)})
 
     # --- Eventos ----------------------------------------------------------
     async def recibir(self, ev: dict[str, str]) -> None:
@@ -225,9 +234,13 @@ class TiempoReal:
 
     @staticmethod
     def _nuevo(uuid: str, ev: dict[str, str], tid: int | None) -> dict:
+        from app.core.contexto import nodo_del_evento
+
         ahora = _ts(ev)
         return {
             "tenant_id": tid,
+            # Servidor del canal: si se cae su conexión, solo se descartan los suyos.
+            "nodo": nodo_del_evento.get(),
             # Reloj local, no el de FreeSWITCH: la purga no puede depender de
             # que los dos relojes coincidan.
             "_visto": time.monotonic(),
@@ -248,7 +261,7 @@ class TiempoReal:
 
     @staticmethod
     def _publico(canal: dict) -> dict:
-        datos = {k: v for k, v in canal.items() if k not in ("tenant_id", "_visto")}
+        datos = {k: v for k, v in canal.items() if k not in ("tenant_id", "_visto", "nodo")}
         timbre, contesta = canal["timbre_at"], canal["contesta_at"]
         datos["ring_ms"] = int((contesta - timbre) * 1000) if timbre and contesta and contesta >= timbre else None
         return datos

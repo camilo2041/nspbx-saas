@@ -30,7 +30,7 @@ async def colgar_salientes(tenant_ids) -> list[int]:
     no responde: quien lo pide tiene que enterarse de que no se cortó."""
     hechas = []
     for tid in tenant_ids:
-        await esl.api(f"hupall {CAUSA} nspbx_saliente {int(tid)}")
+        await esl.api(f"hupall {CAUSA} nspbx_saliente {int(tid)}", tenant_id=int(tid))
         hechas.append(int(tid))
     logger.warning("Salientes EN CURSO colgadas: empresas %s", hechas)
     return hechas
@@ -44,6 +44,8 @@ async def cortar_extension(numero: str, dominio: str) -> None:
     validacion.exigir(validacion.EXTENSION_RE, numero, "Extensión")
     validacion.exigir(validacion.HOST_RE, dominio, "Dominio")
     usuario = f"{numero}@{dominio}"
-    await esl.api(f"hupall {CAUSA} nspbx_saliente_ext {usuario}")
-    await esl.api(f"sofia profile internal flush_inbound_reg {usuario}")
+    # En todos los servidores: el teléfono pudo quedar registrado en otro
+    # (p. ej. antes de mover la empresa). Donde no está, no hace nada.
+    await esl.api_todos(f"hupall {CAUSA} nspbx_saliente_ext {usuario}")
+    await esl.api_todos(f"sofia profile internal flush_inbound_reg {usuario}")
     logger.warning("Extensión %s cortada: salientes en curso colgadas y registro eliminado", usuario)

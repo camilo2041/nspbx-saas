@@ -81,6 +81,11 @@ class Tenant(Base):
     # empresa (fraude en curso, falta de pago) sin desactivarla. Solo lo
     # cambia el rol plataforma; la empresa no puede deshacerlo.
     outbound_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Servidor FreeSWITCH de la empresa (docs/escala.md §4). NULL = el
+    # principal (el de FS_ESL_HOST / Ajustes), que es lo que había siempre.
+    nodo_id: Mapped[int | None] = mapped_column(
+        ForeignKey("nodos_freeswitch.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     @property
@@ -1455,4 +1460,24 @@ class MonitoreoVivo(Base):
     modo: Mapped[str] = mapped_column(String(12))
     token: Mapped[str] = mapped_column(String(64))
     contestado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class NodoFreeswitch(Base):
+    """Un FreeSWITCH adicional al principal (opción A de docs/escala.md: las
+    empresas se reparten entre servidores). Es de la PLATAFORMA, no de una
+    empresa: no lleva tenant_id y solo lo administra el rol plataforma."""
+
+    __tablename__ = "nodos_freeswitch"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(40), unique=True)
+    esl_host: Mapped[str] = mapped_column(String(255))
+    esl_port: Mapped[int] = mapped_column(Integer, default=8021, server_default="8021")
+    esl_password: Mapped[str] = mapped_column(TextoCifrado())
+    # Dónde se registran los teléfonos de sus empresas (DNS o IP pública).
+    sip_host: Mapped[str] = mapped_column(String(255))
+    # Agentes simultáneos que se le planifican (para repartir empresas).
+    capacidad_agentes: Mapped[int] = mapped_column(Integer, default=200, server_default="200")
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

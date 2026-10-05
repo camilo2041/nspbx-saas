@@ -4,7 +4,6 @@ import re
 from urllib.parse import quote
 
 from app.core import validacion
-from app.core.runtime_settings import runtime_settings
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +113,30 @@ class ESLClient:
             return reply.replace("+OK ", "").strip()
 
 
-_client: ESLClient | None = None
-
-_event_reader: asyncio.StreamReader | None = None
-_event_writer: asyncio.StreamWriter | None = None
+# Un cliente de comandos y una conexión de eventos POR SERVIDOR (clave: id
+# del nodo; None = el principal). Ver services/nodos.py y docs/escala.md §4.
+_clientes: dict[int | None, ESLClient] = {}
+_eventos: dict[int | None, asyncio.StreamWriter] = {}
 _pending_jobs: dict[str, "asyncio.Future[str]"] = {}
 _event_listener_lock = asyncio.Lock()
+
+_SIN = object()  # «no se indicó servidor» (None ya significa el principal)
+
+
+async def nodo_para(tenant_id: int | None = None, nodo=_SIN) -> int | None:
+    """A qué servidor va un comando: el indicado; si no, el de la empresa
+    indicada; si no, el del evento que se está procesando; si no, el de la
+    empresa de la tarea en curso; si no, el principal."""
+    from app.core.contexto import empresa_actual, hay_evento, nodo_del_evento
+    from app.services.nodos import directorio
+
+    if nodo is not _SIN:
+        return nodo
+    if tenant_id is not None:
+        return await directorio.nodo_de(tenant_id)
+    if hay_evento.get():
+        return nodo_del_evento.get()
+    return await directorio.nodo_de(empresa_actual.get())
 
 
 async def _read_headers_raw(reader: asyncio.StreamReader) -> dict:
@@ -142,23 +159,26 @@ async def _read_body_raw(reader: asyncio.StreamReader, headers: dict) -> str:
     return body.decode(errors="replace")
 
 
-async def _ensure_event_listener():
+async def _ensure_event_listener(nodo: int | None = None):
     """Conexión ESL dedicada, suscrita a BACKGROUND_JOB, para conocer el
     resultado real (contestada/ocupado/no contesta/colgada) de cada
     `originate` lanzado en background — bgapi por sí solo solo confirma que
-    FreeSWITCH aceptó la orden, no el desenlace de la llamada."""
-    global _event_reader, _event_writer
+    FreeSWITCH aceptó la orden, no el desenlace de la llamada. Una por
+    servidor."""
+    from app.services.nodos import directorio
+
     async with _event_listener_lock:
-        if _event_writer is not None and not _event_writer.is_closing():
+        actual = _eventos.get(nodo)
+        if actual is not None and not actual.is_closing():
             return
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(runtime_settings.fs_esl_host, runtime_settings.fs_esl_port), timeout=5
-        )
+        destino = directorio.destino(nodo)
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(destino.host, destino.port), timeout=5)
         await _read_headers_raw(reader)  # greeting
-        writer.write(f"auth {runtime_settings.fs_esl_password}\n\n".encode())
+        writer.write(f"auth {destino.password}\n\n".encode())
         await writer.drain()
         auth_headers = await _read_headers_raw(reader)
         if "+OK accepted" not in auth_headers.get("reply-text", ""):
+            writer.close()
             raise PermissionError("ESL auth rechazada (event listener)")
         from app.services.lider import lider
         from app.services.tiempo_real import EVENTOS
@@ -171,12 +191,17 @@ async def _ensure_event_listener():
         writer.write(f"event plain BACKGROUND_JOB{canal}\n\n".encode())
         await writer.drain()
         await _read_headers_raw(reader)  # command/reply del "event"
-        _event_reader, _event_writer = reader, writer
-        asyncio.create_task(_event_loop(reader))
+        _eventos[nodo] = writer
+        asyncio.create_task(_event_loop(reader, nodo, writer))
 
 
-async def _event_loop(reader: asyncio.StreamReader):
-    global _event_writer
+async def _event_loop(reader: asyncio.StreamReader, nodo: int | None = None, writer=None):
+    from app.core.contexto import hay_evento, nodo_del_evento
+
+    # Todo lo que se haga al procesar estos eventos (y las tareas que se
+    # creen) va al servidor de donde vinieron (core/contexto.py).
+    nodo_del_evento.set(nodo)
+    hay_evento.set(True)
     try:
         while True:
             headers = await _read_headers_raw(reader)
@@ -202,14 +227,16 @@ async def _event_loop(reader: asyncio.StreamReader):
                 if not fut.done():
                     fut.set_result(result.strip())
     except Exception:
-        logger.exception("Event listener de ESL caído")
+        logger.exception("Event listener de ESL caído (servidor %s)", nodo or "principal")
     finally:
-        if _event_writer:
-            _event_writer.close()
-        _event_writer = None
+        if writer is not None:
+            writer.close()
+        if _eventos.get(nodo) is writer:
+            _eventos.pop(nodo, None)
         from app.services.tiempo_real import tiempo_real
 
-        tiempo_real.reiniciar()
+        # Solo las llamadas de ESE servidor: las de los demás siguen al día.
+        tiempo_real.reiniciar(nodo=nodo)
 
 
 async def _a_tiempo_real(cabeceras: str) -> None:
@@ -243,26 +270,36 @@ async def _a_tiempo_real(cabeceras: str) -> None:
 
 
 async def cerrar_eventos() -> None:
-    """Cierra la conexión de eventos (al ganar o perder el liderazgo: la
-    próxima se abre con la suscripción que corresponda)."""
-    global _event_writer
+    """Cierra las conexiones de eventos (al ganar o perder el liderazgo: las
+    próximas se abren con la suscripción que corresponda)."""
     async with _event_listener_lock:
-        if _event_writer is not None:
-            _event_writer.close()
-        _event_writer = None
+        for writer in list(_eventos.values()):
+            writer.close()
+        _eventos.clear()
 
 
 async def asegurar_eventos() -> None:
-    """Abre la conexión de eventos si no está abierta (ver tiempo_real)."""
-    await _ensure_event_listener()
+    """Abre la conexión de eventos de cada servidor que no la tenga (ver
+    tiempo_real.mantener_conexion). Un servidor caído no frena a los demás."""
+    from app.services.nodos import directorio
+
+    errores = []
+    for nodo in await directorio.todos():
+        try:
+            await _ensure_event_listener(nodo)
+        except Exception as exc:
+            errores.append(f"{directorio.nombre(nodo)}: {exc}")
+    if errores:
+        raise RuntimeError("; ".join(errores))
 
 
-async def bgapi_wait(command: str, timeout: int = 40) -> str:
+async def bgapi_wait(command: str, timeout: int = 40, tenant_id: int | None = None) -> str:
     """Como bgapi, pero espera el evento BACKGROUND_JOB y devuelve/lanza el
     resultado real del comando (p.ej. la llamada fue contestada, colgada,
     ocupada, sin respuesta, etc.), en vez de solo confirmar que se encoló."""
-    await _ensure_event_listener()
-    client = await get_client()
+    nodo = await nodo_para(tenant_id)
+    await _ensure_event_listener(nodo)
+    client = await get_client(nodo)
     reply = await client.bgapi(command)
     m = re.search(r"Job-UUID:\s*(\S+)", reply)
     if not m:
@@ -283,39 +320,52 @@ async def bgapi_wait(command: str, timeout: int = 40) -> str:
 _client_lock = asyncio.Lock()
 
 
-async def get_client() -> ESLClient:
-    global _client
-    # Sin lock, dos corrutinas concurrentes podían ver `_client is None` a
+async def get_client(nodo: int | None = None) -> ESLClient:
+    from app.services.nodos import directorio
+
+    # Sin lock, dos corrutinas concurrentes podían ver el cliente caído a
     # la vez y abrir dos conexiones — la primera quedaba huérfana (nunca
     # cerrada) y cualquier callback pendiente en ella se perdía.
     async with _client_lock:
-        if _client is None or not _client.connected:
-            if _client:
-                await _client.close()
-            _client = ESLClient(
-                runtime_settings.fs_esl_host,
-                runtime_settings.fs_esl_port,
-                runtime_settings.fs_esl_password,
-            )
-            await _client.connect()
-        return _client
+        cliente = _clientes.get(nodo)
+        destino = directorio.destino(nodo)
+        cambio = cliente is not None and (cliente.host, cliente.port, cliente.password) != (destino.host, destino.port, destino.password)
+        if cliente is None or not cliente.connected or cambio:
+            if cliente:
+                await cliente.close()
+            cliente = ESLClient(destino.host, destino.port, destino.password)
+            await cliente.connect()
+            _clientes[nodo] = cliente
+        return cliente
 
 
 async def invalidate_client():
     """Fuerza una reconexión (con los parámetros vigentes) en la próxima llamada."""
-    global _client, _event_writer, _event_reader
-    if _client:
-        await _client.close()
-    _client = None
-    if _event_writer:
-        _event_writer.close()
-    _event_writer = None
-    _event_reader = None
+    for cliente in list(_clientes.values()):
+        await cliente.close()
+    _clientes.clear()
+    await cerrar_eventos()
 
 
-async def api(command: str) -> str:
-    client = await get_client()
+async def api(command: str, tenant_id: int | None = None, nodo=_SIN) -> str:
+    client = await get_client(await nodo_para(tenant_id, nodo))
     return await client.api(command)
+
+
+async def api_todos(command: str) -> dict:
+    """El mismo comando en TODOS los servidores (recargar la configuración,
+    colgar huérfanas). Devuelve {nodo: respuesta o la excepción}: un servidor
+    caído no impide que los demás lo reciban."""
+    from app.services.nodos import directorio
+
+    resultados: dict = {}
+    for nodo in await directorio.todos():
+        try:
+            resultados[nodo] = await api(command, nodo=nodo)
+        except Exception as exc:
+            logger.warning("«%s» falló en el servidor %s: %s", command.split()[0], directorio.nombre(nodo), exc)
+            resultados[nodo] = exc
+    return resultados
 
 
 async def status() -> dict:
@@ -346,6 +396,40 @@ async def status() -> dict:
     if m:
         out["uptime"] = m.group(1).strip()
     return out
+
+
+async def sesiones_en_curso() -> int:
+    """Canales en curso sumando todos los servidores. Lanza si el principal
+    no responde (quien marca prefiere no marcar a pasar el tope a ciegas);
+    un adicional caído no cuenta (sus empresas no pueden marcar igual)."""
+    from app.services.nodos import directorio
+
+    total = (await status()).get("current_sessions", 0)
+    for nodo in (await directorio.todos())[1:]:
+        try:
+            body = await api("status", nodo=nodo)
+        except Exception:
+            continue
+        m = re.search(r"(\d+) session\(s\) - peak", body)
+        total += int(m.group(1)) if m else 0
+    return total
+
+
+async def api_buscar(command: str) -> str:
+    """El comando en cada servidor hasta que uno responda sin -ERR (para
+    algo que se sabe de un canal pero no de qué servidor es)."""
+    from app.services.nodos import directorio
+
+    ultimo = ""
+    for nodo in await directorio.todos():
+        try:
+            ultimo = await api(command, nodo=nodo)
+        except Exception as exc:
+            ultimo = f"-ERR {exc}"
+            continue
+        if not ultimo.strip().startswith("-ERR"):
+            return ultimo
+    return ultimo
 
 
 async def sofia_status() -> str:
@@ -417,7 +501,13 @@ async def dnd_set(extension: str, enabled: bool) -> None:
 
 
 async def reloadxml() -> str:
-    return await api("reloadxml")
+    """En todos los servidores (la configuración es la misma para todos).
+    Devuelve la respuesta del principal, o lanza si el principal falló."""
+    resultados = await api_todos("reloadxml")
+    principal = resultados.get(None)
+    if isinstance(principal, Exception):
+        raise principal
+    return principal or ""
 
 
 async def rescan_profile(profile: str = "external") -> str:
@@ -434,6 +524,7 @@ async def originate(
     wait_timeout: int | None = None,
     extra_vars: dict[str, str] | None = None,
     contexto: str = "default",
+    tenant_id: int | None = None,
 ) -> str:
     """Origina una llamada. endpoint ej: sofia/gateway/trunkX.
 
@@ -511,7 +602,7 @@ async def originate(
         f"originate {{ignore_early_media=true,nspbx_customer={dest}{extra}}}{endpoint_str} "
         f"{action} XML {contexto} '{caller_id}' '{caller_id_number or '_undef_'}' {timeout}"
     )
-    return await bgapi_wait(cmd, timeout=wait_timeout if wait_timeout is not None else timeout + 10)
+    return await bgapi_wait(cmd, timeout=wait_timeout if wait_timeout is not None else timeout + 10, tenant_id=tenant_id)
 
 
 async def originate_bridge(
@@ -520,6 +611,7 @@ async def originate_bridge(
     caller_id: str = "NSPBX",
     timeout: int = 30,
     variables: dict[str, str] | None = None,
+    tenant_id: int | None = None,
 ) -> str:
     """Origina una llamada a `from_endpoint`; al contestar, la bridgea a `bridge_target`.
 
@@ -545,32 +637,33 @@ async def originate_bridge(
         f"origination_caller_id_number='{safe_caller_id}',"
         f"call_timeout={timeout}{extra}}}{from_endpoint} &bridge({bridge_target})"
     )
-    return await bgapi(cmd)
+    return await bgapi(cmd, tenant_id=tenant_id)
 
 
-async def bgapi(command: str) -> str:
-    client = await get_client()
+async def bgapi(command: str, tenant_id: int | None = None, nodo=_SIN) -> str:
+    client = await get_client(await nodo_para(tenant_id, nodo))
     return await client.bgapi(command)
 
 
 _NIVELES_LOG = ("debug", "info", "notice", "warning", "err", "crit", "alert")
 
 
-async def stream_logs(level: str = "info"):
+async def stream_logs(level: str = "info", nodo: int | None = None):
     """Streaming en vivo del log de FreeSWITCH — el equivalente web de
     pararse en `fs_cli` con `/log <nivel>` (o `asterisk -rvvvvv` para
     quien viene de ahí). Conexión ESL PROPIA, separada de la del
     cliente de comandos y de la del oyente de BACKGROUND_JOB: esta se
     queda leyendo indefinidamente mientras dure la pestaña abierta, y no
     debe competir por el mismo socket que usan `api`/`bgapi_wait`."""
+    from app.services.nodos import directorio
+
     if level not in _NIVELES_LOG:
         level = "info"
-    reader, writer = await asyncio.wait_for(
-        asyncio.open_connection(runtime_settings.fs_esl_host, runtime_settings.fs_esl_port), timeout=5
-    )
+    destino = directorio.destino(nodo)
+    reader, writer = await asyncio.wait_for(asyncio.open_connection(destino.host, destino.port), timeout=5)
     try:
         await _read_headers_raw(reader)  # saludo
-        writer.write(f"auth {runtime_settings.fs_esl_password}\n\n".encode())
+        writer.write(f"auth {destino.password}\n\n".encode())
         await writer.drain()
         auth_headers = await _read_headers_raw(reader)
         if "+OK accepted" not in auth_headers.get("reply-text", ""):

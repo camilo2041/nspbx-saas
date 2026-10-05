@@ -37,7 +37,7 @@ _NOMBRE_RE = re.compile(r"[^A-Za-z0-9 .,\-áéíóúüñÁÉÍÓÚÜÑ]")
 async def _variable_de_canal(uuid_canal: str, variable: str) -> str:
     """Valor de una variable del canal, o "" si no se pudo leer (best-effort)."""
     try:
-        valor = (await asyncio.wait_for(esl.api(f"uuid_getvar {uuid_canal} {variable}"), timeout=1.5)).strip()
+        valor = (await asyncio.wait_for(esl.api_buscar(f"uuid_getvar {uuid_canal} {variable}"), timeout=1.5)).strip()
     except Exception:
         return ""
     return "" if valor.startswith("-ERR") or valor == "_undef_" else valor[:120]

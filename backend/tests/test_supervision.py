@@ -33,7 +33,7 @@ class FSConSalas(FS):
         self.salas: dict[str, list[str]] = {}  # sala → uuids en orden de entrada
         anterior = esl.api
 
-        async def api(cmd):
+        async def api(cmd, **_kw):
             partes = cmd.split()
             if partes[:1] == ["conference"] and len(partes) >= 3 and partes[2] == "list":
                 self.api.append(cmd)

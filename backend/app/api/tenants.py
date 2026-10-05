@@ -52,6 +52,7 @@ async def _out(session: AsyncSession, t: Tenant) -> TenantOut:
         modules=t.modules_list,
         enabled=t.enabled,
         outbound_blocked=bool(t.outbound_blocked),
+        nodo_id=t.nodo_id,
         created_at=t.created_at,
         users_count=users,
         extensions_count=extensions,

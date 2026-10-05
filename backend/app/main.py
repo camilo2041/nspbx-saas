@@ -20,14 +20,14 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, nodos as nodos_api, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
 from app.core.database import Base, async_session, engine, verificar_rol_sin_privilegios
 from app.core.security import hash_password
-from app.models import CampaignNumber, Queue, Tenant, Trunk, User
+from app.models import CampaignNumber, NodoFreeswitch, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
 from app.services import agentes, esl, integraciones, predictivo, reportes_programados, supervision, tiempo_real, voice_prompts, xml_endpoints
@@ -628,7 +628,12 @@ async def lifespan(app: FastAPI):
             if len(tenantes_rows) == 1:
                 settings_api.apply_to_runtime(fila_ajustes)
         trunks_rows = (await session.execute(select(Trunk))).scalars().all()
-        sync_gateways(trunks_rows, slugs)
+        # Cada servidor FreeSWITCH con los gateways de sus empresas
+        # (services/nodos.py; sin servidores adicionales, todo en el principal).
+        nodos_rows = (await session.execute(select(NodoFreeswitch))).scalars().all()
+        nombre_nodo = {n.id: n.nombre for n in nodos_rows}
+        sync_gateways(trunks_rows, slugs, {t.id: nombre_nodo.get(t.nodo_id) for t in tenantes_rows},
+                      [n.nombre for n in nodos_rows])
         # mod_callcenter guarda colas/agentes en memoria — se pierden en cada
         # reinicio de FreeSWITCH, así que hay que reescribir su config y
         # recargar el módulo al arrancar el backend.
@@ -658,7 +663,7 @@ async def lifespan(app: FastAPI):
         # quedaría en silencio. Se cuelgan; sus números ya volvieron a
         # pendientes arriba. En un arranque normal no hay ninguna.
         try:
-            await esl.api("hupall NORMAL_CLEARING nspbx_pred 1")
+            await esl.api_todos("hupall NORMAL_CLEARING nspbx_pred 1")
         except Exception as exc:
             logger.warning("No se pudieron colgar llamadas huérfanas del predictivo: %s", exc)
         # La conexión de eventos que tuviera como seguidora era solo de
@@ -857,6 +862,11 @@ app.include_router(
 # salientes). Mismo permiso y misma sesión del dueño.
 app.include_router(
     plataforma_api.router,
+    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
+)
+# Servidores FreeSWITCH y en cuál vive cada empresa (docs/escala.md §4).
+app.include_router(
+    nodos_api.router,
     dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
 )
 app.include_router(appointments_api.router)  # permisos por endpoint: el agente de IA entra acá

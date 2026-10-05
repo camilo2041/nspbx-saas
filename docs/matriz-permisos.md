@@ -150,6 +150,12 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/plataforma/csp` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/destinos-bloqueados` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/destinos-bloqueados` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/nodos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/nodos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| PUT | `/api/plataforma/nodos/empresas/{tenant_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| DELETE | `/api/plataforma/nodos/{nodo_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| PUT | `/api/plataforma/nodos/{nodo_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/nodos/{nodo_id}/probar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/salientes/colgar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
