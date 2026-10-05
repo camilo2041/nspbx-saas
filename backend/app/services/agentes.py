@@ -223,6 +223,17 @@ def _vars(valores: dict[str, str]) -> str:
 async def _originar_audio(session, vivo: AgenteVivo) -> None:
     extension = validacion.exigir(validacion.EXTENSION_RE, vivo.extension or "", "Extensión")
     dominio = await _dominio(session, vivo.tenant_id)
+    # Sin el softphone conectado la llamada de la sesión no llega a ningún
+    # lado y el agente quedaba «Sin audio» sin saber por qué.
+    try:
+        contacto = await esl.api(f"sofia_contact */{extension}@{dominio}")
+    except Exception as exc:  # sin ESL no se puede comprobar: se intenta igual
+        logger.warning("No se pudo comprobar el registro de %s: %s", extension, exc)
+        contacto = ""
+    if "user_not_registered" in contacto:
+        raise ErrorAgente(
+            f"Tu extensión {extension} no está conectada: conecta el softphone (arriba a la derecha) y vuelve a intentarlo"
+        )
     vivo.audio_uuid = str(uuidlib.uuid4())
     vivo.token_audio = secrets.token_hex(16)
     vivo.audio = False
