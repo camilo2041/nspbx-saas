@@ -397,7 +397,7 @@ export default function QueuesPage() {
             <span className="text-sm text-fg-soft">
               Decirle a quien espera cuántas personas tiene antes
               <span className="block text-xs text-muted">
-                Al entrar al grupo. Mientras espera oye música y, cada 30 s, «Gracias por esperar».
+                Al entrar al grupo y, mientras espera con música, cada 45 s: «Gracias por esperar» y cuántas personas tiene antes.
               </span>
             </span>
             <Toggle checked={form.announce_position} onChange={(v) => setForm({ ...form, announce_position: v })} />

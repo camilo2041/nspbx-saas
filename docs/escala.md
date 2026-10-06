@@ -59,8 +59,15 @@ espera (`pg_advisory_xact_lock` en `main.migrar`).
 Las sesiones del widget de llamada web están en la tabla `webcall_sesiones`
 (antes, en memoria de un proceso): el directorio de FreeSWITCH las encuentra
 aunque la petición la atienda otra réplica, y el tope de llamadas por empresa
-y el límite por IP son los mismos para todas. El límite de preguntas al
-asistente sí es por réplica (con dos réplicas, como mucho el doble).
+y el límite por IP son los mismos para todas. El tope de preguntas al
+asistente y de pasos del simulador de bots también está en la base
+(`cupos_uso`, core/cupos.py): uno solo para todas las réplicas. Los intentos
+fallidos de inicio de sesión siguen en memoria de cada réplica (con dos, quien
+prueba claves tiene a lo sumo el doble de intentos antes del bloqueo).
+
+El aviso periódico de la posición en la fila de un grupo
+(services/posicion_colas.py) corre solo en la líder, como el resto de lo que
+habla con FreeSWITCH por iniciativa propia.
 
 Las escuchas del supervisor (escuchar, susurrar, intervenir) están en la
 tabla `monitoreos`: la petición la atiende cualquier réplica y los eventos los
