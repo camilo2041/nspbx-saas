@@ -17,6 +17,7 @@ export const AVISOS: Record<string, { titulo: string; enlace?: string; accion?: 
   licencia_vence: { titulo: "La licencia está por vencer" },
   licencia_vencida: { titulo: "La licencia venció" },
   abandono_alto: { titulo: "Muchas llamadas colgaron esperando", enlace: "/reportes", accion: "Ver el reporte" },
+  numero_sin_ruta: { titulo: "Llaman a un número sin ruta de entrada", enlace: "/inbound-routes", accion: "Crear la ruta" },
 };
 
 const HORAS = 48;

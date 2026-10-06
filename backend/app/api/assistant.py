@@ -9,8 +9,6 @@ persona en el panel (el asistente puede sugerir a qué pantalla ir).
 Usa el modelo de lenguaje que la empresa configuró en Ajustes.
 """
 import logging
-import time
-from collections import defaultdict, deque
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import permissions
+from app.core import cupos, permissions
 from app.core.auth import usuario_actual
 from app.core.database import get_session
 from app.models import CallLog, Campaign, Extension, Trunk, User
@@ -31,7 +29,6 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 MAX_MENSAJES = 12
 MAX_CHARS = 2000
 LIMITE_POR_MINUTO = 15
-_intentos: dict[int, deque] = defaultdict(deque)
 
 # Pantallas a las que el asistente puede mandar a la persona. El front las
 # muestra como botón SOLO si el rol puede abrirlas; acá va el catálogo.
@@ -67,14 +64,9 @@ class ChatOut(BaseModel):
     sugerencias: list[str] = []
 
 
-def _limitar(usuario_id: int) -> None:
-    ahora = time.monotonic()
-    cola = _intentos[usuario_id]
-    while cola and ahora - cola[0] > 60:
-        cola.popleft()
-    if len(cola) >= LIMITE_POR_MINUTO:
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Muchas preguntas seguidas; espera un momento")
-    cola.append(ahora)
+async def _limitar(usuario_id: int) -> None:
+    # Compartido entre réplicas (core/cupos.py): cada pregunta cuesta.
+    await cupos.exigir(f"asistente:{usuario_id}", LIMITE_POR_MINUTO, 60, "Muchas preguntas seguidas; espera un momento")
 
 
 async def _contexto(session: AsyncSession, usuario: User) -> str:
@@ -124,7 +116,7 @@ async def chat(
     session: AsyncSession = Depends(get_session),
     usuario: User = Depends(usuario_actual),
 ):
-    _limitar(usuario.id)
+    await _limitar(usuario.id)
     fila = await ajustes_de(session, usuario.tenant_id)
     clave = (getattr(fila, "ai_llm_api_key", None) if fila else None) or ""
     if not clave:

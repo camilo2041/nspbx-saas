@@ -5,13 +5,12 @@ from pathlib import Path
 
 from app.core import validacion
 from app.core.config import settings
-from app.services import esl, voice_prompts
+from app.services import esl
 
 logger = logging.getLogger(__name__)
 
 CALLCENTER_CONF_PATH = "autoload_configs/callcenter.conf.xml"
 # Cada cuánto se repite «Gracias por esperar» a quien está en la fila.
-FRECUENCIA_AVISO_SEG = 30
 
 
 def parse_agents(agents_json: str | None) -> list[str]:
@@ -117,14 +116,10 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
             # a todos silenciosamente, así que se mantiene "Available".
             "agent-no-answer-status": "Available",
         }
-        if getattr(queue, "announce_position", False):
-            # «Gracias por esperar» cada 30 s sobre la música (la posición se
-            # dice al entrar: config_generator._append_queue_routes). Solo si
-            # el audio ya se generó: un archivo que no existe corta la espera.
-            aviso = voice_prompts.prompt_path("cola_aviso")
-            if aviso:
-                params["announce-sound"] = aviso
-                params["announce-frequency"] = str(FRECUENCIA_AVISO_SEG)
+        # «Anunciar posición»: la posición se dice al entrar
+        # (config_generator._decir_posicion) y, mientras espera, «Gracias por
+        # esperar» + la posición cada pocos segundos (services/posicion_colas.py).
+        # Ya no va como announce-sound del grupo: sonaría dos veces.
         if queue.record:
             # queue_t<id>_…: de qué empresa es cada grabación de cola (en la
             # raíz y no en la carpeta t<id>, que mod_callcenter no crea solo).

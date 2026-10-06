@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import limitador, validacion
+from app.core import cupos, validacion
 from app.core.auth import usuario_actual
 from app.core.database import get_session, tenant_de_sesion, traer_propio
 from app.core import permissions
@@ -407,7 +407,8 @@ async def probar_bot(
     bot = await traer_propio(session, VoiceBot, bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot no encontrado")
-    limitador.limitar_uso(limitador.POR_SIMULADOR, f"sim:{usuario.id}")
+    # Cada paso consume el modelo de IA (cuesta): tope por usuario, el mismo en todas las réplicas.
+    await cupos.exigir(f"sim:{usuario.id}", 40, 60)
 
     modo = payload.modo or ("ia" if bot.bot_type == "ai" else "ivr")
     if modo == "ivr":

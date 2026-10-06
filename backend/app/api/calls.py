@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
-from app.services import buzon, deepgram, llm, tiempos_llamada
+from app.services import buzon, deepgram, llm, sin_ruta, tiempos_llamada
 from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
@@ -215,6 +215,12 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     existing = (await session.execute(select(CallLog).where(CallLog.uuid == uuid))).scalars().first()
     if existing:
         return {"ok": True, "duplicate": True}
+
+    if variables.get("nspbx_sin_ruta"):
+        # Un número sin ruta de entrada: no es una llamada de ninguna empresa.
+        await sin_ruta.registrar(session, variables)
+        await session.commit()
+        return {"ok": True, "sin_ruta": True}
 
     tenant_id = await _tenant_de_cdr(session, variables)
     if tenant_id is None:

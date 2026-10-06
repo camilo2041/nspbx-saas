@@ -142,6 +142,41 @@ async def alertas_de_todas(session: AsyncSession = Depends(get_admin_session)):
     ]
 
 
+@router.get("/sin-ruta")
+async def numeros_sin_ruta(session: AsyncSession = Depends(get_admin_session)):
+    """Números a los que entran llamadas por una troncal sin ninguna ruta de
+    entrada (se cuelgan): falta crearles la ruta, o el proveedor manda el
+    número en otro formato (services/sin_ruta.py)."""
+    from app.models import NumeroSinRuta
+    from app.services import sin_ruta
+
+    empresas = {t.id: t for t in (await session.execute(select(Tenant))).scalars().all()}
+    slugs = {tid: t.slug for tid, t in empresas.items()}
+    filas = (
+        await session.execute(select(NumeroSinRuta).order_by(NumeroSinRuta.ultima_vez.desc()).limit(200))
+    ).scalars().all()
+    salida = []
+    for n in filas:
+        tid = sin_ruta.empresa_de_troncal(n.troncal, slugs)
+        salida.append({
+            "id": n.id, "numero": n.numero, "para": n.para, "origen": n.origen, "troncal": n.troncal,
+            "empresa": empresas[tid].name if tid else None, "tenant_id": tid, "veces": n.veces,
+            "primera_vez": n.primera_vez, "ultima_vez": n.ultima_vez,
+        })
+    return salida
+
+
+@router.delete("/sin-ruta/{numero_id}", status_code=204)
+async def olvidar_sin_ruta(numero_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Ya se resolvió (o no interesa): sale de la lista hasta que vuelva a llamar."""
+    from sqlalchemy import delete
+
+    from app.models import NumeroSinRuta
+
+    await session.execute(delete(NumeroSinRuta).where(NumeroSinRuta.id == numero_id))
+    await session.commit()
+
+
 @router.get("/auditoria")
 async def auditoria_de_todas(
     accion: str | None = None,

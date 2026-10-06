@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -1580,3 +1581,34 @@ class EvaluacionLlamada(Base):
     # manual | ia (la sugerencia de la IA, revisada y guardada por alguien)
     origen: Mapped[str] = mapped_column(String(10), default="manual", server_default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class NumeroSinRuta(Base):
+    """Un número al que entraron llamadas por la troncal sin ninguna ruta de
+    entrada que lo atienda (el dialplan las cuelga: config_generator
+    `no_route`). De la plataforma, no de una empresa: el número no es de
+    nadie todavía. Lo ve la plataforma; la empresa dueña de la troncal
+    (gateway `<slug>_…`) recibe un aviso (services/alertas.py)."""
+
+    __tablename__ = "numeros_sin_ruta"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    numero: Mapped[str] = mapped_column(String(64), unique=True)
+    para: Mapped[str | None] = mapped_column(String(64), nullable=True)  # encabezado To
+    origen: Mapped[str | None] = mapped_column(String(64), nullable=True)  # quién llamó (la última vez)
+    troncal: Mapped[str | None] = mapped_column(String(120), nullable=True)  # gateway de FreeSWITCH
+    veces: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    primera_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ultima_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class CupoUso(Base):
+    """Cuántas veces se usó algo caro (el asistente, el simulador de bots)
+    en la ventana actual. En la base y no en memoria: con varias réplicas
+    el tope es uno solo (core/cupos.py)."""
+
+    __tablename__ = "cupos_uso"
+
+    clave: Mapped[str] = mapped_column(String(120), primary_key=True)
+    ventana: Mapped[int] = mapped_column(BigInteger)  # epoch // duración de la ventana
+    conteo: Mapped[int] = mapped_column(Integer, default=0)

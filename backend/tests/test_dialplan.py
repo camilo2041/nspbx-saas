@@ -114,7 +114,7 @@ async def test_entrantes_un_did_sin_duenio_se_rechaza(cliente, mundo):
     raiz = await _xml(cliente, "/fs/dialplan")
     ultima = raiz.find(".//context[@name='public']").findall("extension")[-1]
     acciones = _acciones(ultima)
-    assert acciones == ["hangup UNALLOCATED_NUMBER"]
+    assert acciones == ["set nspbx_sin_ruta=1", "hangup UNALLOCATED_NUMBER"]
 
 
 async def test_salientes_sin_permiso_internacional_no_dejan_salir_00_ni_011(cliente, mundo):

@@ -181,6 +181,8 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/salientes/colgar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/sin-ruta` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| DELETE | `/api/plataforma/sin-ruta/{numero_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/privacidad/titular/consultar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/privacidad/titular/suprimir` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/queues` | `colas:gestionar` | ✓ | ✓ | ✗ | ✗ |

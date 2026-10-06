@@ -758,8 +758,8 @@ def _decir_posicion(condition: ET.Element, qkey: str) -> None:
     mod_callcenter no anuncia la posición. Se cuentan los que esperan
     (Waiting/Trying) en `callcenter_config queue list members` con un Lua en
     línea (mod_lua) y se reproduce el aviso pre-generado de ese número
-    (voice_prompts: cola_delante_0…9 y _mas). Si el audio no existe todavía
-    (sin API key de voz) no dice nada: mejor callar que la voz de respaldo
+    (voice_prompts: cola_delante_0…9 y _mas, WAV o MP3). Si el audio no existe
+    todavía no dice nada: mejor callar que la voz de respaldo
     en inglés. Cualquier error de Lua solo se registra y la llamada sigue.
     """
     carpeta = f"{voice_prompts.FS_SIDE_SOUNDS_DIR}/{voice_prompts.PROMPTS_DIR}"
@@ -771,9 +771,11 @@ def _decir_posicion(condition: ET.Element, qkey: str) -> None:
         "for l in string.gmatch(r, '[^\\n]+') do "
         "if string.find(l, '|Waiting|', 1, true) or string.find(l, '|Trying|', 1, true) then n = n + 1 end "
         "end; "
-        f"local f = '{carpeta}/cola_delante_' .. (n > 9 and 'mas' or tostring(n)) .. '.wav'; "
-        "local h = io.open(f, 'r'); "
-        "if h then h:close(); session:streamFile(f) end"
+        f"local b = '{carpeta}/cola_delante_' .. (n > 9 and 'mas' or tostring(n)); "
+        "for _, x in ipairs({'.wav', '.mp3'}) do "
+        "local h = io.open(b .. x, 'r'); "
+        "if h then h:close(); session:streamFile(b .. x); break end "
+        "end"
     )
     ET.SubElement(condition, "action", attrib={"application": "lua", "data": codigo})
 
@@ -865,6 +867,9 @@ def _append_inbound_routes(
 
     fallback = ET.SubElement(public_context, "extension", attrib={"name": "no_route", "continue": "false"})
     fb_cond = ET.SubElement(fallback, "condition", attrib={"field": "destination_number", "expression": ".*"})
+    # Marca para el CDR: no es una llamada de ninguna empresa, sino un número
+    # sin ruta que la plataforma tiene que ver (api/calls.py:_sin_ruta).
+    ET.SubElement(fb_cond, "action", attrib={"application": "set", "data": "nspbx_sin_ruta=1"})
     ET.SubElement(fb_cond, "action", attrib={"application": "hangup", "data": "UNALLOCATED_NUMBER"})
 
 

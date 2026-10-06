@@ -12,8 +12,14 @@ arranque el audio — eso es lo que se sentía como demora al "contestar".
 La solución es la misma que ya usa el resto del proyecto para el bot de
 IA: sintetizar UNA VEZ con Deepgram (voz en español real) y reproducir el
 archivo ya listo con `playback`, que no tiene ningún retraso de síntesis.
+
+Sin API key de Deepgram en ninguna empresa, se usan las voces gratuitas de
+edge-tts (services/tts.py, MP3 que FreeSWITCH reproduce con mod_shout): una
+instalación nueva ya habla en español. flite queda solo para cuando tampoco
+hay salida a internet. El mantenimiento vuelve a intentarlo cada hora.
 """
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -21,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import SystemSettings
-from app.services import deepgram
+from app.services import deepgram, tts
 from app.services.numeros import numero_a_palabras
 
 logger = logging.getLogger(__name__)
@@ -33,6 +39,8 @@ FS_SIDE_SOUNDS_DIR = "/usr/share/freeswitch/sounds"
 # voizbot de IA en este momento: son anuncios cortos del sistema, no
 # conversación, y no tiene sentido que dependan de esa configuración.
 _VOZ = "aura-2-celeste-es"
+_VOZ_GRATIS = "es-CO-SalomeNeural"
+_FORMATOS = (".wav", ".mp3")
 
 _TEXTOS = {
     "dnd_on": "No molestar activado.",
@@ -49,44 +57,67 @@ _TEXTOS = {
 }
 
 
-def _local_path(key: str) -> Path:
-    return Path(settings.fs_sounds_dir) / PROMPTS_DIR / f"{key}.wav"
+def _local_path(key: str, formato: str = ".wav") -> Path:
+    return Path(settings.fs_sounds_dir) / PROMPTS_DIR / f"{key}{formato}"
+
+
+def _existente(key: str) -> str | None:
+    """El formato del audio ya generado (WAV de Deepgram o MP3 de edge-tts)."""
+    return next((f for f in _FORMATOS if _local_path(key, f).exists()), None)
 
 
 def prompt_path(key: str) -> str | None:
     """Ruta que ve FreeSWITCH para reproducir el audio con `playback`, o
-    None si todavía no se generó (por ejemplo, sin API key de Deepgram
-    configurada) — quien llama debe tener un plan B para ese caso."""
-    if not _local_path(key).exists():
+    None si todavía no se generó — quien llama debe tener un plan B."""
+    formato = _existente(key)
+    if formato is None:
         return None
-    return f"{FS_SIDE_SOUNDS_DIR}/{PROMPTS_DIR}/{key}.wav"
+    return f"{FS_SIDE_SOUNDS_DIR}/{PROMPTS_DIR}/{key}{formato}"
 
 
-async def ensure_prompts(session: AsyncSession, tenant_id: int | None = None) -> None:
-    """Genera los audios que falten. Se llama una vez al arrancar el
-    backend; si no hay API key todavía, no revienta nada — el dialplan
-    cae de vuelta a `speak` con flite hasta que se configure una."""
-    faltantes = [k for k in _TEXTOS if not _local_path(k).exists()]
-    if not faltantes:
-        return
+async def _clave_deepgram(session: AsyncSession, tenant_id: int | None) -> str:
+    """La de la empresa, o la de cualquiera: los avisos son de todo el sistema."""
+    from sqlalchemy import select
 
     from app.services.ajustes import ajustes_de
 
     fila = await ajustes_de(session, tenant_id)
-    api_key = (fila.deepgram_api_key if fila else None) or ""
-    if not api_key:
-        logger.info(
-            "Sin API key de Deepgram todavía: los avisos (no molestar, buzón, grupos) van a sonar con la voz de "
-            "respaldo (flite) hasta que se configure una en Ajustes."
-        )
-        return
+    if fila is not None and fila.deepgram_api_key:
+        return fila.deepgram_api_key
+    for (clave,) in (await session.execute(select(SystemSettings.deepgram_api_key))).all():
+        if clave:
+            return clave
+    return ""
+
+
+async def ensure_prompts(session: AsyncSession, tenant_id: int | None = None) -> int:
+    """Genera los audios que falten y dice cuántos generó. Se llama al
+    arrancar y cada hora (workers/maintenance.py); nunca revienta: el
+    dialplan cae a flite mientras falte un audio."""
+    faltantes = [k for k in _TEXTOS if _existente(k) is None]
+    if not faltantes:
+        return 0
+    try:
+        api_key = await _clave_deepgram(session, tenant_id)
+    except Exception:
+        logger.exception("No se pudo leer la API key de Deepgram para los avisos de voz")
+        api_key = ""
 
     carpeta = Path(settings.fs_sounds_dir) / PROMPTS_DIR
     carpeta.mkdir(parents=True, exist_ok=True)
+    generados = 0
     for key in faltantes:
         try:
-            audio = await deepgram.synthesize(_TEXTOS[key], _VOZ, api_key)
-            _local_path(key).write_bytes(audio)
+            if api_key:
+                _local_path(key).write_bytes(await deepgram.synthesize(_TEXTOS[key], _VOZ, api_key))
+            else:
+                _local_path(key, ".mp3").write_bytes(
+                    await asyncio.wait_for(tts.synthesize(_TEXTOS[key], _VOZ_GRATIS), timeout=20)
+                )
+            generados += 1
             logger.info("Generado el aviso de voz '%s'", key)
-        except Exception:
-            logger.exception("No se pudo generar el aviso de voz '%s'; sigue con flite de respaldo", key)
+        except Exception as exc:
+            logger.warning("No se pudo generar el aviso de voz '%s' (sigue con flite de respaldo): %s", key, exc)
+            if not api_key:
+                break  # sin internet: no insistir con cada frase
+    return generados

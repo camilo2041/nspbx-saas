@@ -60,6 +60,17 @@ const ESTADO_LICENCIA: Record<string, { label: string; badge: string }> = {
   suspendida: { label: "Suspendida", badge: "amber" },
 };
 
+interface NumeroSinRuta {
+  id: number;
+  numero: string;
+  para: string | null;
+  origen: string | null;
+  troncal: string | null;
+  empresa: string | null;
+  veces: number;
+  ultima_vez: string;
+}
+
 const PLANES = [
   { value: "trial", label: "Prueba (15 días)" },
   { value: "free", label: "Gratis" },
@@ -98,6 +109,7 @@ export default function EmpresasPage() {
   const [globalCortado, setGlobalCortado] = useState<boolean | null>(null);
   const [cambiandoGlobal, setCambiandoGlobal] = useState(false);
   const [alertas, setAlertas] = useState<AlertaTrafico[]>([]);
+  const [sinRuta, setSinRuta] = useState<NumeroSinRuta[]>([]);
   // Destinos internacionales bloqueados para todas las empresas.
   const [bloqueados, setBloqueados] = useState<{ prefijos: string; fijos: string[] } | null>(null);
   const [textoBloqueados, setTextoBloqueados] = useState("");
@@ -165,6 +177,7 @@ export default function EmpresasPage() {
       setGlobalCortado(global.outbound_blocked);
       // Informativo: si falla, la lista de empresas igual se muestra.
       api.get<AlertaTrafico[]>("/api/plataforma/alertas").then(setAlertas).catch(() => setAlertas([]));
+      api.get<NumeroSinRuta[]>("/api/plataforma/sin-ruta").then(setSinRuta).catch(() => setSinRuta([]));
       cargarNodos();
       api
         .get<{ prefijos: string; fijos: string[] }>("/api/plataforma/destinos-bloqueados")
@@ -423,6 +436,41 @@ export default function EmpresasPage() {
                 <Td muted>{new Date(a.cuando + "Z").toLocaleString()}</Td>
                 <Td strong>{a.empresa}</Td>
                 <Td>{a.detalle}</Td>
+              </Tr>
+            ))}
+          </Table>
+        </Card>
+      )}
+
+      {sinRuta.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader
+            title="Llamadas a números sin ruta"
+            subtitle="Entraron por un proveedor a un número que ninguna empresa tiene en Rutas entrantes, y se colgaron. Falta crear la ruta, o el proveedor manda el número en otro formato."
+          />
+          <Table head={["Número", "Empresa (por el proveedor)", "Llamadas", "Última", "Quién llamó", ""]}>
+            {sinRuta.map((n) => (
+              <Tr key={n.id}>
+                <Td strong>
+                  {n.numero}
+                  {n.para && n.para !== n.numero && <span className="block text-xs text-muted">Para: {n.para}</span>}
+                </Td>
+                <Td muted>{n.empresa ?? (n.troncal ? `Proveedor ${n.troncal}` : "Desconocida")}</Td>
+                <Td>{n.veces}</Td>
+                <Td muted>{new Date(n.ultima_vez + "Z").toLocaleString()}</Td>
+                <Td muted>{n.origen ?? "—"}</Td>
+                <Td>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      await api.del(`/api/plataforma/sin-ruta/${n.id}`).catch(() => undefined);
+                      setSinRuta((xs) => xs.filter((x) => x.id !== n.id));
+                    }}
+                  >
+                    Quitar
+                  </Button>
+                </Td>
               </Tr>
             ))}
           </Table>

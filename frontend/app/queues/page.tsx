@@ -22,7 +22,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { api } from "@/lib/api";
-import { Extension, Queue } from "@/lib/types";
+import { Extension, Queue, VoiceBot } from "@/lib/types";
 
 const STRATEGIES = [
   { value: "ring-all", label: "Suena en todos a la vez (recomendado)" },
@@ -35,13 +35,15 @@ const STRATEGIES = [
   { value: "random", label: "Aleatorio" },
 ];
 
-type Desborde = "hangup" | "extension" | "voicemail" | "queue" | "otro";
+type Desborde = "hangup" | "extension" | "voicemail" | "queue" | "voicebot" | "otro";
 const PREFIJO_BUZON = "*99";
+const PREFIJO_BOT = "bot_";
 
 /** Qué hay en `failover_extension`: *99<ext> es el buzón de esa extensión. */
 function tipoDesborde(valor: string | null | undefined, extensiones: Extension[], colas: Queue[]): Desborde {
   if (!valor) return "hangup";
   if (valor.startsWith(PREFIJO_BUZON)) return "voicemail";
+  if (valor.startsWith(PREFIJO_BOT)) return "voicebot";
   if (extensiones.some((e) => e.number === valor)) return "extension";
   if (colas.some((q) => q.extension === valor)) return "queue";
   return "otro";
@@ -77,6 +79,7 @@ export default function QueuesPage() {
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Queue | null>(null);
   const [form, setForm] = useState(empty);
+  const [bots, setBots] = useState<VoiceBot[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,6 +91,8 @@ export default function QueuesPage() {
       setItems(qs);
       setExtensions(exts);
       setError("");
+      // Los voizbots son opcionales (módulo aparte): sin acceso, la lista queda vacía.
+      api.get<VoiceBot[]>("/api/voicebots").then(setBots, () => setBots([]));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally {
@@ -146,6 +151,7 @@ export default function QueuesPage() {
     if (tipo === "voicemail") return `Buzón de ${nombre(v) || `la ${v}`}${espera}`;
     if (tipo === "extension") return `${nombre(v) || `Ext. ${v}`}${espera}`;
     if (tipo === "queue") return `Grupo ${items.find((x) => x.extension === v)?.name ?? v}${espera}`;
+    if (tipo === "voicebot") return `Voizbot ${bots.find((b) => `${PREFIJO_BOT}${b.id}` === v)?.name ?? v}${espera}`;
     return `${v}${espera}`;
   };
 
@@ -158,11 +164,19 @@ export default function QueuesPage() {
     .filter((c) => c.grupos.length > 0);
 
   const tipoForm = tipoDesborde(form.failover_extension, extensions, items);
-  const cambiarDesborde = (tipo: Desborde, valor = "") =>
+  const cambiarDesborde = (tipo: Desborde, valor = "") => {
+    // Al cambiar de tipo sin elegir todavía, el primero de la lista (un valor
+    // vacío se leería como «Colgar» y el selector volvería atrás).
+    if (!valor) {
+      if (tipo === "voicebot") valor = bots[0] ? `${PREFIJO_BOT}${bots[0].id}` : "";
+      if (tipo === "queue") valor = items.find((q) => q.id !== editing?.id)?.extension ?? "";
+      if (tipo === "extension") valor = extensions[0]?.number ?? "";
+    }
     setForm({
       ...form,
       failover_extension: tipo === "hangup" ? "" : tipo === "voicemail" ? (valor ? `${PREFIJO_BUZON}${valor}` : PREFIJO_BUZON) : valor,
     });
+  };
 
   const remove = async (q: Queue) => {
     if (!confirm(`¿Eliminar la cola ${q.name}?`)) return;
@@ -325,12 +339,21 @@ export default function QueuesPage() {
                 { value: "voicemail", label: "El buzón de voz de una persona (deja un mensaje)" },
                 { value: "extension", label: "Una persona" },
                 { value: "queue", label: "Otro grupo" },
+                ...(bots.length || tipoForm === "voicebot" ? [{ value: "voicebot", label: "Un voizbot (asistente de voz)" }] : []),
                 { value: "hangup", label: "Colgar" },
               ]}
             />
             {tipoForm !== "hangup" && (
               <Select
-                label={tipoForm === "queue" ? "¿Qué grupo?" : tipoForm === "voicemail" ? "¿El buzón de quién?" : "¿Quién?"}
+                label={
+                  tipoForm === "queue"
+                    ? "¿Qué grupo?"
+                    : tipoForm === "voicebot"
+                      ? "¿Qué voizbot?"
+                      : tipoForm === "voicemail"
+                        ? "¿El buzón de quién?"
+                        : "¿Quién?"
+                }
                 value={valorDesborde(form.failover_extension)}
                 onChange={(v) => cambiarDesborde(tipoForm === "otro" ? "extension" : tipoForm, v)}
                 placeholder="— Elige —"
@@ -339,7 +362,9 @@ export default function QueuesPage() {
                     ? items
                         .filter((q) => q.id !== editing?.id)
                         .map((q) => ({ value: q.extension, label: `${q.extension} — ${q.name}` }))
-                    : extensions
+                    : tipoForm === "voicebot"
+                      ? bots.map((b) => ({ value: `${PREFIJO_BOT}${b.id}`, label: b.name }))
+                      : extensions
                         .filter((e) => tipoForm !== "voicemail" || e.voicemail)
                         .map((e) => ({ value: e.number, label: `${e.number} — ${e.caller_id_name || "sin nombre"}` }))
                 }

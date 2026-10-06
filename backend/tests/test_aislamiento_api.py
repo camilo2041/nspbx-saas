@@ -56,6 +56,7 @@ _FUERA_DE_ESTA_PRUEBA = {
     "/api/plataforma/nodos/{nodo_id}": "solo plataforma — test_nodos.py",
     "/api/plataforma/nodos/{nodo_id}/probar": "solo plataforma — test_nodos.py",
     "/api/plataforma/nodos/empresas/{tenant_id}": "solo plataforma — test_nodos.py",
+    "/api/plataforma/sin-ruta/{numero_id}": "solo plataforma — test_fase_f.py",
     "/api/tenants/{tenant_id}": "solo plataforma — test_alcance.py",
     "/api/tenants/{tenant_id}/licencia": "solo plataforma — test_alcance.py",
     "/api/tenants/{tenant_id}/salientes/colgar": "solo plataforma — test_emergencia.py",

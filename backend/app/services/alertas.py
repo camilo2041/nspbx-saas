@@ -156,6 +156,7 @@ LICENCIA_DIAS_AVISO = 7
 ABANDONO_VENTANA = timedelta(minutes=30)
 ABANDONO_MIN_LLAMADAS = 5
 ABANDONO_PCT = 30
+SIN_RUTA_VENTANA = timedelta(minutes=30)
 # Estados de un gateway de sofia que significan «no está conectado».
 _GATEWAY_CAIDO = ("FAIL_WAIT", "FAILED", "UNREGED", "NOAVAIL", "DOWN")
 # Silencio propio por tipo (el resto usa SILENCIO).
@@ -170,6 +171,7 @@ TITULOS = {
     "licencia_vence": "La licencia está por vencer",
     "licencia_vencida": "La licencia venció",
     "abandono_alto": "Muchas llamadas colgaron esperando",
+    "numero_sin_ruta": "Llaman a un número sin ruta de entrada",
 }
 
 
@@ -227,6 +229,21 @@ async def detectar_operacion(session, ahora: datetime | None = None) -> list[tup
         if n >= ABANDONO_MIN_LLAMADAS and 100 * abandonadas >= ABANDONO_PCT * n:
             hallazgos.append((tid, "abandono_alto",
                               f"Grupo «{cola}»: {abandonadas} de {n} llamadas colgaron esperando en la última media hora"))
+
+    # Llamadas a un número que entra por la troncal de la empresa pero no
+    # tiene ruta de entrada (services/sin_ruta.py): se están perdiendo.
+    from app.models import NumeroSinRuta
+    from app.services import sin_ruta
+
+    slugs = {tid: t.slug for tid, t in empresas.items()}
+    for n in (
+        await session.execute(select(NumeroSinRuta).where(NumeroSinRuta.ultima_vez >= ahora - SIN_RUTA_VENTANA))
+    ).scalars().all():
+        tid = sin_ruta.empresa_de_troncal(n.troncal, slugs)
+        if tid is not None:
+            hallazgos.append((tid, "numero_sin_ruta",
+                              f"Entran llamadas al número {n.numero} y no tiene ruta de entrada: se cuelgan "
+                              f"({n.veces} en total). Créale una en Rutas entrantes."))
     return hallazgos
 
 

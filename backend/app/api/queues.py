@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session, get_session, traer_propio
-from app.models import Queue, Tenant
+from app.models import Queue, Tenant, VoiceBot
 from app.schemas import QueueCreate, QueueUpdate
 from app.services import esl
 from app.services.ajustes import dominios_tenants
@@ -78,6 +78,12 @@ async def _exigir_numeros_libres(
         raise HTTPException(status_code=409, detail=f"El número {numero} ya lo usa {uso}")
     if desborde and desborde == (numero_propio or numero):
         raise HTTPException(status_code=400, detail="El desborde no puede ser la misma cola")
+    if desborde and desborde.startswith("bot_"):
+        # Un voizbot de la empresa (en el dialplan, `bot_<id>` de su contexto).
+        bot_id = desborde[4:]
+        bot = await traer_propio(session, VoiceBot, int(bot_id)) if bot_id.isdigit() else None
+        if bot is None:
+            raise HTTPException(status_code=400, detail="Ese voizbot no existe")
 
 
 async def _todas(session: AsyncSession) -> list[Queue]:
