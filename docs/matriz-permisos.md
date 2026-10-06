@@ -59,6 +59,15 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/buzon/{mensaje_id}` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | PUT | `/api/buzon/{mensaje_id}` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/buzon/{mensaje_id}/audio` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/calidad/criterios` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/calidad/criterios` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/calidad/llamadas` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/calidad/llamadas/{call_id}` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/calidad/llamadas/{call_id}/evaluaciones` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/calidad/llamadas/{call_id}/sugerencia` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/calidad/llamadas/{call_id}/transcribir` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/calidad/mias` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/calidad/resumen` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/calls` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls/dias` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls/serie` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |

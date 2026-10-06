@@ -130,6 +130,16 @@ const GROUPS: NavGroup[] = [
         ),
       },
       {
+        href: "/calidad",
+        label: "Calidad",
+        permiso: PERMISOS.llamadasPropias,
+        icon: icon(
+          <>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8-4.3-4.1 5.9-.9z" />
+          </>
+        ),
+      },
+      {
         href: "/reportes",
         label: "Reportes",
         permiso: PERMISOS.reportes,
@@ -376,6 +386,7 @@ const MODULO_POR_SECCION: Record<string, string | null> = {
   "/softphone": "pbx",
   "/calls": "pbx",
   "/buzon": "pbx",
+  "/calidad": "pbx",
   "/configurar": "pbx",
   "/extensions": "pbx",
   "/trunks": "pbx",

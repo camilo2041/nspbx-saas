@@ -538,6 +538,9 @@ class CallLog(Base):
     cola_espera_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cola_resultado: Mapped[str | None] = mapped_column(String(12), nullable=True)  # atendida|abandonada|desbordada
     cola_agente: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Transcripción de la grabación ([{rol, texto}]), guardada la primera vez
+    # que se pide (resumen o evaluación de calidad): se paga una sola vez.
+    transcripcion: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     campaign: Mapped["Campaign | None"] = relationship(back_populates="calls")
 
@@ -1543,3 +1546,37 @@ class SesionWebcall(Base):
     registrada: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # Colgó o se cerró: ya no cuenta como activa, pero sigue para el límite por IP.
     terminada: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+
+class CriterioCalidad(Base):
+    """Un punto de la evaluación de calidad de llamadas de la empresa
+    («Saludó y se presentó», «Dio información correcta»…)."""
+
+    __tablename__ = "criterios_calidad"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    nombre: Mapped[str] = mapped_column(String(120))
+    descripcion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    peso: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    orden: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+
+class EvaluacionLlamada(Base):
+    """La evaluación de calidad de una llamada grabada (services/calidad.py).
+    `puntajes`: {id de criterio: 0 no cumple | 1 a medias | 2 cumple}."""
+
+    __tablename__ = "evaluaciones_llamada"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    call_id: Mapped[int] = mapped_column(ForeignKey("call_logs.id", ondelete="CASCADE"), index=True)
+    agente_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    evaluador_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    puntajes: Mapped[dict] = mapped_column(JSON)
+    total_pct: Mapped[float] = mapped_column(Float)
+    comentario: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # manual | ia (la sugerencia de la IA, revisada y guardada por alguien)
+    origen: Mapped[str] = mapped_column(String(10), default="manual", server_default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

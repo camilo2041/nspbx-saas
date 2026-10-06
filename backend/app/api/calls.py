@@ -647,11 +647,16 @@ async def get_summary(
     if not dg_key or not llm_key:
         return {**datos, "available": False, "reason": "Faltan las API keys de Deepgram y del modelo de lenguaje en Ajustes."}
 
-    try:
-        turnos = await deepgram.transcribir_grabacion(local.read_bytes(), dg_key)
-    except Exception as exc:
-        logger.exception("No se pudo transcribir la llamada %s", call_id)
-        return {**datos, "available": False, "reason": f"No se pudo transcribir la grabación: {exc}"}
+    if call.transcripcion is not None:
+        turnos = call.transcripcion
+    else:
+        try:
+            turnos = await deepgram.transcribir_grabacion(local.read_bytes(), dg_key)
+        except Exception as exc:
+            logger.exception("No se pudo transcribir la llamada %s", call_id)
+            return {**datos, "available": False, "reason": f"No se pudo transcribir la grabación: {exc}"}
+        # Se guarda: la evaluación de calidad la reusa sin volver a pagarla.
+        call.transcripcion = turnos or []
 
     if not turnos:
         # Hay archivo pero sin voz: pasa con llamadas que se cortaron al
@@ -674,7 +679,7 @@ async def get_summary(
                 {
                     "role": "system",
                     "content": (
-                        "Resumes llamadas de un consultorio odontológico para que alguien del equipo "
+                        "Resumes llamadas de una empresa para que alguien del equipo "
                         "entienda de un vistazo qué pasó. Escribe en español, en tercera persona, "
                         "máximo tres frases. Di qué pidió la persona, qué se resolvió y si quedó algo "
                         "pendiente. La transcripción es automática y puede traer errores: si algo no se "

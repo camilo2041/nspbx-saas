@@ -37,6 +37,15 @@ const AYUDA: Record<string, Ayuda> = {
     ],
     pregunta: "¿Cómo funciona el buzón de voz?",
   },
+  "/calidad": {
+    que: "Para mejorar la atención: escuchas llamadas grabadas y las calificas con los criterios de tu empresa. La IA puede leer la llamada y sugerir la calificación; tú la revisas y guardas.",
+    pasos: [
+      "En «Criterios», define qué se evalúa (vienen unos de ejemplo).",
+      "En «Evaluar llamadas», abre una llamada, escúchala y califica cada punto (o pulsa «Sugerir con IA»).",
+      "En «Resultados» ves el promedio de cada persona. Cada persona ve sus evaluaciones en esta misma pantalla.",
+    ],
+    pregunta: "¿Cómo evalúo la calidad de las llamadas?",
+  },
   "/trunks": {
     que: "El proveedor de telefonía (técnico: troncal SIP) es la línea que conecta tu central con la red telefónica: por ahí entran y salen las llamadas externas.",
     pasos: [

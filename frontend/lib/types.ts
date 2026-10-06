@@ -50,7 +50,7 @@ export interface VoiceBot {
   created_at: string;
 }
 
-export type FlowNodeType = "menu" | "transfer" | "hangup";
+export type FlowNodeType = "menu" | "transfer" | "hangup" | "horario";
 
 export interface FlowNodeData {
   [key: string]: unknown;
@@ -62,6 +62,10 @@ export interface FlowNodeData {
   whisper_audio_path?: string | null;
   ai_intent?: string;
   whisper_text?: string | null;
+  /** Nodo «Transferir»: a qué va `extension` (por omisión, una extensión). */
+  destino_tipo?: "extension" | "grupo" | "buzon" | "numero";
+  /** Nodo «Horario»: JSON {"mon": ["08:00", "18:00"], ...}. */
+  horario?: string | null;
 }
 
 export interface FlowNode {

@@ -105,6 +105,7 @@ _CUERPOS = {
     ("PUT", "/api/integraciones/webhooks/{webhook_id}"): {"nombre": "Pisado"},
     ("PUT", "/api/reportes/programados/{programado_id}"): {"nombre": "Pisado"},
     ("PUT", "/api/buzon/{mensaje_id}"): {"escuchado": True},
+    ("POST", "/api/calidad/llamadas/{call_id}/evaluaciones"): {"puntajes": {}},
 }
 
 # PUT que, contra un recurso PROPIO, tienen que funcionar. Es el control

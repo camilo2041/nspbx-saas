@@ -38,6 +38,7 @@ _TEXTOS = {
     "dnd_on": "No molestar activado.",
     "dnd_off": "No molestar desactivado.",
     "dnd_no_disponible": "La extensión no está disponible en este momento.",
+    "ivr_opcion_invalida": "Esa opción no es válida. Hasta luego.",
     "buzon_saludo": "La persona que llamas no está disponible. Deja tu mensaje después del tono y cuelga al terminar.",
     # Grupos de atención (services/queues_sync.py y config_generator._append_queue_routes).
     "cola_aviso": "Gracias por esperar. En un momento te atendemos.",
