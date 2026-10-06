@@ -225,6 +225,11 @@ export interface InboundRoute {
   destination_value: string | null;
   priority: number;
   enabled: boolean;
+  /** Horario de atención (JSON por día); null = siempre. */
+  horario?: string | null;
+  /** Fuera de horario, la llamada va a esto (null = colgar). */
+  fuera_horario_tipo?: "extension" | "queue" | "voicebot" | "hangup" | null;
+  fuera_horario_valor?: string | null;
   created_at: string;
 }
 

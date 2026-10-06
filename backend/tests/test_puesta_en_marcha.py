@@ -47,3 +47,30 @@ async def test_los_pasos_reflejan_la_central(cliente, mundo, freeswitch):
     assert not _pasos(await cliente.get("/api/system/puesta-en-marcha", headers=cab))["telefono"]["hecho"]
     freeswitch["registros"] += f"1000,{mundo.alfa.dominio},y,sofia/internal/1000\n"
     assert _pasos(await cliente.get("/api/system/puesta-en-marcha", headers=cab))["telefono"]["hecho"]
+
+
+# --- «Agregar persona»: usuario y extensión en un paso ------------------------------
+
+
+async def test_agregar_persona_crea_su_extension(cliente, mundo):
+    cab = mundo.alfa.cabeceras()
+    antes = [int(e["number"]) for e in (await cliente.get("/api/extensions", headers=cab)).json() if e["number"].isdigit()]
+    r = await cliente.post("/api/users", headers=cab, json={
+        "username": "ana.perez", "full_name": "Ana Pérez", "role": "asesor",
+        "password": "Clave-Segura-9182", "crear_extension": True,  # gitleaks:allow (clave de prueba)
+    })
+    assert r.status_code == 201, r.text
+    ext_id = r.json()["extension_id"]
+    exts = {e["id"]: e for e in (await cliente.get("/api/extensions", headers=cab)).json()}
+    nueva = exts[ext_id]
+    # La siguiente a la mayor de la empresa, con el nombre de la persona.
+    assert int(nueva["number"]) == max(antes) + 1 and nueva["caller_id_name"] == "Ana Pérez"
+    assert len(nueva["password"]) >= 12
+
+    # Con número elegido que ya está en uso: no crea nada a medias.
+    r = await cliente.post("/api/users", headers=cab, json={
+        "username": "luis", "full_name": "Luis", "role": "asesor", "password": "Clave-Segura-9182",  # gitleaks:allow
+        "crear_extension": True, "numero_extension": "1000",
+    })
+    assert r.status_code == 409
+    assert not any(u["username"] == "luis" for u in (await cliente.get("/api/users", headers=cab)).json())

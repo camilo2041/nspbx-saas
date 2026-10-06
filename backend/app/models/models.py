@@ -752,6 +752,12 @@ class InboundRoute(Base):
     destination_value: Mapped[str | None] = mapped_column(String(50), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, default=10)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Horario de atención (JSON {"mon": ["08:00", "18:00"], ...}, mismo
+    # formato que el widget web; ver services/webcall.parse_schedule). Vacío
+    # = siempre. Fuera de él la llamada va a fuera_horario_* (vacío = colgar).
+    horario: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fuera_horario_tipo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    fuera_horario_valor: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

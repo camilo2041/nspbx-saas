@@ -22,6 +22,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { Trunk, TrunkStatus } from "@/lib/types";
 
 const empty = {
@@ -66,6 +67,27 @@ export default function TrunksPage() {
   const [form, setForm] = useState(empty);
   const [busy, setBusy] = useState<number | null>(null);
   const [prueba, setPrueba] = useState<{ cargando: boolean; estado?: string | null } | null>(null);
+  const { usuario } = useAuth();
+  const [celular, setCelular] = useState("");
+  const [llamada, setLlamada] = useState<{ cargando: boolean; texto?: string; ok?: boolean } | null>(null);
+
+  // «Llamada de prueba»: la central hace sonar TU extensión y, al
+  // contestar, marca el número por este proveedor (click-to-call). Si se oye
+  // bien en los dos lados, el proveedor funciona de punta a punta.
+  const llamarPrueba = async (trunk: Trunk) => {
+    if (!usuario?.extension_id) return;
+    setLlamada({ cargando: true });
+    try {
+      await api.post(`/api/extensions/${usuario.extension_id}/call`, { destination: celular.trim(), trunk_id: trunk.id });
+      setLlamada({
+        cargando: false,
+        ok: true,
+        texto: `Contesta en tu extensión ${usuario.extension_number}: al hacerlo, la central marcará ${celular.trim()} por ${trunk.name}.`,
+      });
+    } catch (e) {
+      setLlamada({ cargando: false, ok: false, texto: e instanceof Error ? e.message : "No se pudo llamar" });
+    }
+  };
 
   const loadStatuses = useCallback(async (trunks: Trunk[]) => {
     const entries = await Promise.all(
@@ -372,6 +394,41 @@ export default function TrunksPage() {
                 </p>
               )}
               <p className="mt-1 text-xs text-muted">Guarda los cambios antes de probar.</p>
+
+              <div className="mt-3 border-t border-line pt-3">
+                <span className="text-sm text-fg-soft">Llamada de prueba</span>
+                {usuario?.extension_id ? (
+                  <>
+                    <p className="mt-0.5 text-xs text-muted">
+                      Primero suena tu extensión {usuario.extension_number} (ten el softphone abierto); al contestar, la central
+                      llama a este número por este proveedor.
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <div className="flex-1">
+                        <Input label="Tu celular" value={celular} onChange={setCelular} placeholder="3001234567" mono />
+                      </div>
+                      <div className="self-end">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => llamarPrueba(editing)}
+                          loading={llamada?.cargando}
+                          disabled={celular.trim().length < 7}
+                        >
+                          Llamar
+                        </Button>
+                      </div>
+                    </div>
+                    {llamada?.texto && (
+                      <p className={`mt-2 text-sm ${llamada.ok ? "text-ok-text" : "text-danger-text"}`}>{llamada.texto}</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="mt-0.5 text-xs text-muted">
+                    Para hacerla necesitas una extensión: asígnatela en Usuarios (editándote) y abre el Softphone.
+                  </p>
+                )}
+              </div>
             </div>
           )}
           {!editing && <p className="text-xs text-muted">Al conectarlo verás en la lista si el proveedor lo aceptó.</p>}

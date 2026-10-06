@@ -40,10 +40,10 @@ const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
     titulo: "Telefonía",
     entradas: [
       { titulo: "Extensiones", detalle: "Teléfonos, contraseñas SIP y desvíos", icono: "extension", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/extensiones" },
-      { titulo: "Troncales", detalle: "Conexión con tu proveedor: estado y prueba", icono: "troncal", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/troncales" },
-      { titulo: "Rutas entrantes", detalle: "A dónde va cada número que te llaman", icono: "entrante", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/rutas-entrantes" },
-      { titulo: "Rutas salientes", detalle: "Por qué troncal sale cada llamada", icono: "saliente", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/rutas-salientes" },
-      { titulo: "Colas", detalle: "Grupos de atención y sus agentes", icono: "cola", tono: "marca", permiso: "colas:gestionar", modulo: "pbx", ruta: "/administrar/colas" },
+      { titulo: "Proveedor de telefonía", detalle: "La línea por la que entran y salen las llamadas", icono: "troncal", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/troncales" },
+      { titulo: "Números entrantes", detalle: "A dónde va la llamada cuando marcan tu número", icono: "entrante", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/rutas-entrantes" },
+      { titulo: "Reglas de salida", detalle: "A qué números se llama y por qué proveedor", icono: "saliente", tono: "marca", permiso: "telefonia:gestionar", modulo: "pbx", ruta: "/administrar/rutas-salientes" },
+      { titulo: "Grupos de atención", detalle: "Varias personas que atienden las mismas llamadas", icono: "cola", tono: "marca", permiso: "colas:gestionar", modulo: "pbx", ruta: "/administrar/colas" },
     ],
   },
   {

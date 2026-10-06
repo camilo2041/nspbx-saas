@@ -40,10 +40,25 @@ async def _guardar(session: AsyncSession) -> None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ese número entrante ya está asignado a una ruta")
 
 
+def _fuera_de_horario(cambios: dict, tipo: str | None, valor: str | None) -> None:
+    """A dónde va la llamada fuera del horario: coherente con su tipo, o
+    nada (= colgar)."""
+    if not tipo or tipo == "hangup":
+        cambios["fuera_horario_valor"] = None
+        return
+    if not validacion.destino_valido(tipo, valor):
+        raise HTTPException(
+            status_code=422,
+            detail="Fuera de horario: el destino no corresponde al tipo (extensión, grupo o voizbot)",
+        )
+
+
 @router.post("", response_model=InboundRouteOut, status_code=status.HTTP_201_CREATED)
 async def create_route(payload: InboundRouteCreate, session: AsyncSession = Depends(get_session)):
     await _validar_comodin(session, payload.did_pattern)
-    route = InboundRoute(**payload.model_dump())
+    datos = payload.model_dump()
+    _fuera_de_horario(datos, datos["fuera_horario_tipo"], datos["fuera_horario_valor"])
+    route = InboundRoute(**datos)
     session.add(route)
     await _guardar(session)
     await session.refresh(route)
@@ -80,6 +95,11 @@ async def update_route(route_id: int, payload: InboundRouteUpdate, session: Asyn
             status_code=422,
             detail="El destino no corresponde al tipo: extensión (dígitos), cola (número) o voizbot (bot_N)",
         )
+    _fuera_de_horario(
+        cambios,
+        cambios.get("fuera_horario_tipo", route.fuera_horario_tipo),
+        cambios.get("fuera_horario_valor", route.fuera_horario_valor),
+    )
     await _validar_comodin(session, cambios.get("did_pattern"))
     for field, value in cambios.items():
         setattr(route, field, value)

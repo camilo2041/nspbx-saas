@@ -20,6 +20,7 @@ import {
   Toggle,
   Tr,
 } from "@/components/ui";
+import { EditorHorario } from "@/components/editor-horario";
 import { api } from "@/lib/api";
 import { Extension, InboundRoute, Queue, VoiceBot } from "@/lib/types";
 
@@ -103,6 +104,10 @@ export default function InboundRoutesPage() {
       const payload = {
         ...form,
         destination_value: form.destination_type === "hangup" ? null : destPick || null,
+        horario: form.horario || null,
+        fuera_horario_tipo: form.horario ? form.fuera_horario_tipo || "hangup" : null,
+        fuera_horario_valor:
+          form.horario && form.fuera_horario_tipo && form.fuera_horario_tipo !== "hangup" ? form.fuera_horario_valor || null : null,
       };
       if (editing) {
         await api.put(`/api/inbound-routes/${editing.id}`, payload);
@@ -119,7 +124,7 @@ export default function InboundRoutesPage() {
   };
 
   const remove = async (r: InboundRoute) => {
-    if (!confirm(`¿Eliminar la ruta ${r.name}?`)) return;
+    if (!confirm(`¿Eliminar el número entrante ${r.name}? Las llamadas a ese número dejarán de entrar.`)) return;
     try {
       await api.del(`/api/inbound-routes/${r.id}`);
       await load();
@@ -179,7 +184,14 @@ export default function InboundRoutesPage() {
                 <Td mono muted>
                   {r.priority}
                 </Td>
-                <Td>{r.name}</Td>
+                <Td>
+                  {r.name}
+                  {r.horario && (
+                    <span className="ml-2" title="Fuera del horario de atención va a otro destino">
+                      <Badge color="sky">Con horario</Badge>
+                    </span>
+                  )}
+                </Td>
                 <Td mono strong>
                   {r.did_pattern === "any" ? <Badge color="violet">Cualquiera</Badge> : r.did_pattern}
                 </Td>
@@ -293,6 +305,48 @@ export default function InboundRoutesPage() {
               options={destOptions(form.destination_type as DestType)}
             />
           )}
+          <div className="rounded-xl border border-line p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-fg-soft">
+                Solo en horario de atención
+                <span className="mt-0.5 block text-xs text-faint">Fuera de él, la llamada va a otro lado (o se cuelga).</span>
+              </span>
+              <Toggle
+                checked={!!form.horario}
+                onChange={(v) =>
+                  setForm({
+                    ...form,
+                    horario: v ? JSON.stringify(Object.fromEntries(["mon", "tue", "wed", "thu", "fri"].map((d) => [d, ["08:00", "18:00"]]))) : null,
+                  })
+                }
+              />
+            </div>
+            {form.horario && (
+              <div className="mt-3 space-y-3">
+                <EditorHorario value={form.horario} onChange={(v) => setForm({ ...form, horario: v })} />
+                <Select
+                  label="Fuera de horario, la llamada va a"
+                  value={form.fuera_horario_tipo || "hangup"}
+                  onChange={(v) => setForm({ ...form, fuera_horario_tipo: v as DestType, fuera_horario_valor: "" })}
+                  options={[
+                    { value: "hangup", label: "Colgar" },
+                    { value: "voicebot", label: "El voizbot (puede tomar el recado)" },
+                    { value: "extension", label: "Una persona (por ejemplo, de guardia)" },
+                    { value: "queue", label: "Un grupo de atención" },
+                  ]}
+                />
+                {form.fuera_horario_tipo && form.fuera_horario_tipo !== "hangup" && (
+                  <Select
+                    label="¿A cuál?"
+                    value={form.fuera_horario_valor ?? ""}
+                    onChange={(v) => setForm({ ...form, fuera_horario_valor: v })}
+                    placeholder="— Elige —"
+                    options={destOptions(form.fuera_horario_tipo as DestType)}
+                  />
+                )}
+              </div>
+            )}
+          </div>
           <Input
             label="Nombre"
             value={form.name}
