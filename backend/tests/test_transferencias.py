@@ -23,12 +23,16 @@ class FSLlamadas(FS):
     def __init__(self, monkeypatch):
         super().__init__(monkeypatch)
         self.llamadas: list[dict] = []
+        self.canales: list[dict] = []
         guardar = esl.api
 
         async def api(cmd, *args, **kw):
             if cmd == "show calls as json":
                 self.api.append(cmd)
                 return json.dumps({"row_count": len(self.llamadas), "rows": self.llamadas})
+            if cmd == "show channels as json":
+                self.api.append(cmd)
+                return json.dumps({"row_count": len(self.canales), "rows": self.canales})
             if cmd.startswith("uuid_exists "):
                 self.api.append(cmd)
                 return "false" if cmd.split()[1] in self.no_existe else "true"
@@ -183,6 +187,32 @@ async def test_softphone_transferencia_consultada(cliente, papa, fsl):
     assert fsl.api[-1] == f"hupall NORMAL_CLEARING nspbx_consulta_de {propia}"
     assert (await cliente.post("/api/llamada/transferencia/completar", headers=cab)).status_code == 200
     assert fsl.api[-1] == f"uuid_kill {propia}"
+
+
+async def test_softphone_hablar_los_tres(cliente, papa, fsl):
+    cab = papa["cab"](papa["agentes"][1])
+    propia, _ = _llamada_softphone(fsl, papa)
+    await cliente.post("/api/llamada/transferir", headers=cab, json={"destino": "200", "consultada": True})
+    # Antes de la consulta se fija la tecla de conferencia de att_xfer.
+    assert fsl.api[-2] == f"uuid_setvar {propia} attxfer_conf_key 0"
+    r = await cliente.post("/api/llamada/transferencia/conferencia", headers=cab)
+    assert r.status_code == 200 and r.json()["estado"] == "conferencia"
+    assert fsl.api[-1] == f"uuid_recv_dtmf {propia} 0"
+
+    # Ya en la conferencia no hay puente: la pata propia sale de `show channels`.
+    fsl.llamadas.clear()
+    fsl.canales = [
+        {"uuid": propia, "presence_id": f"201@{papa['dominio']}"},
+        {"uuid": str(uuidlib.uuid4()), "presence_id": "201@otra.test"},
+    ]
+    assert (await cliente.post("/api/llamada/transferencia/cancelar", headers=cab)).status_code == 200
+    assert fsl.api[-1] == f"hupall NORMAL_CLEARING nspbx_consulta_de {propia}"
+    assert (await cliente.post("/api/llamada/transferencia/completar", headers=cab)).status_code == 200
+    assert fsl.api[-1] == f"uuid_kill {propia}"
+    # Sin canal propio, nada que hacer.
+    fsl.canales = []
+    r = await cliente.post("/api/llamada/transferencia/completar", headers=cab)
+    assert r.status_code == 409 and "llamada en curso" in r.json()["detail"]
 
 
 async def test_softphone_validaciones(cliente, papa, fsl):

@@ -15,7 +15,11 @@ Hay dos formas de estar en una llamada, y cada una se maneja distinto:
   están puenteadas. La espera es `uuid_hold` (re-INVITE al teléfono propio
   y música a la otra pata), la directa es `uuid_transfer -bleg` y la
   consultada es `att_xfer` corriendo en la pata propia: al colgar quien
-  transfiere, FreeSWITCH une al cliente con la persona consultada.
+  transfiere, FreeSWITCH une al cliente con la persona consultada. «Hablar
+  los tres» es la tecla de conferencia de att_xfer (`attxfer_conf_key`),
+  que el panel «marca» con `uuid_recv_dtmf`: los tres pasan a una
+  conferencia y, desde ahí, quien transfiere puede salir (los otros dos
+  siguen) o cortar a la persona consultada.
 """
 
 import json
@@ -32,6 +36,8 @@ from app.services import agentes, esl
 logger = logging.getLogger(__name__)
 
 MUSICA = "local_stream://moh"
+# Tecla de att_xfer que pasa a los tres a una conferencia (la «marca» el panel).
+TECLA_CONFERENCIA = "0"
 
 
 class ErrorTransferencia(Exception):
@@ -39,6 +45,11 @@ class ErrorTransferencia(Exception):
         super().__init__(mensaje)
         self.mensaje = mensaje
         self.codigo = codigo
+
+
+class SinLlamada(ErrorTransferencia):
+    def __init__(self):
+        super().__init__("No tienes una llamada en curso")
 
 
 @dataclass
@@ -110,13 +121,34 @@ async def llamada_de(session, usuario: User) -> Llamada:
     except Exception as exc:
         raise ErrorTransferencia(f"No se pudo consultar la central: {exc}", 503) from None
     if not pares:
-        raise ErrorTransferencia("No tienes una llamada en curso")
+        raise SinLlamada()
     if len(pares) > 1:
         raise ErrorTransferencia("Tienes más de una llamada a la vez: cuelga una para transferir")
     propia, otra = pares[0]
     for u in (propia, otra):
         validacion.exigir(validacion.NOMBRE_RE, u, "uuid")
     return Llamada(usuario.tenant_id, ext, dominio, contexto, propia, otra)
+
+
+async def _pata_propia(session, usuario: User) -> tuple[int, str]:
+    """(empresa, pata del teléfono propio). Puenteada (`show calls`) o, si no,
+    en una conferencia de tres (`show channels`: ahí no hay puente)."""
+    try:
+        llamada = await llamada_de(session, usuario)
+        return llamada.tenant_id, llamada.propia
+    except SinLlamada:
+        pass
+    dominio, _ = await _contexto(session, usuario.tenant_id)
+    yo = f"{usuario.extension.number}@{dominio}"
+    try:
+        filas = json.loads(await esl.api("show channels as json", tenant_id=usuario.tenant_id)).get("rows") or []
+    except (ValueError, AttributeError):
+        filas = []
+    propias = [f["uuid"] for f in filas if f.get("presence_id") == yo and f.get("uuid")]
+    if len(propias) != 1:
+        raise SinLlamada()
+    validacion.exigir(validacion.NOMBRE_RE, propias[0], "uuid")
+    return usuario.tenant_id, propias[0]
 
 
 async def _agente_en_llamada(session, usuario: User) -> AgenteVivo | None:
@@ -185,6 +217,7 @@ async def transferir(session, usuario: User, destino: str, consultada: bool) -> 
     # oír música y quien transfiere habla con el destino. Al colgar quien
     # transfiere (o «Completar»), FreeSWITCH une al cliente con el destino;
     # si el destino cuelga, vuelve con el cliente.
+    await _api(f"uuid_setvar {llamada.propia} attxfer_conf_key {TECLA_CONFERENCIA}", llamada.tenant_id)
     await _api(f"uuid_broadcast {llamada.propia} att_xfer::{{{variables}}}{cadena} aleg", llamada.tenant_id)
     return {"estado": "consultando", "destino": destino}
 
@@ -238,9 +271,10 @@ async def completar(session, usuario: User) -> dict:
         await agentes._transicion(session, vivo, agentes.DISPO, en_espera=False, consulta_uuid=None, consulta_destino=None)
         await session.commit()
         return {"estado": "transferida", "destino": destino}
-    # Softphone: att_xfer une las otras dos patas cuando quien transfiere cuelga.
-    llamada = await llamada_de(session, usuario)
-    await _api(f"uuid_kill {llamada.propia}", llamada.tenant_id)
+    # Softphone: att_xfer une las otras dos patas cuando quien transfiere
+    # cuelga; en la conferencia de tres, los otros dos siguen hablando.
+    tenant_id, propia = await _pata_propia(session, usuario)
+    await _api(f"uuid_kill {propia}", tenant_id)
     return {"estado": "transferida"}
 
 
@@ -256,8 +290,8 @@ async def cancelar(session, usuario: User) -> dict:
         raise ErrorTransferencia("Tu usuario no tiene una extensión", 400)
     # La pata consultada lleva nspbx_consulta_de=<pata propia>; se corta por
     # esa marca (esté timbrando o ya hablando) y att_xfer devuelve al cliente.
-    llamada = await llamada_de(session, usuario)
-    await _api(f"hupall NORMAL_CLEARING nspbx_consulta_de {llamada.propia}", llamada.tenant_id)
+    tenant_id, propia = await _pata_propia(session, usuario)
+    await _api(f"hupall NORMAL_CLEARING nspbx_consulta_de {propia}", tenant_id)
     return {"estado": "en_llamada"}
 
 
@@ -273,10 +307,17 @@ async def _cancelar_agente(session, vivo: AgenteVivo) -> None:
 
 
 async def unir_a_los_tres(session, usuario: User) -> dict:
-    """Consola de agente: el cliente vuelve a la sala, donde ya está la
-    persona consultada (los tres hablan)."""
+    """Los tres hablan. Consola de agente: el cliente vuelve a la sala, donde
+    ya está la persona consultada. Softphone: la tecla de conferencia de
+    att_xfer, como si quien transfiere la marcara en su teléfono."""
     vivo = await _agente_en_llamada(session, usuario)
-    if vivo is None or not vivo.consulta_uuid:
+    if vivo is None:
+        if usuario.tenant_id is None or usuario.extension is None:
+            raise ErrorTransferencia("Tu usuario no tiene una extensión", 400)
+        llamada = await llamada_de(session, usuario)
+        await _api(f"uuid_recv_dtmf {llamada.propia} {TECLA_CONFERENCIA}", llamada.tenant_id)
+        return {"estado": "conferencia"}
+    if not vivo.consulta_uuid:
         raise ErrorTransferencia("No hay una consulta en curso")
     await _volver_a_la_sala(vivo)
     vivo.en_espera = False

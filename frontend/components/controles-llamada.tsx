@@ -26,6 +26,8 @@ export function ControlesLlamada({
 }) {
   const [enEsperaLocal, setEnEsperaLocal] = useState(false);
   const [consultaLocal, setConsultaLocal] = useState<string | null>(null);
+  // Softphone: los tres en conferencia (en la consola lo sabe la sala del agente).
+  const [tresLocal, setTresLocal] = useState(false);
   const [abierto, setAbierto] = useState(false);
   const [destino, setDestino] = useState("");
   const [destinos, setDestinos] = useState<DestinosTransferencia | null>(null);
@@ -91,9 +93,10 @@ export function ControlesLlamada({
   const completar = async () => {
     const r = await pedir("completar", "/api/llamada/transferencia/completar");
     if (r) {
-      setAviso(`Llamada pasada a ${nombre(consulta ?? "")}.`);
+      setAviso(tresLocal ? "Saliste de la llamada: ellos siguen hablando." : `Llamada pasada a ${nombre(consulta ?? "")}.`);
       setConsultaLocal(null);
       setEnEsperaLocal(false);
+      setTresLocal(false);
       onTransferida?.();
     }
   };
@@ -103,7 +106,13 @@ export function ControlesLlamada({
     if (r) {
       setConsultaLocal(null);
       setEnEsperaLocal(false);
+      setTresLocal(false);
     }
+  };
+
+  const hablarLosTres = async () => {
+    const r = await pedir("tres", "/api/llamada/transferencia/conferencia");
+    if (r && !agente) setTresLocal(true);
   };
 
   const nombre = (n: string): string => {
@@ -118,17 +127,25 @@ export function ControlesLlamada({
     return (
       <div className="mt-3 space-y-2 rounded-xl border border-warn/30 bg-warn-soft p-3">
         <p className="text-sm text-warn-text">
-          Hablando con <b>{nombre(consulta)}</b>. El cliente está en espera con música.
+          {tresLocal ? (
+            <>
+              Están hablando los tres: tú, el cliente y <b>{nombre(consulta)}</b>.
+            </>
+          ) : (
+            <>
+              Hablando con <b>{nombre(consulta)}</b>. El cliente está en espera con música.
+            </>
+          )}
         </p>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="success" onClick={completar} loading={trabajando === "completar"}>
-            Pasarle la llamada
+            {tresLocal ? "Salir (que sigan ellos)" : "Pasarle la llamada"}
           </Button>
           <Button size="sm" variant="secondary" onClick={cancelar} loading={trabajando === "cancelar"}>
-            Volver con el cliente
+            {tresLocal ? `Sacar a ${nombre(consulta)}` : "Volver con el cliente"}
           </Button>
-          {agente && (
-            <Button size="sm" variant="ghost" onClick={() => pedir("tres", "/api/llamada/transferencia/conferencia")}>
+          {!tresLocal && (
+            <Button size="sm" variant="ghost" onClick={hablarLosTres} loading={trabajando === "tres"}>
               Hablar los tres
             </Button>
           )}
