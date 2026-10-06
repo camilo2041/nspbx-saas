@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models import SystemSettings
 from app.services import deepgram
+from app.services.numeros import numero_a_palabras
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,13 @@ _TEXTOS = {
     "dnd_on": "No molestar activado.",
     "dnd_off": "No molestar desactivado.",
     "dnd_no_disponible": "La extensión no está disponible en este momento.",
+    "buzon_saludo": "La persona que llamas no está disponible. Deja tu mensaje después del tono y cuelga al terminar.",
+    # Grupos de atención (services/queues_sync.py y config_generator._append_queue_routes).
+    "cola_aviso": "Gracias por esperar. En un momento te atendemos.",
+    "cola_delante_0": "Eres el siguiente en ser atendido.",
+    "cola_delante_1": "Hay una persona antes que tú.",
+    **{f"cola_delante_{n}": f"Hay {numero_a_palabras(n)} personas antes que tú." for n in range(2, 10)},
+    "cola_delante_mas": "Hay más de nueve personas antes que tú. Gracias por esperar.",
 }
 
 
@@ -67,7 +75,7 @@ async def ensure_prompts(session: AsyncSession, tenant_id: int | None = None) ->
     api_key = (fila.deepgram_api_key if fila else None) or ""
     if not api_key:
         logger.info(
-            "Sin API key de Deepgram todavía: los avisos de DND van a sonar con la voz de "
+            "Sin API key de Deepgram todavía: los avisos (no molestar, buzón, grupos) van a sonar con la voz de "
             "respaldo (flite) hasta que se configure una en Ajustes."
         )
         return

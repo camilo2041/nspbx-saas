@@ -10,6 +10,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { FloatingCallWidget } from "@/components/floating-call-widget";
 import { IncomingCallBanner } from "@/components/incoming-call-banner";
 import { ThemeToggle } from "@/components/theme";
+import { api } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { SoftphoneProvider } from "@/lib/softphone-context";
 import { PERMISOS } from "@/lib/types";
@@ -77,6 +78,18 @@ const GROUPS: NavGroup[] = [
             strokeLinejoin="round"
             d="M4 5h5l2 5-3 2a12 12 0 005 5l2-3 5 2v5a1 1 0 01-1 1A17 17 0 013 6a1 1 0 011-1z"
           />
+        ),
+      },
+      {
+        href: "/buzon",
+        label: "Buzón de voz",
+        permiso: PERMISOS.llamadasPropias,
+        icon: icon(
+          <>
+            <circle cx="6.5" cy="12" r="3.5" />
+            <circle cx="17.5" cy="12" r="3.5" />
+            <path strokeLinecap="round" d="M6.5 15.5h11" />
+          </>
         ),
       },
       {
@@ -361,6 +374,7 @@ const AVANZADO_KEY = "nspbx-modo-avanzado";
 const MODULO_POR_SECCION: Record<string, string | null> = {
   "/softphone": "pbx",
   "/calls": "pbx",
+  "/buzon": "pbx",
   "/configurar": "pbx",
   "/extensions": "pbx",
   "/trunks": "pbx",
@@ -429,12 +443,38 @@ export default function SidebarLayout({ children }: { children: ReactNode }) {
   );
 }
 
+/** Mensajes de buzón sin escuchar (el número junto a «Buzón de voz»). */
+function useMensajesSinEscuchar(activo: boolean): number {
+  const pathname = usePathname();
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!activo) return;
+    let vivo = true;
+    const leer = () =>
+      api
+        .get<{ sin_escuchar: number }>("/api/buzon/resumen")
+        .then((r) => vivo && setN(r.sin_escuchar))
+        .catch(() => undefined);
+    leer();
+    const t = setInterval(leer, 60000);
+    // La pantalla del buzón avisa al marcar o borrar, para no esperar al minuto.
+    window.addEventListener("nspbx:buzon", leer);
+    return () => {
+      vivo = false;
+      clearInterval(t);
+      window.removeEventListener("nspbx:buzon", leer);
+    };
+  }, [activo, pathname]);
+  return activo ? n : 0;
+}
+
 function Marco({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { usuario, puede, tieneModulo, salir, cargando } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [avanzado, setAvanzado] = useState(false);
+  const sinEscuchar = useMensajesSinEscuchar(!!usuario && puede(PERMISOS.llamadasPropias) && tieneModulo("pbx"));
 
   useEffect(() => {
     try {
@@ -590,6 +630,16 @@ function Marco({ children }: { children: ReactNode }) {
                         {item.icon}
                       </span>
                       {!collapsed && <span className="truncate">{item.label}</span>}
+                      {item.href === "/buzon" && sinEscuchar > 0 && (
+                        <span
+                          className={`rounded-full bg-danger px-1.5 text-[10px] font-bold leading-4 text-white ${
+                            collapsed ? "absolute right-1 top-1" : "ml-auto"
+                          }`}
+                          aria-label={`${sinEscuchar} mensaje(s) sin escuchar`}
+                        >
+                          {sinEscuchar > 99 ? "99+" : sinEscuchar}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}

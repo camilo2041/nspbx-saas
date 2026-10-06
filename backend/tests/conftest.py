@@ -96,6 +96,7 @@ from app.models import (  # noqa: E402
     Extension,
     InboundRoute,
     License,
+    MensajeBuzon,
     OutboundRoute,
     PaymentPromise,
     Queue,
@@ -247,7 +248,11 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
                              payload=f'{{"datos": "{marca}"}}', intentos=1)
     programado = ReporteProgramado(tenant_id=tid, nombre=f"Diario {marca}", tipo="campanas", frecuencia="diaria", hora=7,
                                    destinatarios=f"jefe@{marca}.test", activo=False)
-    session.add_all([entrega, programado])
+    buzon = MensajeBuzon(
+        tenant_id=tid, extension="1000", call_uuid=f"vm-{marca}", caller_number=f"{telefono}06",
+        caller_name=f"Llamante {marca}", ruta=f"/var/lib/freeswitch/recordings/t{tid}/buzon/1000/{marca}.wav", duracion=5,
+    )
+    session.add_all([entrega, programado, buzon])
     await session.flush()
 
     for rol in (permissions.ADMIN, permissions.SUPERVISOR, permissions.ASESOR):
@@ -292,6 +297,7 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         "webhook": gancho.id,
         "entrega_webhook": entrega.id,
         "reporte_programado": programado.id,
+        "mensaje_buzon": buzon.id,
     }
     return e
 

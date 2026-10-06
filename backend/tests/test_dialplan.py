@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 import pytest
 from sqlalchemy import text
 
+from app.core import validacion
 from app.core.database import engine
 
 from .conftest import FS_SECRET
@@ -100,7 +101,7 @@ async def test_entrantes_cada_did_va_al_contexto_de_su_empresa(cliente, mundo):
             ext.find(".//action[@application='set']").get("data"),
         )
     for e in (mundo.alfa, mundo.beta):
-        did = f"^{e.telefono}00$"
+        did = validacion.expresion_did(f"{e.telefono}00")
         assert did in destinos, f"falta el DID de {e.slug}"
         transfer, dominio = destinos[did]
         assert transfer.endswith(f"XML ctx_{e.slug}")

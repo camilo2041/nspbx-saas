@@ -221,14 +221,14 @@ export interface InboundRoute {
   id: number;
   name: string;
   did_pattern: string;
-  destination_type: "extension" | "queue" | "voicebot" | "hangup";
+  destination_type: "extension" | "voicemail" | "queue" | "voicebot" | "hangup";
   destination_value: string | null;
   priority: number;
   enabled: boolean;
   /** Horario de atención (JSON por día); null = siempre. */
   horario?: string | null;
   /** Fuera de horario, la llamada va a esto (null = colgar). */
-  fuera_horario_tipo?: "extension" | "queue" | "voicebot" | "hangup" | null;
+  fuera_horario_tipo?: "extension" | "voicemail" | "queue" | "voicebot" | "hangup" | null;
   fuera_horario_valor?: string | null;
   created_at: string;
 }
@@ -1059,4 +1059,14 @@ export interface NodoFreeswitch {
   canales?: number | null;
   pico?: number | null;
   version?: string | null;
+}
+
+export interface MensajeBuzon {
+  id: number;
+  extension: string;
+  caller_number: string | null;
+  caller_name: string | null;
+  duracion: number;
+  escuchado: boolean;
+  created_at: string | null;
 }

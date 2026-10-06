@@ -6,6 +6,7 @@ se normaliza y guarda. Antes la tabla `call_logs` existía pero nadie la
 llenaba: no había forma de ver el historial en la app.
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -22,7 +23,7 @@ from app.core.config import settings
 from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
-from app.services import deepgram, llm, tiempos_llamada
+from app.services import buzon, deepgram, llm, tiempos_llamada
 from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
@@ -274,11 +275,21 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         disposicion_id=disposicion_id,
         abandonada=True if variables.get("nspbx_abandonada") == "true" else None,
     )
+    if variables.get("nspbx_buzon_ext"):
+        # La llamada terminó en el buzón: no es una «contestada» aunque el
+        # canal se haya contestado para grabar el mensaje.
+        call.status = "voicemail"
     session.add(call)
+    mensaje = None
+    if variables.get("nspbx_buzon_ext"):
+        mensaje = await buzon.registrar(session, variables, tenant_id, uuid, caller, call.caller_name)
     try:
         await session.commit()
     except Exception:
         await session.rollback()  # carrera con otro POST del mismo uuid
+        return {"ok": True}
+    if mensaje is not None:
+        asyncio.create_task(buzon.avisar(tenant_id, mensaje.id))
     return {"ok": True}
 
 

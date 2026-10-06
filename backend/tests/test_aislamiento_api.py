@@ -47,6 +47,7 @@ _RECURSO_POR_PARAMETRO = {
     "webhook_id": "webhook",
     "entrega_id": "entrega_webhook",
     "programado_id": "reporte_programado",
+    "mensaje_id": "mensaje_buzon",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por
@@ -103,6 +104,7 @@ _CUERPOS = {
     ("POST", "/api/supervision/agentes/{user_id}/sacar"): {"cortar_llamada": False},
     ("PUT", "/api/integraciones/webhooks/{webhook_id}"): {"nombre": "Pisado"},
     ("PUT", "/api/reportes/programados/{programado_id}"): {"nombre": "Pisado"},
+    ("PUT", "/api/buzon/{mensaje_id}"): {"escuchado": True},
 }
 
 # PUT que, contra un recurso PROPIO, tienen que funcionar. Es el control

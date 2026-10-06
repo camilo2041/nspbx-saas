@@ -28,6 +28,15 @@ const AYUDA: Record<string, Ayuda> = {
     ],
     pregunta: "¿Qué es una extensión y cómo conecto un teléfono a ella?",
   },
+  "/buzon": {
+    que: "Los mensajes de voz que te dejaron cuando no contestaste (o tenías «no molestar»). Si tu usuario tiene correo, también te llega cada mensaje por correo.",
+    pasos: [
+      "El buzón se activa por extensión (Extensiones → Buzón de voz).",
+      "Para dejar un mensaje directo, marca *99 y la extensión (por ejemplo *99101).",
+      "En Números entrantes o en un grupo puedes mandar las llamadas al buzón de alguien, por ejemplo fuera de horario.",
+    ],
+    pregunta: "¿Cómo funciona el buzón de voz?",
+  },
   "/trunks": {
     que: "El proveedor de telefonía (técnico: troncal SIP) es la línea que conecta tu central con la red telefónica: por ahí entran y salen las llamadas externas.",
     pasos: [
@@ -38,7 +47,7 @@ const AYUDA: Record<string, Ayuda> = {
     pregunta: "¿Qué es una troncal SIP y qué datos le pido a mi proveedor?",
   },
   "/inbound-routes": {
-    que: "Aquí dices a dónde va una llamada cuando alguien marca tu número: a una persona, a un grupo de atención o al voizbot. Puedes ponerle horario de atención.",
+    que: "Aquí dices a dónde va una llamada cuando alguien marca tu número: a una persona, a su buzón de voz, a un grupo de atención o al voizbot. Puedes ponerle horario de atención.",
     pasos: ["Si tienes un solo número, usa «Cualquier número».", "Elige a dónde va y, si quieres, qué pasa fuera de horario."],
     pregunta: "¿Cómo hago que las llamadas a mi número suenen en mi equipo?",
   },

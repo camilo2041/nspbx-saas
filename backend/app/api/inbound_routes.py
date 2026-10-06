@@ -49,7 +49,7 @@ def _fuera_de_horario(cambios: dict, tipo: str | None, valor: str | None) -> Non
     if not validacion.destino_valido(tipo, valor):
         raise HTTPException(
             status_code=422,
-            detail="Fuera de horario: el destino no corresponde al tipo (extensión, grupo o voizbot)",
+            detail="Fuera de horario: el destino no corresponde al tipo (extensión, buzón, grupo o voizbot)",
         )
 
 
@@ -93,7 +93,7 @@ async def update_route(route_id: int, payload: InboundRouteUpdate, session: Asyn
     elif not validacion.destino_valido(tipo_final, valor_final):
         raise HTTPException(
             status_code=422,
-            detail="El destino no corresponde al tipo: extensión (dígitos), cola (número) o voizbot (bot_N)",
+            detail="El destino no corresponde al tipo: extensión o buzón (dígitos), cola (número) o voizbot (bot_N)",
         )
     _fuera_de_horario(
         cambios,
