@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pressable, ScrollView, Switch, Text, View } from "react-native";
 
+import { ControlesLlamada } from "@/src/ControlesLlamada";
 import { Avatar } from "@/src/gestion";
 import { toque } from "@/src/haptico";
 import { Icono } from "@/src/Icono";
@@ -166,10 +167,19 @@ export default function TelefonoScreen() {
 
         {tecladoAbierto ? <Teclado onTecla={sendDtmf} compacto /> : null}
 
-        <View style={e.controles}>
-          <Control icono={muted ? "silenciado" : "microfono"} etiqueta={muted ? "Activar" : "Silenciar"} activo={muted} onPress={toggleMute} />
-          <Control icono="teclado" etiqueta="Teclado" activo={tecladoAbierto} onPress={() => setTecladoAbierto((v) => !v)} />
-          <Control icono="altavoz" etiqueta="Altavoz" activo={speaker} onPress={toggleSpeaker} />
+        <View style={{ gap: 18 }}>
+          <View style={e.controles}>
+            <Control icono={muted ? "silenciado" : "microfono"} etiqueta={muted ? "Activar" : "Silenciar"} activo={muted} onPress={toggleMute} />
+            <Control icono="teclado" etiqueta="Teclado" activo={tecladoAbierto} onPress={() => setTecladoAbierto((v) => !v)} />
+            <Control icono="altavoz" etiqueta="Altavoz" activo={speaker} onPress={toggleSpeaker} />
+          </View>
+          {/* Espera y transferir, con la llamada ya contestada. Con el teclado abierto
+              se oculta sin desmontarse: no se pierde una consulta en curso. */}
+          {phase === "in-call" ? (
+            <View style={tecladoAbierto ? { display: "none" } : undefined}>
+              <ControlesLlamada />
+            </View>
+          ) : null}
         </View>
 
         <BotonIcono icono="colgar" etiqueta="Colgar" tono="peligro" relleno tam={72} onPress={hangup} style={{ alignSelf: "center" }} />

@@ -1,13 +1,13 @@
-import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
-import { GestureResponderEvent, LayoutChangeEvent, Pressable, ScrollView, Text, View } from "react-native";
+import { useState } from "react";
+import { ScrollView, Text, View } from "react-native";
 
-import { ApiError, cabeceraAuth, peticion, urlApi } from "@/src/api/client";
+import { ApiError, peticion } from "@/src/api/client";
 import type { CallLogOut } from "@/src/api/types";
 import { useDatos } from "@/src/datos";
 import { Aviso, Avatar, Esqueleto } from "@/src/gestion";
-import { exito, fallo, impacto } from "@/src/haptico";
+import { exito, fallo } from "@/src/haptico";
+import { AudioDeApi, mmss } from "@/src/Reproductor";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
 import { Icono } from "@/src/Icono";
 import { radios, useColores } from "@/src/tema";
@@ -28,75 +28,6 @@ const ESTADOS: Record<string, { texto: string; tono: "ok" | "aviso" | "peligro" 
   cancelled: { texto: "Cancelada", tono: "neutro" },
   rejected: { texto: "Rechazada", tono: "peligro" },
 };
-
-const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-
-function Reproductor({ fuente }: { fuente: { uri: string; headers: Record<string, string> } }) {
-  const col = useColores();
-  const player = useAudioPlayer(fuente);
-  const estado = useAudioPlayerStatus(player);
-  const [ancho, setAncho] = useState(1);
-  const dur = estado.duration || 0;
-  const pos = Math.min(estado.currentTime || 0, dur || 0);
-
-  const alternar = () => {
-    impacto();
-    if (estado.playing) player.pause();
-    else {
-      // Al terminar, vuelve al principio antes de reproducir de nuevo.
-      if (dur > 0 && pos >= dur - 0.3) player.seekTo(0).catch(() => {});
-      player.play();
-    }
-  };
-  const saltar = (delta: number) => player.seekTo(Math.max(0, Math.min(dur, pos + delta))).catch(() => {});
-  const tocarBarra = (e: GestureResponderEvent) => {
-    if (dur > 0) player.seekTo((e.nativeEvent.locationX / ancho) * dur).catch(() => {});
-  };
-
-  return (
-    <View style={{ gap: 12 }}>
-      <Pressable onPress={tocarBarra} onLayout={(e: LayoutChangeEvent) => setAncho(e.nativeEvent.layout.width || 1)} hitSlop={{ top: 10, bottom: 10 }}>
-        <View style={{ height: 6, borderRadius: 3, backgroundColor: col.superficie3, overflow: "hidden" }}>
-          <View style={{ height: 6, width: `${dur ? (pos / dur) * 100 : 0}%`, backgroundColor: col.marca }} />
-        </View>
-      </Pressable>
-      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-        <Text style={{ fontSize: 12, color: col.textoSecundario }}>{mmss(pos)}</Text>
-        <Text style={{ fontSize: 12, color: col.textoSecundario }}>{dur ? mmss(dur) : estado.isBuffering ? "Cargando…" : "--:--"}</Text>
-      </View>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 28 }}>
-        <Pressable onPress={() => saltar(-10)} hitSlop={10} accessibilityLabel="Retroceder 10 segundos">
-          <Icono nombre="retroceder10" tam={28} color={col.textoSuave} />
-        </Pressable>
-        <Pressable
-          onPress={alternar}
-          accessibilityLabel={estado.playing ? "Pausar" : "Reproducir"}
-          style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: col.marca, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icono nombre={estado.playing ? "pausa" : "reproducir"} tam={28} color={col.sobreMarca} />
-        </Pressable>
-        <Pressable onPress={() => saltar(10)} hitSlop={10} accessibilityLabel="Adelantar 10 segundos">
-          <Icono nombre="adelantar10" tam={28} color={col.textoSuave} />
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function Grabacion({ id }: { id: string }) {
-  const [fuente, setFuente] = useState<{ uri: string; headers: Record<string, string> } | null>(null);
-  useEffect(() => {
-    let vivo = true;
-    // Una petición liviana primero: si el token venció, se renueva y la cabecera sale al día.
-    peticion("/api/auth/me")
-      .catch(() => {})
-      .finally(() => vivo && setFuente({ uri: urlApi(`/api/calls/${id}/recording`), headers: cabeceraAuth() }));
-    return () => {
-      vivo = false;
-    };
-  }, [id]);
-  return fuente ? <Reproductor fuente={fuente} /> : <Esqueleto alto={90} />;
-}
 
 export default function DetalleLlamada() {
   const col = useColores();
@@ -195,7 +126,7 @@ export default function DetalleLlamada() {
         {c.has_recording ? (
           <Tarjeta style={{ gap: 8 }}>
             <Text style={{ fontSize: 14, fontWeight: "700", color: col.texto }}>Grabación</Text>
-            <Grabacion id={String(c.id)} />
+            <AudioDeApi ruta={`/api/calls/${c.id}/recording`} />
           </Tarjeta>
         ) : (
           <Aviso tono="aviso" texto="Esta llamada no tiene grabación disponible." />

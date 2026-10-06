@@ -29,6 +29,8 @@ const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
   {
     titulo: "Operación",
     entradas: [
+      { titulo: "Buzón de voz", detalle: "Mensajes que te dejaron cuando no contestaste", icono: "buzon", tono: "marca", permiso: ["llamadas:ver_propias", "llamadas:ver_todas"], modulo: "pbx", ruta: "/administrar/buzon" },
+      { titulo: "Mis evaluaciones", detalle: "Lo que el supervisor calificó de tus llamadas", icono: "ok", tono: "ok", permiso: "llamadas:ver_propias", ruta: "/administrar/mis-evaluaciones" },
       { titulo: "Citas", detalle: "Agenda y confirmaciones del voizbot", icono: "calendario", tono: "info", permiso: "citas:gestionar", modulo: "voicebot", ruta: "/administrar/citas" },
       { titulo: "Supervisión", detalle: "Agentes y campañas en vivo; escuchar y susurrar", icono: "ver", tono: "marca", permiso: "supervision:ver", ruta: "/administrar/supervision" },
       { titulo: "Reportes", detalle: "Agentes, campañas, disposiciones y cumplimiento", icono: "metricas", tono: "info", permiso: "reportes:ver", ruta: "/administrar/reportes" },
