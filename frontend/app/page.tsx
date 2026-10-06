@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useState } from "react";
 
 import { DashboardCalls } from "@/components/dashboard-calls";
 import { LlamadasEnVivo } from "@/components/llamadas-en-vivo";
+import { PuestaEnMarcha } from "@/components/puesta-en-marcha";
 import {
   Card,
   CardBody,
@@ -224,7 +225,7 @@ export default function DashboardPage() {
   }, [veAjustes]);
 
   const stats = [
-    veInfra && { label: "Troncales", value: counts.trunks, href: "/trunks", color: "sky" as const, icon: icons.trunks },
+    veInfra && { label: "Proveedores", value: counts.trunks, href: "/trunks", color: "sky" as const, icon: icons.trunks },
     veInfra && {
       label: "Extensiones",
       value: counts.extensions,
@@ -281,6 +282,8 @@ export default function DashboardPage() {
           <ErrorBanner message={error} />
         </div>
       )}
+
+      {puede(PERMISOS.ajustes) && <PuestaEnMarcha />}
 
       {loading ? (
         <DashboardSkeleton />

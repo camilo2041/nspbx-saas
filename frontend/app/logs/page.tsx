@@ -150,8 +150,8 @@ export default function LogsPage() {
   return (
     <div>
       <PageHeader
-        title="Logs"
-        subtitle="Consola en vivo de FreeSWITCH — lo mismo que fs_cli con /log, pero en el navegador"
+        title="Registro técnico"
+        subtitle="Lo que hace la central por dentro, en vivo, para soporte (técnico: consola de FreeSWITCH, como fs_cli)."
       />
 
       <Card>

@@ -710,7 +710,7 @@ export default function CampaignsPage() {
             hint="Por dónde salen las llamadas. Sin troncal la campaña no puede llamar."
           />
           {trunks.length === 0 && (
-            <Note tone="warn">Todavía no hay troncales: crea una en Troncales (los datos te los da tu proveedor de telefonía).</Note>
+            <Note tone="warn">Todavía no conectas un proveedor de telefonía: hazlo en Central telefónica → Proveedor de telefonía.</Note>
           )}
 
           {form.metodo === "voizbot" ? (

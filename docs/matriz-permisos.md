@@ -202,6 +202,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/system/diagnostics` | `ajustes:gestionar` · global | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/system/maintenance` | `ajustes:gestionar` · global | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/system/maintenance/backup-now` | `ajustes:gestionar` · global | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/system/puesta-en-marcha` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/system/recursos` | `ajustes:gestionar` · global | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/system/salientes` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/system/salientes/colgar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |

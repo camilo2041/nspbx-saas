@@ -148,7 +148,9 @@ const GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "Telefonía",
+    // Nombres para quien no sabe de telefonía (el término técnico está en
+    // el subtítulo de cada pantalla) y en el orden en que se configuran.
+    title: "Central telefónica",
     items: [
       {
         href: "/extensions",
@@ -164,7 +166,7 @@ const GROUPS: NavGroup[] = [
       },
       {
         href: "/trunks",
-        label: "Troncales",
+        label: "Proveedor de telefonía",
         permiso: PERMISOS.telefonia,
         icon: icon(
           <path
@@ -176,19 +178,13 @@ const GROUPS: NavGroup[] = [
       },
       {
         href: "/inbound-routes",
-        label: "Rutas entrantes",
+        label: "Números entrantes",
         permiso: PERMISOS.telefonia,
         icon: icon(<path strokeLinecap="round" strokeLinejoin="round" d="M9 5l-7 7 7 7M2 12h20" />),
       },
       {
-        href: "/outbound-routes",
-        label: "Rutas salientes",
-        permiso: PERMISOS.telefonia,
-        icon: icon(<path strokeLinecap="round" strokeLinejoin="round" d="M15 5l7 7-7 7M22 12H2" />),
-      },
-      {
         href: "/queues",
-        label: "Colas",
+        label: "Grupos de atención",
         permiso: PERMISOS.colas,
         icon: icon(
           <path
@@ -199,9 +195,15 @@ const GROUPS: NavGroup[] = [
         ),
       },
       {
+        href: "/outbound-routes",
+        label: "Reglas de salida",
+        permiso: PERMISOS.telefonia,
+        icon: icon(<path strokeLinecap="round" strokeLinejoin="round" d="M15 5l7 7-7 7M22 12H2" />),
+      },
+      {
         href: "/logs",
-        label: "Logs",
-        // Mismo permiso que Troncales: la consola en vivo expone tráfico
+        label: "Registro técnico",
+        // Mismo permiso que el proveedor (troncales): la consola en vivo expone tráfico
         // SIP completo (números, cabeceras, credenciales de registro).
         permiso: PERMISOS.telefonia,
         icon: icon(
