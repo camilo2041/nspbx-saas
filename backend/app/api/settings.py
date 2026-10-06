@@ -168,6 +168,17 @@ async def colgar_salientes_propias(usuario: User = Depends(usuario_actual)):
     return {"empresas": 1}
 
 
+@router.get("/puesta-en-marcha")
+async def puesta_en_marcha(session: AsyncSession = Depends(get_session), usuario: User = Depends(usuario_actual)):
+    """Los pasos para dejar la central funcionando y cuáles faltan (ver
+    services/puesta_en_marcha.py). Lo muestra el Inicio del panel."""
+    from app.services import puesta_en_marcha as servicio
+
+    if usuario.tenant_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo para usuarios de una empresa")
+    return await servicio.revisar(session, usuario.tenant_id)
+
+
 @router.get("/salientes")
 async def estado_salientes(session: AsyncSession = Depends(get_session), usuario: User = Depends(usuario_actual)):
     """Si la empresa puede llamar afuera ahora, y cuánto lleva del cupo de

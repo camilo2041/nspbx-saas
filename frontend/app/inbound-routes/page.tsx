@@ -20,6 +20,7 @@ import {
   Toggle,
   Tr,
 } from "@/components/ui";
+import { EditorHorario } from "@/components/editor-horario";
 import { api } from "@/lib/api";
 import { Extension, InboundRoute, Queue, VoiceBot } from "@/lib/types";
 
@@ -30,7 +31,7 @@ const empty: Omit<InboundRoute, "id" | "created_at"> = {
   did_pattern: "any",
   destination_type: "extension",
   destination_value: "",
-  priority: 10,
+  priority: 100, // «cualquier número» va al final (ver el formulario)
   enabled: true,
 };
 
@@ -103,6 +104,10 @@ export default function InboundRoutesPage() {
       const payload = {
         ...form,
         destination_value: form.destination_type === "hangup" ? null : destPick || null,
+        horario: form.horario || null,
+        fuera_horario_tipo: form.horario ? form.fuera_horario_tipo || "hangup" : null,
+        fuera_horario_valor:
+          form.horario && form.fuera_horario_tipo && form.fuera_horario_tipo !== "hangup" ? form.fuera_horario_valor || null : null,
       };
       if (editing) {
         await api.put(`/api/inbound-routes/${editing.id}`, payload);
@@ -119,7 +124,7 @@ export default function InboundRoutesPage() {
   };
 
   const remove = async (r: InboundRoute) => {
-    if (!confirm(`¿Eliminar la ruta ${r.name}?`)) return;
+    if (!confirm(`¿Eliminar el número entrante ${r.name}? Las llamadas a ese número dejarán de entrar.`)) return;
     try {
       await api.del(`/api/inbound-routes/${r.id}`);
       await load();
@@ -148,9 +153,9 @@ export default function InboundRoutesPage() {
   return (
     <div>
       <PageHeader
-        title="Rutas entrantes"
-        subtitle="A dónde va cada llamada entrante según el DID/número marcado — como las Inbound Routes de Issabel"
-        actions={<Button onClick={openCreate}>+ Nueva ruta</Button>}
+        title="Números entrantes"
+        subtitle="A dónde va una llamada cuando alguien marca tu número: a una persona, a un grupo o al voizbot. Término técnico: rutas entrantes por DID."
+        actions={<Button onClick={openCreate}>+ Configurar número</Button>}
       />
 
       {error && (
@@ -161,25 +166,32 @@ export default function InboundRoutesPage() {
 
       <Card>
         <CardHeader
-          title="Lista de rutas"
-          subtitle={`${items.length} registrada(s) — se evalúan en orden de prioridad, la primera que coincida gana`}
+          title="Tus números"
+          subtitle={`${items.length} configurado(s). Si una llamada coincide con varios, gana el de menor prioridad.`}
         />
         {loading ? (
           <TableSkeleton cols={6} />
         ) : items.length === 0 ? (
           <EmptyState
-            title="No hay rutas entrantes"
-            hint="Sin rutas, cualquier llamada entrante real se cuelga automáticamente (UNALLOCATED_NUMBER). Crea al menos una — usa 'any' como DID para un comodín que capture todo."
-            action={<Button onClick={openCreate}>+ Nueva ruta</Button>}
+            title="Todavía no recibes llamadas"
+            hint="Mientras no configures un número, las llamadas que entran por tu proveedor se cuelgan solas. Lo más simple: «cualquier número» → una persona o un grupo."
+            action={<Button onClick={openCreate}>+ Configurar número</Button>}
           />
         ) : (
-          <Table head={["Prioridad", "Nombre", "DID", "Destino", "Estado", { label: "Acciones", align: "right" }]}>
+          <Table head={["Prioridad", "Nombre", "Número", "Va a", "Estado", { label: "Acciones", align: "right" }]}>
             {items.map((r, i) => (
               <Tr key={r.id} delay={i * 35}>
                 <Td mono muted>
                   {r.priority}
                 </Td>
-                <Td>{r.name}</Td>
+                <Td>
+                  {r.name}
+                  {r.horario && (
+                    <span className="ml-2" title="Fuera del horario de atención va a otro destino">
+                      <Badge color="sky">Con horario</Badge>
+                    </span>
+                  )}
+                </Td>
                 <Td mono strong>
                   {r.did_pattern === "any" ? <Badge color="violet">Cualquiera</Badge> : r.did_pattern}
                 </Td>
@@ -214,7 +226,7 @@ export default function InboundRoutesPage() {
       <Modal
         open={modal}
         onClose={() => setModal(false)}
-        title={editing ? `Editar ruta ${editing.name}` : "Nueva ruta entrante"}
+        title={editing ? `Editar número ${editing.name}` : "Configurar número entrante"}
         footer={
           <>
             <Button variant="secondary" onClick={() => setModal(false)}>
@@ -227,56 +239,138 @@ export default function InboundRoutesPage() {
         }
       >
         <div className="space-y-4">
-          <Input
-            label="Nombre"
-            value={form.name}
-            onChange={(v) => setForm({ ...form, name: v })}
-            placeholder="DID principal"
-            required
-          />
-          <Input
-            label="DID (número marcado por quien llama)"
-            value={form.did_pattern}
-            onChange={(v) => setForm({ ...form, did_pattern: v })}
-            placeholder="Ej. 6017654321, o 'any' para cualquier número"
-            hint="Usa 'any' como comodín de respaldo (ponla con la prioridad más alta/número mayor para que se evalúe al final)."
-            required
-            mono
-          />
-          <Input
-            label="Prioridad"
-            type="number"
-            value={form.priority}
-            onChange={(v) => setForm({ ...form, priority: Number(v) })}
-            hint="Se evalúan de menor a mayor; la primera que matchee gana."
-          />
+          <div>
+            <span className="mb-1.5 block text-xs font-medium text-fg-soft">Cuando llamen a…</span>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { todos: true, titulo: "Cualquier número", detalle: "Todas las llamadas que entran por tus proveedores." },
+                { todos: false, titulo: "Un número específico", detalle: "Si tienes varios números y cada uno va a un lugar." },
+              ].map((o) => {
+                const activo = (form.did_pattern.trim().toLowerCase() === "any") === o.todos;
+                return (
+                  <button
+                    key={o.titulo}
+                    type="button"
+                    aria-pressed={activo}
+                    onClick={() =>
+                      setForm(
+                        o.todos
+                          // El comodín va al final: los números específicos ganan primero.
+                          ? { ...form, did_pattern: "any", priority: Math.max(form.priority, 100) }
+                          : { ...form, did_pattern: form.did_pattern === "any" ? "" : form.did_pattern, priority: form.priority >= 100 ? 10 : form.priority }
+                      )
+                    }
+                    className={`rounded-xl border p-3 text-left transition-colors ${
+                      activo ? "border-brand bg-brand-soft" : "border-line hover:bg-surface-2"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold text-fg">{o.titulo}</span>
+                    <span className="mt-0.5 block text-xs text-muted">{o.detalle}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {form.did_pattern.trim().toLowerCase() !== "any" && (
+            <Input
+              label="Tu número"
+              value={form.did_pattern}
+              onChange={(v) => setForm({ ...form, did_pattern: v })}
+              placeholder="6017654321"
+              hint="Tal como te lo entrega el proveedor (técnico: DID). Si no estás seguro, usa «Cualquier número»."
+              required
+              mono
+            />
+          )}
           <Select
-            label="Tipo de destino"
+            label="…la llamada va a"
             value={form.destination_type}
             onChange={(v) => {
               setForm({ ...form, destination_type: v as DestType });
               setDestPick("");
             }}
             options={[
-              { value: "extension", label: "Extensión" },
-              { value: "queue", label: "Cola" },
-              { value: "voicebot", label: "Voizbot" },
+              { value: "extension", label: "Una persona (su extensión)" },
+              { value: "queue", label: "Un grupo de atención (suena en varias personas)" },
+              { value: "voicebot", label: "El voizbot (contesta solo)" },
               { value: "hangup", label: "Colgar" },
             ]}
           />
           {form.destination_type !== "hangup" && (
             <Select
-              label="Destino"
+              label={form.destination_type === "queue" ? "¿Qué grupo?" : form.destination_type === "voicebot" ? "¿Qué voizbot?" : "¿Quién?"}
               value={destPick}
               onChange={setDestPick}
-              placeholder="— Selecciona —"
+              placeholder="— Elige —"
               options={destOptions(form.destination_type as DestType)}
             />
           )}
+          <div className="rounded-xl border border-line p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-fg-soft">
+                Solo en horario de atención
+                <span className="mt-0.5 block text-xs text-faint">Fuera de él, la llamada va a otro lado (o se cuelga).</span>
+              </span>
+              <Toggle
+                checked={!!form.horario}
+                onChange={(v) =>
+                  setForm({
+                    ...form,
+                    horario: v ? JSON.stringify(Object.fromEntries(["mon", "tue", "wed", "thu", "fri"].map((d) => [d, ["08:00", "18:00"]]))) : null,
+                  })
+                }
+              />
+            </div>
+            {form.horario && (
+              <div className="mt-3 space-y-3">
+                <EditorHorario value={form.horario} onChange={(v) => setForm({ ...form, horario: v })} />
+                <Select
+                  label="Fuera de horario, la llamada va a"
+                  value={form.fuera_horario_tipo || "hangup"}
+                  onChange={(v) => setForm({ ...form, fuera_horario_tipo: v as DestType, fuera_horario_valor: "" })}
+                  options={[
+                    { value: "hangup", label: "Colgar" },
+                    { value: "voicebot", label: "El voizbot (puede tomar el recado)" },
+                    { value: "extension", label: "Una persona (por ejemplo, de guardia)" },
+                    { value: "queue", label: "Un grupo de atención" },
+                  ]}
+                />
+                {form.fuera_horario_tipo && form.fuera_horario_tipo !== "hangup" && (
+                  <Select
+                    label="¿A cuál?"
+                    value={form.fuera_horario_valor ?? ""}
+                    onChange={(v) => setForm({ ...form, fuera_horario_valor: v })}
+                    placeholder="— Elige —"
+                    options={destOptions(form.fuera_horario_tipo as DestType)}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+          <Input
+            label="Nombre"
+            value={form.name}
+            onChange={(v) => setForm({ ...form, name: v })}
+            placeholder="Línea principal"
+            hint="Solo para reconocerlo en la lista."
+            required
+          />
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
-            <span className="text-sm text-fg-soft">Habilitada</span>
+            <span className="text-sm text-fg-soft">Activo</span>
             <Toggle checked={form.enabled} onChange={(v) => setForm({ ...form, enabled: v })} />
           </div>
+          <details className="rounded-xl border border-line">
+            <summary className="cursor-pointer select-none px-3 py-2.5 text-sm font-medium text-fg-soft">Opciones avanzadas</summary>
+            <div className="space-y-4 border-t border-line p-3">
+              <Input
+                label="Prioridad"
+                type="number"
+                value={form.priority}
+                onChange={(v) => setForm({ ...form, priority: Number(v) })}
+                hint="Si una llamada coincide con varios números configurados, gana el de número más bajo. «Cualquier número» va con 100 para quedar al final."
+              />
+            </div>
+          </details>
         </div>
       </Modal>
     </div>

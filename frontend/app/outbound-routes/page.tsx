@@ -61,6 +61,15 @@ function ejemplo(pattern: string, strip: number, prepend: string): string {
   return `marcando ${marcado} sale ${sale}`;
 }
 
+// Plantillas del plan de numeración de Colombia (desde 2021 los fijos son de
+// 10 dígitos con indicativo 60X). Las cifras a quitar o anteponer dependen
+// del proveedor: se dejan en cero y se ajustan en «Opciones avanzadas».
+const PLANTILLAS = [
+  { name: "Celulares Colombia", pattern: "3XXXXXXXXX", detalle: "10 dígitos, empiezan por 3" },
+  { name: "Fijos Colombia", pattern: "60XXXXXXXX", detalle: "601… a 608…, 10 dígitos" },
+  { name: "Líneas 01 8000", pattern: "018000XXXXXX", detalle: "Gratuitas nacionales" },
+];
+
 export default function OutboundRoutesPage() {
   const [items, setItems] = useState<OutboundRoute[]>([]);
   const [trunks, setTrunks] = useState<Trunk[]>([]);
@@ -70,6 +79,24 @@ export default function OutboundRoutesPage() {
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<OutboundRoute | null>(null);
   const [form, setForm] = useState(empty);
+  const [creandoBasicas, setCreandoBasicas] = useState(false);
+
+  // Un clic: las tres reglas de Colombia, saliendo por todos los proveedores.
+  const crearBasicas = async () => {
+    setCreandoBasicas(true);
+    try {
+      const existentes = new Set(items.map((r) => r.pattern));
+      for (const [i, p] of PLANTILLAS.entries()) {
+        if (existentes.has(p.pattern)) continue;
+        await api.post("/api/outbound-routes", { ...empty, prepend: null, name: p.name, pattern: p.pattern, priority: 10 + i });
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudieron crear las reglas");
+    } finally {
+      setCreandoBasicas(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -157,9 +184,9 @@ export default function OutboundRoutesPage() {
   return (
     <div>
       <PageHeader
-        title="Rutas salientes"
-        subtitle="Por qué troncal sale cada destino marcado — como las Outbound Routes de Issabel"
-        actions={<Button onClick={openCreate}>+ Nueva ruta</Button>}
+        title="Reglas de salida"
+        subtitle="A qué números se puede llamar y por qué proveedor sale cada uno. Término técnico: rutas salientes."
+        actions={<Button onClick={openCreate}>+ Nueva regla</Button>}
       />
 
       {error && (
@@ -170,19 +197,28 @@ export default function OutboundRoutesPage() {
 
       <Card>
         <CardHeader
-          title="Lista de rutas"
-          subtitle={`${items.length} registrada(s) — se evalúan en orden de prioridad, la primera que coincida gana`}
+          title="Tus reglas"
+          subtitle={`${items.length} regla(s). Con reglas, solo salen los números que cubra alguna.`}
         />
         {loading ? (
           <TableSkeleton cols={6} />
         ) : items.length === 0 ? (
           <EmptyState
-            title="No hay rutas salientes"
-            hint="Sin reglas, todo destino externo sale por la cadena completa de troncales habilitadas, como hasta ahora. Crea reglas para separar celulares de fijos, normalizar el marcado o abrir internacional solo donde haga falta."
-            action={<Button onClick={openCreate}>+ Nueva ruta</Button>}
+            title="Sin reglas: las llamadas salen por tus proveedores"
+            hint="Todo sale por tus proveedores en orden. Si quieres limitar a qué se llama (por ejemplo, solo celulares y fijos de Colombia), crea las reglas básicas con un clic. Las internacionales siguen bloqueadas."
+            action={
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button onClick={crearBasicas} loading={creandoBasicas}>
+                  Crear reglas de Colombia (celulares, fijos, 01 8000)
+                </Button>
+                <Button variant="secondary" onClick={openCreate}>
+                  + Regla a mano
+                </Button>
+              </div>
+            }
           />
         ) : (
-          <Table head={["Prioridad", "Nombre", "Patrón", "Sale por", "Estado", { label: "Acciones", align: "right" }]}>
+          <Table head={["Prioridad", "Nombre", "Números", "Sale por", "Estado", { label: "Acciones", align: "right" }]}>
             {items.map((r, i) => (
               <Tr key={r.id} delay={i * 35}>
                 <Td mono muted>
@@ -236,7 +272,7 @@ export default function OutboundRoutesPage() {
       <Modal
         open={modal}
         onClose={() => setModal(false)}
-        title={editing ? `Editar ruta ${editing.name}` : "Nueva ruta saliente"}
+        title={editing ? `Editar regla ${editing.name}` : "Nueva regla de salida"}
         footer={
           <>
             <Button variant="secondary" onClick={() => setModal(false)}>
@@ -249,6 +285,26 @@ export default function OutboundRoutesPage() {
         }
       >
         <div className="space-y-4">
+          {!editing && (
+            <div>
+              <span className="mb-1.5 block text-xs font-medium text-fg-soft">Empieza con una plantilla</span>
+              <div className="flex flex-wrap gap-2">
+                {PLANTILLAS.map((p) => (
+                  <button
+                    key={p.pattern}
+                    type="button"
+                    onClick={() => setForm({ ...form, name: p.name, pattern: p.pattern })}
+                    className={`rounded-lg border px-3 py-1.5 text-left text-xs ${
+                      form.pattern === p.pattern ? "border-brand bg-brand-soft" : "border-line hover:bg-surface-2"
+                    }`}
+                  >
+                    <span className="block font-semibold text-fg">{p.name}</span>
+                    <span className="text-muted">{p.detalle}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <Input
             label="Nombre"
             value={form.name}
@@ -257,39 +313,14 @@ export default function OutboundRoutesPage() {
             required
           />
           <Input
-            label="Patrón de marcado"
+            label="Números que cubre"
             value={form.pattern}
             onChange={(v) => setForm({ ...form, pattern: v.toUpperCase() })}
             placeholder="3XXXXXXXXX"
-            hint="X = 0-9 · Z = 1-9 · N = 2-9 · . = uno o más · [1-5] = rango. Ej: 3XXXXXXXXX celulares, 601XXXXXXX fijos Bogotá."
+            hint="Cada X es un dígito cualquiera: 3XXXXXXXXX = celulares de 10 dígitos que empiezan por 3. (Z = 1-9 · N = 2-9 · . = uno o más · [1-5] = rango.)"
             required
             mono
           />
-          <Input
-            label="Prioridad"
-            type="number"
-            value={form.priority}
-            onChange={(v) => setForm({ ...form, priority: Number(v) })}
-            hint="Se evalúan de menor a mayor; la primera que coincida gana."
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Quitar dígitos"
-              type="number"
-              value={form.strip_digits}
-              onChange={(v) => setForm({ ...form, strip_digits: Number(v) })}
-              hint="Por la izquierda"
-            />
-            <Input
-              label="Anteponer"
-              value={form.prepend ?? ""}
-              onChange={(v) => setForm({ ...form, prepend: v })}
-              placeholder="57"
-              hint="Después de quitar"
-              mono
-            />
-          </div>
-
           {form.pattern && (
             <div className="rounded-xl border border-line bg-surface-2 px-3.5 py-2.5 text-sm">
               <span className="text-fg-soft">Ejemplo: </span>
@@ -298,9 +329,9 @@ export default function OutboundRoutesPage() {
           )}
 
           <div>
-            <div className="mb-1.5 text-sm text-fg-soft">Troncales, en orden de reintento</div>
+            <div className="mb-1.5 text-sm text-fg-soft">Sale por (en orden; si el primero falla, prueba el siguiente)</div>
             <div className="space-y-1.5">
-              {trunks.length === 0 && <div className="text-sm text-fg-soft">No hay troncales configuradas.</div>}
+              {trunks.length === 0 && <div className="text-sm text-fg-soft">Todavía no conectas un proveedor de telefonía.</div>}
               {trunks.map((t) => (
                 <label
                   key={t.id}
@@ -321,15 +352,15 @@ export default function OutboundRoutesPage() {
               ))}
             </div>
             <div className="mt-1.5 text-xs text-fg-soft">
-              Sin ninguna marcada se usan todas las habilitadas, en el orden de la empresa.
+              Sin marcar ninguno, usa todos tus proveedores activos.
             </div>
           </div>
 
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
             <div>
-              <div className="text-sm text-fg-soft">Permitir internacional</div>
+              <div className="text-sm text-fg-soft">Permitir llamadas internacionales</div>
               <div className="text-xs text-fg-soft">
-                Apagado bloquea los prefijos 00 y 011, donde vive el fraude telefónico.
+                Apagado bloquea 00 y 011. Ahí ocurre casi todo el fraude telefónico: actívalo solo si de verdad lo necesitas.
               </div>
             </div>
             <Toggle
@@ -339,9 +370,40 @@ export default function OutboundRoutesPage() {
           </div>
 
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
-            <span className="text-sm text-fg-soft">Habilitada</span>
+            <span className="text-sm text-fg-soft">Activa</span>
             <Toggle checked={form.enabled} onChange={(v) => setForm({ ...form, enabled: v })} />
           </div>
+
+          <details className="rounded-xl border border-line">
+            <summary className="cursor-pointer select-none px-3 py-2.5 text-sm font-medium text-fg-soft">
+              Opciones avanzadas <span className="text-xs font-normal text-muted">(solo si tu proveedor pide otro formato)</span>
+            </summary>
+            <div className="space-y-4 border-t border-line p-3">
+              <Input
+                label="Prioridad"
+                type="number"
+                value={form.priority}
+                onChange={(v) => setForm({ ...form, priority: Number(v) })}
+                hint="Si un número coincide con varias reglas, gana la de número más bajo."
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="Quitar dígitos al inicio"
+                  type="number"
+                  value={form.strip_digits}
+                  onChange={(v) => setForm({ ...form, strip_digits: Number(v) })}
+                />
+                <Input
+                  label="Agregar al inicio"
+                  value={form.prepend ?? ""}
+                  onChange={(v) => setForm({ ...form, prepend: v })}
+                  placeholder="57"
+                  hint="Después de quitar."
+                  mono
+                />
+              </div>
+            </div>
+          </details>
         </div>
       </Modal>
     </div>

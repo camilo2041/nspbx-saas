@@ -151,7 +151,7 @@ export default function ExtensionsPage() {
     <div>
       <PageHeader
         title="Extensiones"
-        subtitle="Cuentas SIP que se conectan con un softphone o teléfono IP"
+        subtitle="El número interno de cada persona (101, 102…). Con él se conecta su softphone, la app o un teléfono de escritorio. Término técnico: cuentas SIP."
         actions={
           <>
             <Button variant="secondary" onClick={reload} loading={reloading}>

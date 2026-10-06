@@ -587,6 +587,34 @@ DidEntrante = Annotated[str, Field(min_length=1, max_length=100), AfterValidator
 DestinoRuta = Annotated[str, Field(min_length=1, max_length=50), AfterValidator(_destino)]
 
 
+def _horario_atencion(v: str | None) -> str | None:
+    """JSON {"mon": ["08:00", "18:00"], ...} (días mon..sun, horas HH:MM, la
+    de inicio antes que la de fin). Vacío = siempre abierto."""
+    if v is None or not v.strip():
+        return None
+    import json
+    import re as _re
+
+    try:
+        datos = json.loads(v)
+    except ValueError:
+        raise ValueError("Horario no válido") from None
+    dias = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+    if not isinstance(datos, dict) or not set(datos) <= dias:
+        raise ValueError("Horario no válido: días mon a sun")
+    for franja in datos.values():
+        if (
+            not isinstance(franja, list) or len(franja) != 2
+            or not all(isinstance(h, str) and _re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", h) for h in franja)
+            or franja[0] >= franja[1]
+        ):
+            raise ValueError("Horario no válido: cada día va de HH:MM a HH:MM, con el inicio antes del fin")
+    return json.dumps(datos, sort_keys=True)
+
+
+HorarioAtencion = Annotated[Optional[str], Field(default=None, max_length=500), AfterValidator(_horario_atencion)]
+
+
 class InboundRouteBase(BaseModel):
     name: NombreVisible
     did_pattern: DidEntrante
@@ -594,6 +622,9 @@ class InboundRouteBase(BaseModel):
     destination_value: Optional[DestinoRuta] = None
     priority: int = Field(default=10, ge=0, le=1000)
     enabled: bool = True
+    horario: HorarioAtencion = None
+    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|queue|voicebot|hangup)$")
+    fuera_horario_valor: Optional[DestinoRuta] = None
 
     @model_validator(mode="after")
     def _destino_coherente(self):
@@ -616,6 +647,9 @@ class InboundRouteUpdate(BaseModel):
     destination_value: Optional[DestinoRuta] = None
     priority: Optional[int] = Field(default=None, ge=0, le=1000)
     enabled: Optional[bool] = None
+    horario: HorarioAtencion = None
+    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|queue|voicebot|hangup)$")
+    fuera_horario_valor: Optional[DestinoRuta] = None
 
 
 class InboundRouteOut(BaseModel):
@@ -630,6 +664,9 @@ class InboundRouteOut(BaseModel):
     destination_value: Optional[str] = None
     priority: int = 10
     enabled: bool = True
+    horario: Optional[str] = None
+    fuera_horario_tipo: Optional[str] = None
+    fuera_horario_valor: Optional[str] = None
     created_at: datetime
 
 
@@ -1063,6 +1100,10 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(min_length=8, max_length=128)
+    # «Agregar persona» en un paso: además del usuario, crea su extensión
+    # (con el número dado o el siguiente libre) y se la asigna.
+    crear_extension: bool = False
+    numero_extension: Optional[Extension] = None
 
 
 class UserUpdate(BaseModel):

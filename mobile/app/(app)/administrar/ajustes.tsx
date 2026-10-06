@@ -279,7 +279,7 @@ export default function AjustesScreen() {
                 <FilaMenu titulo="IP pública" icono="mundo" valor={diag.public_ip ?? "—"} ultima />
               </Seccion>
               {diag.trunks.length ? (
-                <Seccion titulo="Troncales">
+                <Seccion titulo="Proveedores de telefonía">
                   {diag.trunks.map((t, i) => (
                     <FilaMenu
                       key={t.id}

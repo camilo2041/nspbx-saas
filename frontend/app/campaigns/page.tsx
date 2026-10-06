@@ -38,6 +38,8 @@ import {
   VoiceBot,
 } from "@/lib/types";
 import { AgentesCampana } from "@/components/agentes-campana";
+import { AsistenteCampana } from "@/components/asistente-campana";
+import { CargarClientes } from "@/components/cargar-clientes";
 import { DiagnosticoCampana } from "@/components/diagnostico-campana";
 import { ListasCampana } from "@/components/listas-campana";
 import { statusBadge } from "@/lib/utils";
@@ -116,6 +118,9 @@ export default function CampaignsPage() {
   const [editing, setEditing] = useState<CampaignWithStats | null>(null);
   const [form, setForm] = useState(empty);
   const [selected, setSelected] = useState<CampaignWithStats | null>(null);
+  // Asistente que sigue a «Crear»: clientes (Excel) → agentes → iniciar.
+  const [asistente, setAsistente] = useState<CampaignWithStats | null>(null);
+  const [cargarExcel, setCargarExcel] = useState(false);
   const [numbers, setNumbers] = useState<CampaignNumber[]>([]);
   const [buscarNumero, setBuscarNumero] = useState("");
   const [estadoNumero, setEstadoNumero] = useState("");
@@ -243,7 +248,7 @@ export default function CampaignsPage() {
         // Lo siguiente es cargar números y agentes: se abre el detalle de una.
         const lista = await load();
         const nueva = lista?.find((c) => c.id === creada.id);
-        if (nueva) await openDetail(nueva);
+        if (nueva) setAsistente(nueva);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al guardar");
@@ -710,7 +715,7 @@ export default function CampaignsPage() {
             hint="Por dónde salen las llamadas. Sin troncal la campaña no puede llamar."
           />
           {trunks.length === 0 && (
-            <Note tone="warn">Todavía no hay troncales: crea una en Troncales (los datos te los da tu proveedor de telefonía).</Note>
+            <Note tone="warn">Todavía no conectas un proveedor de telefonía: hazlo en Central telefónica → Proveedor de telefonía.</Note>
           )}
 
           {form.metodo === "voizbot" ? (
@@ -792,7 +797,7 @@ export default function CampaignsPage() {
               </div>
             ) : (
               <Note tone="muted">
-                Al crearla se abre la campaña para elegir los agentes que la trabajan y cargar los números.
+                Al crearla, un asistente te guía: cargar tus clientes desde Excel, elegir los agentes e iniciar.
               </Note>
             ))}
 
@@ -916,6 +921,37 @@ export default function CampaignsPage() {
             </div>
           </details>
         </div>
+      </Modal>
+
+      <AsistenteCampana
+        key={asistente?.id ?? 0}
+        campana={asistente}
+        onCerrar={async () => {
+          const c = asistente;
+          setAsistente(null);
+          const lista = await load();
+          const actual = lista?.find((x) => x.id === c?.id);
+          if (actual) await openDetail(actual);
+        }}
+      />
+
+      <Modal
+        open={cargarExcel && !!selected}
+        onClose={() => setCargarExcel(false)}
+        size="xl"
+        title={`Cargar clientes en ${selected?.name ?? ""}`}
+        subtitle="Excel (.xlsx) o CSV. Entran como una lista nueva de la campaña y quedan también en Contactos."
+      >
+        {selected && (
+          <CargarClientes
+            campaignId={selected.id}
+            variablesMensaje={nombresColumnas}
+            onCargado={async () => {
+              setStats(await api.get<CampaignStats>(`/api/campaigns/${selected.id}/stats`));
+              await recargarNumeros(selected.id);
+            }}
+          />
+        )}
       </Modal>
 
       <Modal
@@ -1058,8 +1094,11 @@ export default function CampaignsPage() {
                 <Button size="sm" variant="secondary" onClick={descargarPlantilla}>
                   Descargar plantilla
                 </Button>
+                <Button size="sm" onClick={() => setCargarExcel(true)}>
+                  Cargar clientes desde Excel
+                </Button>
                 <Button size="sm" variant="secondary" onClick={() => archivoRef.current?.click()}>
-                  Cargar desde archivo
+                  Pegar desde CSV
                 </Button>
                 <input
                   ref={archivoRef}

@@ -59,7 +59,7 @@ export function ResumenCentral() {
   }, [veAjustes]);
 
   const cuentas = [
-    veInfra && { titulo: "Troncales", valor: troncales.datos?.length, icono: "troncal" as const, ruta: "/administrar/troncales" },
+    veInfra && { titulo: "Proveedores", valor: troncales.datos?.length, icono: "troncal" as const, ruta: "/administrar/troncales" },
     veInfra && { titulo: "Extensiones", valor: extensiones.datos?.length, icono: "extension" as const, ruta: "/administrar/extensiones" },
     veBots && { titulo: "Voizbots", valor: bots.datos?.length, icono: "bot" as const, ruta: "/administrar/bots" },
     veCampanas && {

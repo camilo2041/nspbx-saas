@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 
+import { AyudaPantalla } from "@/components/ayuda-pantalla";
 import { AssistantWidget } from "@/components/assistant-widget";
 import { CommandPalette } from "@/components/command-palette";
 import { FloatingCallWidget } from "@/components/floating-call-widget";
@@ -25,6 +26,8 @@ interface NavItem {
   icon: ReactNode;
   /** Permiso necesario para verlo. null = visible para cualquier sesión. */
   permiso: string | null;
+  /** Pantalla técnica: en modo básico no se muestra en el menú. */
+  avanzado?: boolean;
 }
 
 interface NavGroup {
@@ -38,7 +41,7 @@ const GROUPS: NavGroup[] = [
     items: [
       {
         href: "/",
-        label: "Dashboard",
+        label: "Inicio",
         permiso: null,
         icon: icon(
           <>
@@ -148,8 +151,16 @@ const GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "Telefonía",
+    // Nombres para quien no sabe de telefonía (el término técnico está en
+    // el subtítulo de cada pantalla) y en el orden en que se configuran.
+    title: "Central telefónica",
     items: [
+      {
+        href: "/configurar",
+        label: "Configuración guiada",
+        permiso: PERMISOS.ajustes,
+        icon: icon(<path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7M12 3v2M12 19v2M3 12h2M19 12h2" />),
+      },
       {
         href: "/extensions",
         label: "Extensiones",
@@ -164,7 +175,7 @@ const GROUPS: NavGroup[] = [
       },
       {
         href: "/trunks",
-        label: "Troncales",
+        label: "Proveedor de telefonía",
         permiso: PERMISOS.telefonia,
         icon: icon(
           <path
@@ -176,19 +187,13 @@ const GROUPS: NavGroup[] = [
       },
       {
         href: "/inbound-routes",
-        label: "Rutas entrantes",
+        label: "Números entrantes",
         permiso: PERMISOS.telefonia,
         icon: icon(<path strokeLinecap="round" strokeLinejoin="round" d="M9 5l-7 7 7 7M2 12h20" />),
       },
       {
-        href: "/outbound-routes",
-        label: "Rutas salientes",
-        permiso: PERMISOS.telefonia,
-        icon: icon(<path strokeLinecap="round" strokeLinejoin="round" d="M15 5l7 7-7 7M22 12H2" />),
-      },
-      {
         href: "/queues",
-        label: "Colas",
+        label: "Grupos de atención",
         permiso: PERMISOS.colas,
         icon: icon(
           <path
@@ -199,9 +204,17 @@ const GROUPS: NavGroup[] = [
         ),
       },
       {
+        href: "/outbound-routes",
+        avanzado: true,
+        label: "Reglas de salida",
+        permiso: PERMISOS.telefonia,
+        icon: icon(<path strokeLinecap="round" strokeLinejoin="round" d="M15 5l7 7-7 7M22 12H2" />),
+      },
+      {
         href: "/logs",
-        label: "Logs",
-        // Mismo permiso que Troncales: la consola en vivo expone tráfico
+        avanzado: true,
+        label: "Registro técnico",
+        // Mismo permiso que el proveedor (troncales): la consola en vivo expone tráfico
         // SIP completo (números, cabeceras, credenciales de registro).
         permiso: PERMISOS.telefonia,
         icon: icon(
@@ -228,6 +241,7 @@ const GROUPS: NavGroup[] = [
       },
       {
         href: "/ai-usage",
+        avanzado: true,
         label: "Consumo IA",
         permiso: PERMISOS.consumoIa,
         icon: icon(
@@ -277,6 +291,7 @@ const GROUPS: NavGroup[] = [
       },
       {
         href: "/seguridad",
+        avanzado: true,
         label: "Seguridad",
         permiso: PERMISOS.ajustes,
         icon: icon(
@@ -289,6 +304,7 @@ const GROUPS: NavGroup[] = [
       },
       {
         href: "/roles",
+        avanzado: true,
         label: "Roles y permisos",
         permiso: PERMISOS.usuarios,
         icon: icon(
@@ -336,12 +352,16 @@ const GROUPS: NavGroup[] = [
 
 const ALL_ITEMS = GROUPS.flatMap((g) => g.items);
 const SIDEBAR_KEY = "nspbx-sidebar-collapsed";
+// Modo básico (por defecto): el menú esconde las pantallas técnicas. Quien
+// las necesita las activa con «Opciones avanzadas» al pie del menú.
+const AVANZADO_KEY = "nspbx-modo-avanzado";
 
 // Qué módulo de la empresa habilita cada sección (modelo de packs — ver
 // backend Tenant.modules). voicebot = el bot de IA; pbx = telefonía.
 const MODULO_POR_SECCION: Record<string, string | null> = {
   "/softphone": "pbx",
   "/calls": "pbx",
+  "/configurar": "pbx",
   "/extensions": "pbx",
   "/trunks": "pbx",
   "/inbound-routes": "pbx",
@@ -414,10 +434,27 @@ function Marco({ children }: { children: ReactNode }) {
   const { usuario, puede, tieneModulo, salir, cargando } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [avanzado, setAvanzado] = useState(false);
 
   useEffect(() => {
-    setCollapsed(localStorage.getItem(SIDEBAR_KEY) === "1");
+    try {
+      setCollapsed(localStorage.getItem(SIDEBAR_KEY) === "1");
+      setAvanzado(localStorage.getItem(AVANZADO_KEY) === "1");
+    } catch {
+      // storage bloqueado: valores por defecto
+    }
   }, []);
+
+  const cambiarAvanzado = () => {
+    setAvanzado((a) => {
+      try {
+        localStorage.setItem(AVANZADO_KEY, a ? "0" : "1");
+      } catch {
+        // no persiste, pero cambia en esta visita
+      }
+      return !a;
+    });
+  };
 
   const toggleCollapsed = () => {
     setCollapsed((c) => {
@@ -439,6 +476,8 @@ function Marco({ children }: { children: ReactNode }) {
     ...g,
     items: g.items.filter((i) => {
       if (i.permiso !== null && !puede(i.permiso)) return false;
+      // La pantalla abierta se muestra igual, aunque sea avanzada.
+      if (i.avanzado && !avanzado && !(pathname === i.href || pathname.startsWith(`${i.href}/`))) return false;
       const mod = MODULO_POR_SECCION[i.href];
       if (mod && !tieneModulo(mod)) return false;
       return true;
@@ -619,11 +658,13 @@ function Marco({ children }: { children: ReactNode }) {
           }`}
         >
           {!collapsed && (
-            <span className="truncate text-[10px] leading-tight text-faint">
-              FreeSWITCH · FastAPI
-              <br />
-              PostgreSQL
-            </span>
+            <label
+              className="flex cursor-pointer items-center gap-2 text-[11px] text-faint hover:text-fg-soft"
+              title="Muestra en el menú las pantallas técnicas: reglas de salida, registro técnico, roles, seguridad y consumo de IA"
+            >
+              <input type="checkbox" checked={avanzado} onChange={cambiarAvanzado} />
+              Opciones avanzadas
+            </label>
           )}
           <button
             type="button"
@@ -680,6 +721,7 @@ function Marco({ children }: { children: ReactNode }) {
               Buscar
               <kbd className="rounded-md border border-line px-1.5 text-[10px]">Ctrl K</kbd>
             </button>
+            <AyudaPantalla pathname={pathname} titulo={current?.label ?? "Panel"} />
             <ThemeToggle />
           </div>
         </header>

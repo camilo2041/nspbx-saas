@@ -132,3 +132,32 @@ async def test_salientes_sin_permiso_internacional_no_dejan_salir_00_ni_011(clie
             for internacional in ("0044770090012", "01144770090012", "+447700900123", "3001234567890123"):
                 assert not re.match(expresion, internacional), f"{expresion} deja salir {internacional}"
             assert re.match(expresion, "3001234567"), f"{expresion} no deja salir un celular nacional"
+
+
+async def test_fuera_del_horario_la_llamada_va_a_otro_destino(cliente, mundo, monkeypatch):
+    """Número entrante con horario de atención: dentro va a su destino;
+    fuera, al de «fuera de horario» (vacío = colgar)."""
+    from datetime import datetime
+
+    from app.core import clock
+
+    cab = mundo.alfa.cabeceras()
+    r = await cliente.post("/api/inbound-routes", headers=cab, json={
+        "name": "horario", "did_pattern": "6019990000", "destination_type": "extension", "destination_value": "1000",
+        "horario": '{"mon": ["08:00", "18:00"]}', "fuera_horario_tipo": "queue", "fuera_horario_valor": "5000",
+    })
+    assert r.status_code == 201, r.text
+
+    def acciones_del_did(raiz):
+        ext = next(e for e in raiz.find(".//context[@name='public']").findall("extension") if e.get("name", "").startswith(f"did_{r.json()['id']}_"))
+        return [(a.get("application"), a.get("data")) for a in ext.iter("action")]
+
+    lunes_10 = datetime(2026, 10, 5, 10, 0)  # lunes
+    monkeypatch.setattr(clock, "now_local", lambda: lunes_10)
+    assert ("transfer", f"1000 XML ctx_{mundo.alfa.slug}") in acciones_del_did(await _xml(cliente, "/fs/dialplan"))
+    monkeypatch.setattr(clock, "now_local", lambda: lunes_10.replace(hour=20))
+    assert ("transfer", f"5000 XML ctx_{mundo.alfa.slug}") in acciones_del_did(await _xml(cliente, "/fs/dialplan"))
+
+    # Horario mal escrito: se rechaza.
+    r2 = await cliente.put(f"/api/inbound-routes/{r.json()['id']}", headers=cab, json={"horario": '{"mon": ["18:00", "08:00"]}'})
+    assert r2.status_code == 422

@@ -10,10 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import usuario_out
 from app.core import permissions
 from app.core.auth import requiere, usuario_actual
-from app.core.database import get_session, traer_propio
+from app.core import validacion
+from app.core.database import get_session, tenant_de_sesion, traer_propio
 from app.core.security import hash_password
 from app.services.sesiones import revocar_sesiones
-from app.models import Extension, User
+from app.models import Extension, Tenant, User
+from app.services import licensing
+from app.services.numeracion import numero_en_uso, siguiente_libre
 from app.schemas import UserCreate, UserOut, UserUpdate
 
 logger = logging.getLogger(__name__)
@@ -81,12 +84,48 @@ async def roles(usuario: User = Depends(usuario_actual)):
     ]
 
 
+async def _crear_extension(session: AsyncSession, payload: UserCreate) -> Extension:
+    """La extensión de «Agregar persona»: mismas reglas que crearla desde
+    Extensiones (licencia, cupo del plan, número libre), con clave segura
+    generada y el nombre de la persona como identificador de llamada."""
+    tid = tenant_de_sesion(session)
+    if tid is not None:
+        empresa = await session.get(Tenant, tid)
+        if empresa and not empresa.has_module("pbx"):
+            raise HTTPException(status_code=403, detail="Tu plan no incluye la central telefónica")
+        lic = await licensing.obtener(session, tid)
+        st = licensing.estado(lic)
+        if st != "ok":
+            raise HTTPException(status_code=402, detail=f"La licencia de tu empresa está {st}. Renovala para seguir operando.")
+        if not await licensing.hay_cupo(session, lic, "max_extensions", await licensing.contar_extensiones(session, tid)):
+            raise HTTPException(status_code=402, detail="Alcanzaste el límite de extensiones de tu plan. Mejora la licencia para agregar más.")
+    numero = payload.numero_extension or await siguiente_libre(session)
+    if uso := await numero_en_uso(session, numero):
+        raise HTTPException(status_code=409, detail=f"El número {numero} ya lo usa {uso}")
+    # El nombre va en el identificador de llamada solo si pasa la misma
+    # validación que en Extensiones (sin comillas ni caracteres de control).
+    nombre = payload.full_name.strip()[:80]
+    ext = Extension(
+        number=numero,
+        password=validacion.generar_clave_sip(),
+        caller_id_name=nombre if validacion.NOMBRE_VISIBLE_RE.fullmatch(nombre) else None,
+    )
+    session.add(ext)
+    await session.flush()
+    return ext
+
+
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 async def crear(payload: UserCreate, session: AsyncSession = Depends(get_session)):
-    await _validar_extension(session, payload.role, payload.extension_id)
-    await _extension_libre(session, payload.extension_id)
+    if payload.crear_extension and payload.extension_id is None:
+        extension_id = (await _crear_extension(session, payload)).id
+    else:
+        extension_id = payload.extension_id
+        await _validar_extension(session, payload.role, extension_id)
+        await _extension_libre(session, extension_id)
 
-    datos = payload.model_dump(exclude={"password"})
+    datos = payload.model_dump(exclude={"password", "crear_extension", "numero_extension"})
+    datos["extension_id"] = extension_id
     usuario = User(**datos, password_hash=await asyncio.to_thread(hash_password, payload.password))
     session.add(usuario)
     try:

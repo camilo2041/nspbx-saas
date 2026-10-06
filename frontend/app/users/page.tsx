@@ -54,12 +54,36 @@ interface Formulario {
   password: string;
 }
 
+// Valor del selector de extensión que pide crear una nueva al guardar
+// («Agregar persona» en un paso: POST /api/users con crear_extension).
+const NUEVA = "__nueva__";
+
+/** «Ana Pérez Gómez» → «ana.perez»: sugerencia de usuario mientras no lo toquen. */
+function usuarioSugerido(nombre: string): string {
+  const partes = nombre
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  return partes.slice(0, 2).join(".");
+}
+
+/** Contraseña de 14 caracteres para compartir con la persona. */
+function claveAleatoria(): string {
+  const letras = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint32Array(14);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => letras[b % letras.length]).join("");
+}
+
 const VACIO: Formulario = {
   username: "",
   full_name: "",
   email: "",
   role: "asesor",
-  extension_id: "",
+  extension_id: NUEVA,
   enabled: true,
   password: "",
 };
@@ -77,6 +101,8 @@ export default function UsersPage() {
   const [form, setForm] = useState<Formulario>(VACIO);
   const [guardando, setGuardando] = useState(false);
   const [errorForm, setErrorForm] = useState("");
+  const [usuarioTocado, setUsuarioTocado] = useState(false);
+  const [creado, setCreado] = useState("");
   const [aBorrar, setABorrar] = useState<Usuario | null>(null);
 
   const load = useCallback(async () => {
@@ -105,6 +131,7 @@ export default function UsersPage() {
   const abrirNuevo = () => {
     setEditando(null);
     setForm(VACIO);
+    setUsuarioTocado(false);
     setErrorForm("");
     setAbierto(true);
   };
@@ -140,7 +167,7 @@ export default function UsersPage() {
       full_name: form.full_name.trim(),
       email: form.email.trim() || null,
       role: form.role,
-      extension_id: form.extension_id ? Number(form.extension_id) : null,
+      extension_id: form.extension_id && form.extension_id !== NUEVA ? Number(form.extension_id) : null,
       enabled: form.enabled,
     };
     if (form.password) cuerpo.password = form.password;
@@ -148,7 +175,15 @@ export default function UsersPage() {
       if (editando) {
         await api.put(`/api/users/${editando.id}`, cuerpo);
       } else {
-        await api.post("/api/users", { ...cuerpo, username: form.username.trim() });
+        const nuevo = await api.post<Usuario>("/api/users", {
+          ...cuerpo,
+          username: form.username.trim(),
+          crear_extension: form.extension_id === NUEVA,
+        });
+        setCreado(
+          `${nuevo.full_name} ya puede entrar con el usuario «${nuevo.username}»` +
+            (nuevo.extension_number ? ` y atender en la extensión ${nuevo.extension_number}.` : ".")
+        );
       }
       setAbierto(false);
       await load();
@@ -205,9 +240,20 @@ export default function UsersPage() {
     <div>
       <PageHeader
         title="Usuarios"
-        subtitle="Quién entra al sistema y qué puede hacer cada uno"
-        actions={<Button onClick={abrirNuevo}>Nuevo usuario</Button>}
+        subtitle="Las personas de tu equipo: con qué entran, qué pueden hacer y su extensión para llamar."
+        actions={<Button onClick={abrirNuevo}>+ Agregar persona</Button>}
       />
+
+      {creado && (
+        <div className="mb-4">
+          <Note tone="brand">
+            {creado}{" "}
+            <button type="button" className="ml-1 underline" onClick={() => setCreado("")}>
+              Entendido
+            </button>
+          </Note>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4">
@@ -295,7 +341,7 @@ export default function UsersPage() {
       <Modal
         open={abierto}
         onClose={() => setAbierto(false)}
-        title={editando ? `Editar ${editando.full_name}` : "Nuevo usuario"}
+        title={editando ? `Editar ${editando.full_name}` : "Agregar persona"}
         footer={
           <>
             <Button variant="ghost" onClick={() => setAbierto(false)}>
@@ -310,12 +356,22 @@ export default function UsersPage() {
         <div className="flex flex-col gap-4">
           {errorForm && <ErrorBanner message={errorForm} onClose={() => setErrorForm("")} />}
 
-          <Input label="Nombre completo" value={form.full_name} onChange={(v) => setForm({ ...form, full_name: v })} required />
+          <Input
+            label="Nombre completo"
+            value={form.full_name}
+            onChange={(v) =>
+              setForm({ ...form, full_name: v, ...(!editando && !usuarioTocado && { username: usuarioSugerido(v) }) })
+            }
+            required
+          />
 
           <Input
             label="Usuario"
             value={form.username}
-            onChange={(v) => setForm({ ...form, username: v })}
+            onChange={(v) => {
+              setUsuarioTocado(true);
+              setForm({ ...form, username: v });
+            }}
             disabled={!!editando}
             hint={
               editando
@@ -341,14 +397,17 @@ export default function UsersPage() {
           />
 
           <Select
-            label={rolActual?.requiere_extension ? "Extensión (obligatoria)" : "Extensión (opcional)"}
+            label={rolActual?.requiere_extension ? "Extensión para llamar (obligatoria)" : "Extensión para llamar"}
             value={form.extension_id}
             onChange={(v) => setForm({ ...form, extension_id: v })}
-            placeholder="Sin extensión"
-            options={extensionesLibres.map((e) => ({
-              value: String(e.id),
-              label: `${e.number}${e.caller_id_name ? ` — ${e.caller_id_name}` : ""}`,
-            }))}
+            placeholder="Sin extensión (no hace ni recibe llamadas)"
+            options={[
+              ...(editando ? [] : [{ value: NUEVA, label: "Crear una nueva automáticamente (recomendado)" }]),
+              ...extensionesLibres.map((e) => ({
+                value: String(e.id),
+                label: `${e.number}${e.caller_id_name ? ` — ${e.caller_id_name}` : ""}`,
+              })),
+            ]}
             hint={
               rolActual?.requiere_extension
                 ? "Un asesor atiende desde su extensión, y su historial de llamadas se filtra por ella."
@@ -356,15 +415,26 @@ export default function UsersPage() {
             }
           />
           {faltaExtension && <Note tone="warn">Este rol necesita una extensión asignada.</Note>}
-          {extensionesLibres.length === 0 && (
+          {editando && extensionesLibres.length === 0 && (
             <Note tone="muted">
-              No quedan extensiones libres. Crea una en Telefonía → Extensiones, o libera la de otro usuario.
+              No quedan extensiones libres. Crea una en Central telefónica → Extensiones, o libera la de otro usuario.
             </Note>
           )}
 
+          {!editando && (
+            <div className="-mb-2 flex justify-end">
+              <button
+                type="button"
+                className="text-xs font-medium text-brand underline"
+                onClick={() => setForm({ ...form, password: claveAleatoria() })}
+              >
+                Generar una contraseña
+              </button>
+            </div>
+          )}
           <Input
-            label={editando ? "Nueva contraseña" : "Contraseña"}
-            type="password"
+            label={editando ? "Nueva contraseña" : "Contraseña para entrar al sistema"}
+            type={!editando && form.password ? "text" : "password"}
             value={form.password}
             onChange={(v) => setForm({ ...form, password: v })}
             hint={

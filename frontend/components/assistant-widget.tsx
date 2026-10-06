@@ -20,14 +20,14 @@ const MAX_HISTORIAL = 12;
 // pide cada una. El backend solo sugiere rutas de este catálogo; aquí se
 // vuelve a comprobar para no mostrar un botón a una pantalla sin acceso.
 const RUTAS: Record<string, { label: string; permiso: string | null }> = {
-  "/": { label: "Dashboard", permiso: null },
+  "/": { label: "Inicio", permiso: null },
   "/softphone": { label: "Softphone", permiso: PERMISOS.softphone },
   "/calls": { label: "Llamadas", permiso: PERMISOS.llamadasPropias },
   "/appointments": { label: "Citas", permiso: PERMISOS.citas },
   "/extensions": { label: "Extensiones", permiso: PERMISOS.telefonia },
-  "/trunks": { label: "Troncales", permiso: PERMISOS.telefonia },
-  "/inbound-routes": { label: "Rutas entrantes", permiso: PERMISOS.telefonia },
-  "/queues": { label: "Colas", permiso: PERMISOS.colas },
+  "/trunks": { label: "Proveedor de telefonía", permiso: PERMISOS.telefonia },
+  "/inbound-routes": { label: "Números entrantes", permiso: PERMISOS.telefonia },
+  "/queues": { label: "Grupos de atención", permiso: PERMISOS.colas },
   "/voicebots": { label: "Voizbots", permiso: PERMISOS.voizbotsVer },
   "/campaigns": { label: "Campañas", permiso: PERMISOS.campanas },
   "/ai-usage": { label: "Consumo IA", permiso: PERMISOS.consumoIa },
@@ -157,6 +157,20 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
     },
     [msgs, pensando, abierto]
   );
+
+  // Otras pantallas abren el asistente con una pregunta ya hecha (la ayuda
+  // «¿Qué es esto?»: window.dispatchEvent(new CustomEvent("nspbx:preguntar", {detail: "…"}))).
+  const enviarRef = useRef(enviar);
+  enviarRef.current = enviar;
+  useEffect(() => {
+    const onPreguntar = (e: Event) => {
+      const pregunta = (e as CustomEvent<string>).detail;
+      setAbierto(true);
+      if (typeof pregunta === "string" && pregunta.trim()) enviarRef.current(pregunta);
+    };
+    window.addEventListener("nspbx:preguntar", onPreguntar);
+    return () => window.removeEventListener("nspbx:preguntar", onPreguntar);
+  }, []);
 
   const sugerencias = SUGERENCIAS_POR_PANTALLA[pathname] ?? SUGERENCIAS_BASE;
 

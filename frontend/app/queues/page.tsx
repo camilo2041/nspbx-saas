@@ -25,11 +25,11 @@ import { api } from "@/lib/api";
 import { Extension, Queue } from "@/lib/types";
 
 const STRATEGIES = [
-  { value: "ring-all", label: "Timbrar a todos a la vez" },
-  { value: "round-robin", label: "Round robin (turnos)" },
+  { value: "ring-all", label: "Suena en todos a la vez (recomendado)" },
+  { value: "longest-idle-agent", label: "Al que lleva más tiempo libre" },
+  { value: "round-robin", label: "Por turnos" },
   { value: "top-down", label: "Orden de la lista (de arriba a abajo)" },
   { value: "sequentially-by-agent-order", label: "Secuencial por orden de agente" },
-  { value: "longest-idle-agent", label: "Agente con más tiempo libre" },
   { value: "agent-with-least-talk-time", label: "Agente con menos tiempo hablado" },
   { value: "agent-with-fewest-calls", label: "Agente con menos llamadas" },
   { value: "random", label: "Aleatorio" },
@@ -139,9 +139,9 @@ export default function QueuesPage() {
   return (
     <div>
       <PageHeader
-        title="Colas de llamadas"
-        subtitle="Distribuyen llamadas entrantes entre varios agentes (como las colas de Issabel/FreePBX)"
-        actions={<Button onClick={openCreate}>+ Nueva cola</Button>}
+        title="Grupos de atención"
+        subtitle="Varias personas que atienden las mismas llamadas (ventas, soporte…): la llamada suena en el grupo y la toma quien esté libre. Término técnico: colas."
+        actions={<Button onClick={openCreate}>+ Nuevo grupo</Button>}
       />
 
       {error && (
@@ -151,23 +151,23 @@ export default function QueuesPage() {
       )}
 
       <Card>
-        <CardHeader title="Lista de colas" subtitle={`${items.length} registrada(s)`} />
+        <CardHeader title="Tus grupos" subtitle={`${items.length} grupo(s)`} />
         {loading ? (
           <TableSkeleton cols={7} />
         ) : items.length === 0 ? (
           <EmptyState
-            title="No hay colas"
-            hint="Crea la primera para repartir llamadas entrantes entre varios agentes."
-            action={<Button onClick={openCreate}>+ Nueva cola</Button>}
+            title="Todavía no hay grupos"
+            hint="Crea uno para que las llamadas de tu número suenen en varias personas. Luego, en Números entrantes, envía tu número a este grupo."
+            action={<Button onClick={openCreate}>+ Nuevo grupo</Button>}
           />
         ) : (
           <Table
             head={[
-              "Extensión",
+              "Número interno",
               "Nombre",
-              "Estrategia",
-              "Agentes",
-              "Desbordamiento",
+              "Cómo suena",
+              "Personas",
+              "Si nadie contesta",
               "Estado",
               { label: "Acciones", align: "right" },
             ]}
@@ -215,7 +215,7 @@ export default function QueuesPage() {
       <Modal
         open={modal}
         onClose={() => setModal(false)}
-        title={editing ? `Editar cola ${editing.name}` : "Nueva cola"}
+        title={editing ? `Editar grupo ${editing.name}` : "Nuevo grupo de atención"}
         footer={
           <>
             <Button variant="secondary" onClick={() => setModal(false)}>
@@ -229,34 +229,23 @@ export default function QueuesPage() {
       >
         <div className="space-y-4">
           <Input
-            label="Nombre de la cola"
+            label="Nombre del grupo"
             value={form.name}
             onChange={(v) => setForm({ ...form, name: v })}
-            placeholder="soporte"
+            placeholder="ventas, soporte…"
+            hint="Sin espacios ni tildes: letras, números, punto, guion."
             required
-          />
-          <Input
-            label="Extensión (número que marcan para entrar)"
-            value={form.extension}
-            onChange={(v) => setForm({ ...form, extension: v })}
-            placeholder="8000"
-            required
-            mono
-          />
-          <Select
-            label="Estrategia de timbrado"
-            value={form.strategy}
-            onChange={(v) => setForm({ ...form, strategy: v })}
-            options={STRATEGIES}
           />
 
           <div>
             <span className="mb-1.5 block text-xs font-medium text-fg-soft">
-              Agentes {form.agents.length > 0 && <span className="text-brand-text">({form.agents.length})</span>}
+              ¿Quiénes atienden? {form.agents.length > 0 && <span className="text-brand-text">({form.agents.length})</span>}
             </span>
             <div className="max-h-44 overflow-y-auto rounded-xl border border-line bg-surface-2 p-1.5">
               {extensions.length === 0 ? (
-                <p className="px-2 py-2 text-xs text-faint">No hay extensiones creadas todavía.</p>
+                <p className="px-2 py-2 text-xs text-faint">
+                  Todavía no hay extensiones: crea una por persona en Central telefónica → Extensiones.
+                </p>
               ) : (
                 extensions.map((ext) => (
                   <Check
@@ -275,55 +264,79 @@ export default function QueuesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Timbrado por agente (seg)"
-              type="number"
-              value={form.agent_ring_timeout}
-              onChange={(v) => setForm({ ...form, agent_ring_timeout: Number(v) })}
-            />
-            <Input
-              label="Máx. no-contesta antes de pausar agente"
-              type="number"
-              value={form.max_no_answer}
-              onChange={(v) => setForm({ ...form, max_no_answer: Number(v) })}
-            />
-            <Input
-              label="Espera máx. en cola (seg, 0=sin límite)"
-              type="number"
-              value={form.max_wait_time}
-              onChange={(v) => setForm({ ...form, max_wait_time: Number(v) })}
-            />
-            <Input
-              label="Espera máx. sin agentes (seg, 0=sin límite)"
-              type="number"
-              value={form.max_wait_time_with_no_agent}
-              onChange={(v) => setForm({ ...form, max_wait_time_with_no_agent: Number(v) })}
-            />
-            <Input
-              label="Pausa del agente tras colgar (seg)"
-              type="number"
-              value={form.wrap_up_time}
-              onChange={(v) => setForm({ ...form, wrap_up_time: Number(v) })}
-            />
-          </div>
+          <Select
+            label="¿Cómo suena?"
+            value={form.strategy}
+            onChange={(v) => setForm({ ...form, strategy: v })}
+            options={STRATEGIES}
+          />
 
           <Input
-            label="Extensión de desbordamiento (opcional)"
+            label="Si nadie contesta, pasar a (opcional)"
             value={form.failover_extension ?? ""}
             onChange={(v) => setForm({ ...form, failover_extension: v })}
-            placeholder="Ej. 1000, o un voizbot bot_2 — vacío = cuelga"
-            hint="A dónde va la llamada si se agota la espera o no hay agentes disponibles."
+            placeholder="Una extensión (1000) o un voizbot (bot_2) — vacío = cuelga"
+            hint="Cuando se acaba la espera o no hay nadie disponible."
+          />
+
+          <Input
+            label="Número interno del grupo"
+            value={form.extension}
+            onChange={(v) => setForm({ ...form, extension: v })}
+            placeholder="8000"
+            hint="Para transferir llamadas al grupo desde un teléfono. Que no sea el de una extensión."
+            required
+            mono
           />
 
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
-            <span className="text-sm text-fg-soft">Grabar llamadas de la cola</span>
+            <span className="text-sm text-fg-soft">Grabar las llamadas del grupo</span>
             <Toggle checked={form.record} onChange={(v) => setForm({ ...form, record: v })} />
           </div>
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
-            <span className="text-sm text-fg-soft">Habilitada</span>
+            <span className="text-sm text-fg-soft">Activo</span>
             <Toggle checked={form.enabled} onChange={(v) => setForm({ ...form, enabled: v })} />
           </div>
+
+          <details className="rounded-xl border border-line">
+            <summary className="cursor-pointer select-none px-3 py-2.5 text-sm font-medium text-fg-soft">
+              Opciones avanzadas <span className="text-xs font-normal text-muted">(tiempos de espera y timbre)</span>
+            </summary>
+            <div className="grid grid-cols-2 gap-3 border-t border-line p-3">
+              <Input
+                label="Segundos que suena en cada persona"
+                type="number"
+                value={form.agent_ring_timeout}
+                onChange={(v) => setForm({ ...form, agent_ring_timeout: Number(v) })}
+              />
+              <Input
+                label="Llamadas sin contestar antes de pausar a la persona"
+                type="number"
+                value={form.max_no_answer}
+                onChange={(v) => setForm({ ...form, max_no_answer: Number(v) })}
+              />
+              <Input
+                label="Espera máxima del cliente (seg)"
+                type="number"
+                value={form.max_wait_time}
+                onChange={(v) => setForm({ ...form, max_wait_time: Number(v) })}
+                hint="0 = sin límite."
+              />
+              <Input
+                label="Espera máxima si no hay nadie conectado (seg)"
+                type="number"
+                value={form.max_wait_time_with_no_agent}
+                onChange={(v) => setForm({ ...form, max_wait_time_with_no_agent: Number(v) })}
+                hint="0 = sin límite."
+              />
+              <Input
+                label="Descanso tras cada llamada (seg)"
+                type="number"
+                value={form.wrap_up_time}
+                onChange={(v) => setForm({ ...form, wrap_up_time: Number(v) })}
+              />
+            </div>
+          </details>
         </div>
       </Modal>
     </div>

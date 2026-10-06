@@ -64,7 +64,7 @@ export default function RutasSalientes() {
     { clave: "prepend", etiqueta: "Anteponer (después de quitar)", tipo: "telefono", placeholder: "57" },
     {
       clave: "trunk_ids",
-      etiqueta: "Troncales, en orden de reintento",
+      etiqueta: "Sale por (si el primero falla, prueba el siguiente)",
       tipo: "multiples",
       conOrden: true,
       opciones: (troncales.datos ?? []).map((t) => ({ valor: String(t.id), etiqueta: t.name })),

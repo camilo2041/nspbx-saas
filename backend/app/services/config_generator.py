@@ -691,6 +691,10 @@ def _append_inbound_routes(
     # prioridad 0 quedaba antes de los DID exactos de las demás y les
     # robaba TODAS las llamadas entrantes, sin ningún error visible.
     ordered = sorted((r for r in routes if r.enabled), key=lambda r: (_es_comodin(r), r.priority, r.id))
+    from app.core.clock import now_local
+    from app.services import webcall
+
+    ahora = now_local()
     for route in ordered:
         pattern = route.did_pattern.strip()
         # re.escape: el DID es un número exacto, no una expresión. Con datos
@@ -706,13 +710,21 @@ def _append_inbound_routes(
             )
             continue
         destino_ctx = contextos.get(route.tenant_id) or "default"
+        tipo, valor = route.destination_type, route.destination_value
+        # Horario de atención: el dialplan se arma en cada llamada (xml_curl),
+        # así que basta mirar la hora de ahora.
+        horario = getattr(route, "horario", None)
+        if horario and not webcall.is_open(horario, ahora):
+            tipo, valor = getattr(route, "fuera_horario_tipo", None) or "hangup", getattr(route, "fuera_horario_valor", None)
+            if tipo != "hangup" and not validacion.destino_valido(tipo, valor):
+                tipo, valor = "hangup", None
         extension = ET.SubElement(public_context, "extension", attrib={"name": f"did_{route.id}_{route.name}", "continue": "false"})
         condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": expression})
         ET.SubElement(condition, "action", attrib={"application": "set", "data": f"domain_name={dominios.get(route.tenant_id, '$${domain}')}"})
-        if route.destination_type == "hangup" or not route.destination_value:
+        if tipo == "hangup" or not valor:
             ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
         else:
-            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{route.destination_value} XML {destino_ctx}"})
+            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{valor} XML {destino_ctx}"})
 
     fallback = ET.SubElement(public_context, "extension", attrib={"name": "no_route", "continue": "false"})
     fb_cond = ET.SubElement(fallback, "condition", attrib={"field": "destination_number", "expression": ".*"})

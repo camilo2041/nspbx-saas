@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Badge,
@@ -124,6 +124,66 @@ export default function ConsolaAgente() {
   };
 
   const agente = estado?.agente ?? null;
+
+  // «Empezar a trabajar»: los cuatro pasos de siempre (conectar el
+  // softphone, entrar, esperar el audio, quedar en Listo) con un botón, y
+  // si uno falla se dice cuál. Antes eran cuatro botones y el agente no
+  // sabía en cuál se había quedado.
+  const [arranque, setArranque] = useState<{ paso: string; error?: string } | null>(null);
+  const connRef = useRef(connState);
+  connRef.current = connState;
+
+  useEffect(() => {
+    // Por defecto quedan elegidas las campañas en curso (o todas si ninguna lo está).
+    if (!estado || agente || elegidas.length) return;
+    const enCurso = estado.campanas.filter((c) => c.status === "running" || c.metodo === "manual");
+    const ids = (enCurso.length ? enCurso : estado.campanas).map((c) => c.id);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (ids.length) setElegidas(ids);
+  }, [estado, agente, elegidas.length]);
+
+  const esperar = async (cond: () => boolean | Promise<boolean>, segundos: number) => {
+    for (let i = 0; i < segundos * 2; i++) {
+      if (await cond()) return true;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
+  };
+
+  const empezar = async () => {
+    setError("");
+    try {
+      if (connRef.current !== "registered") {
+        setArranque({ paso: "Conectando el softphone…" });
+        connect().catch(() => {});
+        if (!(await esperar(() => connRef.current === "registered", 15))) {
+          setArranque({ paso: "", error: "El softphone no conectó. Revisa tu internet y el permiso del micrófono, y vuelve a intentar." });
+          return;
+        }
+      }
+      setArranque({ paso: "Entrando a tus campañas…" });
+      let e = await api.post<EstadoConsola>("/api/agente/entrar", { campanas: elegidas });
+      setEstado(e);
+      esperarSesionAgente(e.agente?.token_audio ?? null);
+      setArranque({ paso: "Abriendo el audio (el softphone contesta solo)…" });
+      const conAudio = await esperar(async () => {
+        e = await api.get<EstadoConsola>("/api/agente/estado");
+        setEstado(e);
+        esperarSesionAgente(e.agente?.token_audio ?? null);
+        return !!e.agente?.audio;
+      }, 20);
+      if (!conAudio) {
+        setArranque({ paso: "", error: "Entraste, pero el audio no conectó. Pulsa «Reconectar audio»." });
+        return;
+      }
+      setArranque({ paso: "Quedando disponible…" });
+      setEstado(await api.post<EstadoConsola>("/api/agente/listo"));
+      setArranque(null);
+    } catch (err) {
+      setArranque({ paso: "", error: err instanceof Error ? err.message : "No se pudo empezar" });
+    }
+  };
+
   const misCampanas = useMemo(
     () => (estado?.campanas ?? []).filter((c) => agente?.campanas.includes(c.id)),
     [estado, agente]
@@ -186,26 +246,23 @@ export default function ConsolaAgente() {
               )}
               {!entorno?.extension ? (
                 <Note tone="warn">No tienes extensión asignada: pídele a un administrador que te asigne una.</Note>
-              ) : !softphoneListo ? (
-                <Note tone="warn">
-                  Conecta el softphone antes de entrar: la consola te llama a tu extensión para abrir el audio.{" "}
-                  <button type="button" className="font-medium underline" onClick={() => connect()}>
-                    Conectar ahora
-                  </button>
-                </Note>
               ) : (
                 <Note tone="muted">
-                  Al entrar, la central llama a tu extensión {entorno.extension.number} y el softphone contesta solo. Mantén
-                  esta pestaña abierta.
+                  {softphoneListo ? "Softphone conectado. " : "El softphone se conecta solo al empezar. "}
+                  La central llama a tu extensión {entorno.extension.number} para abrir el audio y el softphone contesta
+                  solo. Mantén esta pestaña abierta.
                 </Note>
               )}
-              <Button
-                onClick={() => hacer("entrar", "entrar", { campanas: elegidas })}
-                loading={trabajando === "entrar"}
-                disabled={elegidas.length === 0 || !softphoneListo}
-              >
-                Entrar
-              </Button>
+              {arranque?.error && <Note tone="warn">{arranque.error}</Note>}
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={empezar} loading={!!arranque?.paso} disabled={elegidas.length === 0 || !entorno?.extension}>
+                  Empezar a trabajar
+                </Button>
+                {arranque?.paso && <span className="text-sm text-fg-soft">{arranque.paso}</span>}
+                {!arranque?.paso && (
+                  <span className="text-xs text-muted">Conecta el softphone, entra y te deja disponible para recibir llamadas.</span>
+                )}
+              </div>
             </CardBody>
           </Card>
         )}

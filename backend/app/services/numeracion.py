@@ -29,3 +29,13 @@ async def numero_en_uso(
     if fila:
         return f"la cola «{fila[0]}»"
     return None
+
+
+async def siguiente_libre(session: AsyncSession, desde: int = 101) -> str:
+    """El número de extensión que sigue al mayor de la empresa (101 si no
+    hay ninguno), saltando los que ya use una cola."""
+    numeros = [int(n) for n in (await session.execute(select(Extension.number))).scalars() if n.isdigit() and len(n) <= 6]
+    candidato = max([desde - 1, *numeros]) + 1
+    while await numero_en_uso(session, str(candidato)):
+        candidato += 1
+    return str(candidato)
