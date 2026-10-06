@@ -30,6 +30,8 @@ def _tres_cifras(n: int) -> str:
     """0 <= n < 1000 en palabras."""
     if n == 0:
         return ""
+    if n < 10:
+        return _UNIDADES[n]
     if n < 30:
         if n in _ESPECIALES:
             return _ESPECIALES[n]

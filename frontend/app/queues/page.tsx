@@ -35,6 +35,22 @@ const STRATEGIES = [
   { value: "random", label: "Aleatorio" },
 ];
 
+type Desborde = "hangup" | "extension" | "voicemail" | "queue" | "otro";
+const PREFIJO_BUZON = "*99";
+
+/** Qué hay en `failover_extension`: *99<ext> es el buzón de esa extensión. */
+function tipoDesborde(valor: string | null | undefined, extensiones: Extension[], colas: Queue[]): Desborde {
+  if (!valor) return "hangup";
+  if (valor.startsWith(PREFIJO_BUZON)) return "voicemail";
+  if (extensiones.some((e) => e.number === valor)) return "extension";
+  if (colas.some((q) => q.extension === valor)) return "queue";
+  return "otro";
+}
+
+function valorDesborde(valor: string | null | undefined): string {
+  return valor?.startsWith(PREFIJO_BUZON) ? valor.slice(PREFIJO_BUZON.length) : (valor ?? "");
+}
+
 const empty: Omit<Queue, "id" | "created_at"> = {
   name: "",
   extension: "",
@@ -100,6 +116,10 @@ export default function QueuesPage() {
   // config de FreeSWITCH, así que no era solo una fila de más).
   const save = async () => {
     if (saving) return;
+    if (form.failover_extension === PREFIJO_BUZON) {
+      setError("Elige de quién es el buzón al que van las llamadas que nadie contesta.");
+      return;
+    }
     setSaving(true);
     try {
       const payload = { ...form, failover_extension: form.failover_extension || null };
@@ -116,6 +136,25 @@ export default function QueuesPage() {
       setSaving(false);
     }
   };
+
+  const desbordeLabel = (q: Queue) => {
+    const tipo = tipoDesborde(q.failover_extension, extensions, items);
+    const v = valorDesborde(q.failover_extension);
+    const nombre = (n: string) => extensions.find((e) => e.number === n)?.caller_id_name;
+    const espera = q.max_wait_time > 0 ? ` (a los ${q.max_wait_time} s)` : "";
+    if (tipo === "hangup") return "Cuelga";
+    if (tipo === "voicemail") return `Buzón de ${nombre(v) || `la ${v}`}${espera}`;
+    if (tipo === "extension") return `${nombre(v) || `Ext. ${v}`}${espera}`;
+    if (tipo === "queue") return `Grupo ${items.find((x) => x.extension === v)?.name ?? v}${espera}`;
+    return `${v}${espera}`;
+  };
+
+  const tipoForm = tipoDesborde(form.failover_extension, extensions, items);
+  const cambiarDesborde = (tipo: Desborde, valor = "") =>
+    setForm({
+      ...form,
+      failover_extension: tipo === "hangup" ? "" : tipo === "voicemail" ? (valor ? `${PREFIJO_BUZON}${valor}` : PREFIJO_BUZON) : valor,
+    });
 
   const remove = async (q: Queue) => {
     if (!confirm(`¿Eliminar la cola ${q.name}?`)) return;
@@ -182,9 +221,7 @@ export default function QueuesPage() {
                 <Td>
                   <Badge color="indigo">{q.agents.length}</Badge>
                 </Td>
-                <Td mono muted>
-                  {q.failover_extension || "—"}
-                </Td>
+                <Td muted>{desbordeLabel(q)}</Td>
                 <Td>
                   {q.enabled ? (
                     <Badge color="green" dot>
@@ -271,13 +308,47 @@ export default function QueuesPage() {
             options={STRATEGIES}
           />
 
-          <Input
-            label="Si nadie contesta, pasar a (opcional)"
-            value={form.failover_extension ?? ""}
-            onChange={(v) => setForm({ ...form, failover_extension: v })}
-            placeholder="Una extensión (1000) o un voizbot (bot_2) — vacío = cuelga"
-            hint="Cuando se acaba la espera o no hay nadie disponible."
-          />
+          <div className="space-y-3 rounded-xl border border-line p-3">
+            <Select
+              label="Si nadie contesta, la llamada va a"
+              value={tipoForm === "otro" ? "extension" : tipoForm}
+              onChange={(v) => cambiarDesborde(v as Desborde)}
+              options={[
+                { value: "voicemail", label: "El buzón de voz de una persona (deja un mensaje)" },
+                { value: "extension", label: "Una persona" },
+                { value: "queue", label: "Otro grupo" },
+                { value: "hangup", label: "Colgar" },
+              ]}
+            />
+            {tipoForm !== "hangup" && (
+              <Select
+                label={tipoForm === "queue" ? "¿Qué grupo?" : tipoForm === "voicemail" ? "¿El buzón de quién?" : "¿Quién?"}
+                value={valorDesborde(form.failover_extension)}
+                onChange={(v) => cambiarDesborde(tipoForm === "otro" ? "extension" : tipoForm, v)}
+                placeholder="— Elige —"
+                options={
+                  tipoForm === "queue"
+                    ? items
+                        .filter((q) => q.id !== editing?.id)
+                        .map((q) => ({ value: q.extension, label: `${q.extension} — ${q.name}` }))
+                    : extensions
+                        .filter((e) => tipoForm !== "voicemail" || e.voicemail)
+                        .map((e) => ({ value: e.number, label: `${e.number} — ${e.caller_id_name || "sin nombre"}` }))
+                }
+              />
+            )}
+            <Input
+              label="Si nadie contesta en (segundos)"
+              type="number"
+              value={form.max_wait_time}
+              onChange={(v) => setForm({ ...form, max_wait_time: Number(v) })}
+              hint={
+                form.max_wait_time > 0
+                  ? `A los ${form.max_wait_time} s de espera la llamada sale del grupo.`
+                  : "0 = espera sin límite mientras haya alguien conectado. Recomendado: 60."
+              }
+            />
+          </div>
 
           <Input
             label="Número interno del grupo"
@@ -289,6 +360,15 @@ export default function QueuesPage() {
             mono
           />
 
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+            <span className="text-sm text-fg-soft">
+              Decirle a quien espera cuántas personas tiene antes
+              <span className="block text-xs text-muted">
+                Al entrar al grupo. Mientras espera oye música y, cada 30 s, «Gracias por esperar».
+              </span>
+            </span>
+            <Toggle checked={form.announce_position} onChange={(v) => setForm({ ...form, announce_position: v })} />
+          </div>
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
             <span className="text-sm text-fg-soft">Grabar las llamadas del grupo</span>
             <Toggle checked={form.record} onChange={(v) => setForm({ ...form, record: v })} />
@@ -314,13 +394,6 @@ export default function QueuesPage() {
                 type="number"
                 value={form.max_no_answer}
                 onChange={(v) => setForm({ ...form, max_no_answer: Number(v) })}
-              />
-              <Input
-                label="Espera máxima del cliente (seg)"
-                type="number"
-                value={form.max_wait_time}
-                onChange={(v) => setForm({ ...form, max_wait_time: Number(v) })}
-                hint="0 = sin límite."
               />
               <Input
                 label="Espera máxima si no hay nadie conectado (seg)"

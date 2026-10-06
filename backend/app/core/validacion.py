@@ -63,13 +63,44 @@ DID_RE = TELEFONO_RE
 BOT_RE = re.compile(r"^bot_[0-9]{1,10}$")
 
 
+# Indicativo de Colombia: los proveedores mandan el mismo número de tres
+# formas (+576011234567, 576011234567 o 6011234567) según su configuración.
+INDICATIVO = "57"
+_LARGO_NACIONAL = 10
+_SEPARADORES_RE = re.compile(r"[\s().-]")
+
+
+def did_canonico(did: str) -> str:
+    """El DID como se guarda: sin espacios ni guiones y, si es un número
+    colombiano completo (con +57 o 57 adelante), sin el indicativo. Así
+    «+57 601 123 4567» y «6011234567» son la MISMA ruta (y el índice único
+    lo detecta), y el dialplan acepta cualquiera de las tres formas."""
+    v = _SEPARADORES_RE.sub("", did.strip())
+    digitos = v[1:] if v.startswith("+") else v
+    if digitos.isdigit() and digitos.startswith(INDICATIVO) and len(digitos) == len(INDICATIVO) + _LARGO_NACIONAL:
+        return digitos[len(INDICATIVO):]
+    return v
+
+
+def expresion_did(did: str) -> str:
+    """Expresión del dialplan para un DID exacto, tolerante al formato en
+    que lo mande el proveedor (ver did_canonico)."""
+    v = did_canonico(did)
+    digitos = v[1:] if v.startswith("+") else v
+    if digitos.isdigit() and len(digitos) == _LARGO_NACIONAL:
+        return rf"^(?:\+?{INDICATIVO})?{digitos}$"
+    if digitos.isdigit():
+        return rf"^\+?{digitos}$"
+    return f"^{re.escape(v)}$"
+
+
 def destino_valido(tipo: str, valor: str | None) -> bool:
     """¿El destino de una ruta entrante es coherente con su tipo?"""
     if tipo == "hangup":
         return True
     if not valor:
         return False
-    if tipo == "extension":
+    if tipo in ("extension", "voicemail"):
         return bool(EXTENSION_RE.fullmatch(valor))
     if tipo == "queue":
         return bool(TELEFONO_RE.fullmatch(valor))

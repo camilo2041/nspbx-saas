@@ -114,6 +114,67 @@ def _decir(condition: ET.Element, prompt_key: str, texto_respaldo: str) -> None:
         ET.SubElement(condition, "action", attrib={"application": "speak", "data": f"flite|kal|{texto_respaldo}"})
 
 
+# Buzón de voz -------------------------------------------------------------
+# *99 + extensión: deja un mensaje directo en el buzón de esa extensión, sin
+# timbrarle. Lo usan las rutas entrantes y los grupos («si nadie contesta,
+# al buzón de…») y sirve también marcado desde un teléfono.
+PREFIJO_BUZON = "*99"
+TIMBRADO_EXTENSION_SEG = 30
+BUZON_MAX_SEG = 180
+
+
+def _numeros_con_buzon(extensions: list) -> list[str]:
+    return sorted(
+        e.number
+        for e in extensions
+        if getattr(e, "voicemail", False) and getattr(e, "enabled", True) and validacion.EXTENSION_RE.fullmatch(e.number or "")
+    )
+
+
+def _acciones_buzon(condition: ET.Element, tenant_id: int, extension: str) -> None:
+    """Saludo, tono y grabación del mensaje; al colgar, el CDR de la llamada
+    trae `nspbx_buzon_ext` y `nspbx_buzon` y el backend guarda el mensaje
+    (api/calls.py:receive_cdr). `extension` es el número o una variable del
+    canal (${destination_number}, $1).
+
+    El audio va en la carpeta de grabaciones de la empresa: misma retención,
+    mismo aislamiento y el backend ya sabe servirlo."""
+    carpeta = f"$${{recordings_dir}}/{carpeta_grabaciones(tenant_id)}/buzon/{extension}"
+    ET.SubElement(condition, "action", attrib={"application": "answer"})
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": f"nspbx_buzon_ext={extension}"})
+    ET.SubElement(
+        condition,
+        "action",
+        attrib={"application": "set", "data": f"nspbx_buzon={carpeta}/${{strftime(%Y%m%d-%H%M%S)}}_${{uuid}}.wav"},
+    )
+    # `system` y no `bgsystem`: `record` necesita la carpeta ya creada.
+    ET.SubElement(condition, "action", attrib={"application": "system", "data": f"mkdir -p {carpeta}"})
+    ET.SubElement(condition, "action", attrib={"application": "sleep", "data": "500"})
+    _decir(
+        condition,
+        "buzon_saludo",
+        "La persona que llamas no esta disponible. Deja tu mensaje despues del tono y cuelga al terminar.",
+    )
+    ET.SubElement(condition, "action", attrib={"application": "playback", "data": "tone_stream://%(500,0,1000)"})
+    # Hasta BUZON_MAX_SEG; corta solo tras 5 s de silencio (umbral 200).
+    ET.SubElement(condition, "action", attrib={"application": "record", "data": f"${{nspbx_buzon}} {BUZON_MAX_SEG} 200 5"})
+    ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+
+def _append_buzon_directo(context: ET.Element, extensions: list, tenant_id: int) -> None:
+    """*99<extensión>: directo al buzón, sin timbrar (ver PREFIJO_BUZON)."""
+    con_buzon = _numeros_con_buzon(extensions)
+    if not con_buzon:
+        return
+    extension = ET.SubElement(context, "extension", attrib={"name": "nspbx_buzon_directo", "continue": "false"})
+    condition = ET.SubElement(
+        extension,
+        "condition",
+        attrib={"field": "destination_number", "expression": f"^{re.escape(PREFIJO_BUZON)}({'|'.join(con_buzon)})$"},
+    )
+    _acciones_buzon(condition, tenant_id, "$1")
+
+
 def _append_dnd_feature_codes(context: ET.Element, dominio: str, tenant_id: int) -> None:
     """*78 activa "no molestar" para quien marca, *79 lo apaga.
 
@@ -176,8 +237,20 @@ def _append_dnd_hook(context: ET.Element, extensions: list, tenant_id: int) -> N
     c1 = ET.SubElement(cortar, "condition", attrib={"field": "destination_number", "expression": f"^({numbers})$"})
     c2 = ET.SubElement(cortar, "condition", attrib={"field": f"${{db(select/dnd/${{destination_number}}_t{int(tenant_id)})}}", "expression": "^on$"})
     ET.SubElement(c2, "action", attrib={"application": "answer"})
-    _decir(c2, "dnd_no_disponible", "La extensión no está disponible en este momento.")
-    ET.SubElement(c2, "action", attrib={"application": "hangup", "data": "USER_BUSY"})
+    # Con buzón: quien llama deja su mensaje en vez de solo oír el aviso.
+    # break="never": si la extensión no tiene buzón se sigue al aviso; si
+    # lo tiene, el buzón termina en hangup y lo de abajo no llega a correr.
+    con_buzon = _numeros_con_buzon(extensions)
+    if con_buzon:
+        c3 = ET.SubElement(
+            cortar,
+            "condition",
+            attrib={"field": "destination_number", "expression": f"^({'|'.join(con_buzon)})$", "break": "never"},
+        )
+        _acciones_buzon(c3, tenant_id, "${destination_number}")
+    c4 = ET.SubElement(cortar, "condition")
+    _decir(c4, "dnd_no_disponible", "La extensión no está disponible en este momento.")
+    ET.SubElement(c4, "action", attrib={"application": "hangup", "data": "USER_BUSY"})
 
 
 def _append_mobile_push_hook(context: ET.Element, extensions: list, push_numbers: set[str], slug: str) -> None:
@@ -226,7 +299,9 @@ def _append_mobile_push_hook(context: ET.Element, extensions: list, push_numbers
         )
 
 
-def _append_push_bridge_routes(context: ET.Element, push_numbers: set[str], extensions: list, dominio: str) -> None:
+def _append_push_bridge_routes(
+    context: ET.Element, push_numbers: set[str], extensions: list, dominio: str, tenant_id: int = 0
+) -> None:
     """Llamada a una extensión con la app móvil: REINTENTA el timbrado unos segundos.
 
     Con el teléfono bloqueado la app no está registrada: el push la despierta, pero
@@ -241,6 +316,7 @@ def _append_push_bridge_routes(context: ET.Element, push_numbers: set[str], exte
     """
     if not push_numbers or not dominio:
         return
+    con_buzon = set(_numeros_con_buzon(extensions))
     for numero in sorted(n for n in push_numbers if any(e.number == n for e in extensions)):
         if not validacion.EXTENSION_RE.fullmatch(numero):
             continue
@@ -258,11 +334,15 @@ def _append_push_bridge_routes(context: ET.Element, push_numbers: set[str], exte
                 "data": f"{{originate_retries=10,originate_retry_sleep_ms=2500,call_timeout=45}}user/{numero}@{dominio}",
             },
         )
+        if numero in con_buzon:
+            _acciones_buzon(cond, tenant_id, numero)
         ET.SubElement(cond, "action", attrib={"application": "hangup", "data": "NO_ANSWER"})
 
 
-def _append_local_extension_route(context: ET.Element, extensions: list, dominio: str) -> None:
-    """Extension a extension (Local_Extension)."""
+def _append_local_extension_route(context: ET.Element, extensions: list, dominio: str, tenant_id: int = 0) -> None:
+    """Extension a extension (Local_Extension). Si no contesta (o está
+    ocupada o sin teléfono conectado) y tiene buzón, la llamada va al buzón;
+    si no, se cuelga."""
     if not extensions:
         return
     extension = ET.SubElement(context, "extension", attrib={"name": "Local_Extension", "continue": "false"})
@@ -279,6 +359,9 @@ def _append_local_extension_route(context: ET.Element, extensions: list, dominio
     # el que se encarga de contestarla en ese momento, no antes.
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "continue_on_fail=true"})
+    # Cuánto timbra antes de rendirse (y pasar al buzón). El de fábrica es
+    # 60 s: casi nadie espera tanto para dejar un mensaje.
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": f"call_timeout={TIMBRADO_EXTENSION_SEG}"})
     # Tono de "llamando" para quien marca (425 Hz, 1 s sí / 4 s no) como audio previo a
     # la respuesta: sin él, la pata de quien llama timbra en silencio.
     ET.SubElement(condition, "action", attrib={"application": "set", "data": "ringback=%(1000,4000,425)"})
@@ -287,6 +370,15 @@ def _append_local_extension_route(context: ET.Element, extensions: list, dominio
     # `user/<ext>@$${domain}` terminaría buscando el contacto en el dominio
     # equivocado. Acá cada contexto ya sabe de qué empresa es.
     ET.SubElement(condition, "action", attrib={"application": "bridge", "data": f"user/${{destination_number}}@{dominio}"})
+    con_buzon = _numeros_con_buzon(extensions)
+    if con_buzon:
+        # break="never": sin buzón se sigue a la condición de abajo (colgar).
+        buzon = ET.SubElement(
+            extension,
+            "condition",
+            attrib={"field": "destination_number", "expression": f"^({'|'.join(con_buzon)})$", "break": "never"},
+        )
+        _acciones_buzon(buzon, tenant_id, "${destination_number}")
     anti = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": f"^({numbers})$"})
     anti.set("break", "on-false")
     ET.SubElement(anti, "action", attrib={"application": "hangup", "data": "NO_ANSWER"})
@@ -651,11 +743,39 @@ def _append_queue_routes(context: ET.Element, queues: list, dominio: str) -> Non
         # atendido. Sin agente que conteste no hubo bridge y sigue igual al
         # desborde.
         ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
+        if getattr(queue, "announce_position", False):
+            _decir_posicion(condition, qkey)
         ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})
         if queue.failover_extension and validacion.DESTINO_RE.fullmatch(queue.failover_extension):
             ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML {context.get('name')}"})
         else:
             ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+
+def _decir_posicion(condition: ET.Element, qkey: str) -> None:
+    """Antes de entrar a la fila: «Hay N personas antes que tú».
+
+    mod_callcenter no anuncia la posición. Se cuentan los que esperan
+    (Waiting/Trying) en `callcenter_config queue list members` con un Lua en
+    línea (mod_lua) y se reproduce el aviso pre-generado de ese número
+    (voice_prompts: cola_delante_0…9 y _mas). Si el audio no existe todavía
+    (sin API key de voz) no dice nada: mejor callar que la voz de respaldo
+    en inglés. Cualquier error de Lua solo se registra y la llamada sigue.
+    """
+    carpeta = f"{voice_prompts.FS_SIDE_SOUNDS_DIR}/{voice_prompts.PROMPTS_DIR}"
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": f"nspbx_cola={qkey}"})
+    codigo = (
+        "~local r = freeswitch.API():executeString('callcenter_config queue list members ' .. "
+        "session:getVariable('nspbx_cola')) or ''; "
+        "local n = 0; "
+        "for l in string.gmatch(r, '[^\\n]+') do "
+        "if string.find(l, '|Waiting|', 1, true) or string.find(l, '|Trying|', 1, true) then n = n + 1 end "
+        "end; "
+        f"local f = '{carpeta}/cola_delante_' .. (n > 9 and 'mas' or tostring(n)) .. '.wav'; "
+        "local h = io.open(f, 'r'); "
+        "if h then h:close(); session:streamFile(f) end"
+    )
+    ET.SubElement(condition, "action", attrib={"application": "lua", "data": codigo})
 
 
 def _append_inbound_routes(
@@ -695,12 +815,9 @@ def _append_inbound_routes(
     from app.services import webcall
 
     ahora = now_local()
+    exactas: list[tuple] = []
+    comodines: list[tuple] = []
     for route in ordered:
-        pattern = route.did_pattern.strip()
-        # re.escape: el DID es un número exacto, no una expresión. Con datos
-        # guardados antes de validarlos, un "5.*" seguía funcionando como
-        # regex y capturaba números ajenos.
-        expression = ".*" if _es_comodin(route) else f"^{re.escape(pattern)}$"
         if route.destination_type != "hangup" and not validacion.destino_valido(
             route.destination_type, route.destination_value
         ):
@@ -709,7 +826,6 @@ def _append_inbound_routes(
                 route.id, route.destination_value, route.destination_type,
             )
             continue
-        destino_ctx = contextos.get(route.tenant_id) or "default"
         tipo, valor = route.destination_type, route.destination_value
         # Horario de atención: el dialplan se arma en cada llamada (xml_curl),
         # así que basta mirar la hora de ahora.
@@ -718,13 +834,34 @@ def _append_inbound_routes(
             tipo, valor = getattr(route, "fuera_horario_tipo", None) or "hangup", getattr(route, "fuera_horario_valor", None)
             if tipo != "hangup" and not validacion.destino_valido(tipo, valor):
                 tipo, valor = "hangup", None
-        extension = ET.SubElement(public_context, "extension", attrib={"name": f"did_{route.id}_{route.name}", "continue": "false"})
-        condition = ET.SubElement(extension, "condition", attrib={"field": "destination_number", "expression": expression})
+        (comodines if _es_comodin(route) else exactas).append((route, tipo, valor))
+
+    def _ruta(route, tipo, valor, campo: str, expresion: str, sufijo: str = "") -> None:
+        extension = ET.SubElement(
+            public_context, "extension", attrib={"name": f"did_{route.id}_{route.name}{sufijo}", "continue": "false"}
+        )
+        condition = ET.SubElement(extension, "condition", attrib={"field": campo, "expression": expresion})
         ET.SubElement(condition, "action", attrib={"application": "set", "data": f"domain_name={dominios.get(route.tenant_id, '$${domain}')}"})
         if tipo == "hangup" or not valor:
             ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
         else:
-            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{valor} XML {destino_ctx}"})
+            # Buzón: *99<extensión> en el contexto de la empresa (ver PREFIJO_BUZON).
+            destino = f"{PREFIJO_BUZON}{valor}" if tipo == "voicemail" else valor
+            destino_ctx = contextos.get(route.tenant_id) or "default"
+            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{destino} XML {destino_ctx}"})
+
+    # El número exacto, sin importar si llega con +57, 57 o sin indicativo
+    # (validacion.expresion_did: nunca es una expresión que escriba alguien;
+    # con datos guardados antes de validarlos, un "5.*" capturaba números
+    # ajenos). Primero en el número marcado (Request-URI) y después en el
+    # encabezado To: con registro, varios proveedores mandan la llamada al
+    # usuario de la troncal y el número real solo viene en el To.
+    for route, tipo, valor in exactas:
+        _ruta(route, tipo, valor, "destination_number", validacion.expresion_did(route.did_pattern))
+    for route, tipo, valor in exactas:
+        _ruta(route, tipo, valor, "${sip_to_user}", validacion.expresion_did(route.did_pattern), "_to")
+    for route, tipo, valor in comodines:
+        _ruta(route, tipo, valor, "destination_number", ".*")
 
     fallback = ET.SubElement(public_context, "extension", attrib={"name": "no_route", "continue": "false"})
     fb_cond = ET.SubElement(fallback, "condition", attrib={"field": "destination_number", "expression": ".*"})
@@ -892,8 +1029,9 @@ def build_dialplan_xml(
         _append_dnd_feature_codes(context, dominio, t["tenant_id"])
         _append_dnd_hook(context, extensions, t["tenant_id"])
         _append_mobile_push_hook(context, extensions, t.get("push_extensions") or set(), slugs.get(t["tenant_id"], ""))
-        _append_push_bridge_routes(context, t.get("push_extensions") or set(), extensions, dominio)
-        _append_local_extension_route(context, extensions, dominio)
+        _append_buzon_directo(context, extensions, t["tenant_id"])
+        _append_push_bridge_routes(context, t.get("push_extensions") or set(), extensions, dominio, t["tenant_id"])
+        _append_local_extension_route(context, extensions, dominio, t["tenant_id"])
         _append_voicebot_routes(section, context, bots, dominio, t["tenant_id"])
         _append_queue_routes(context, queues, dominio)
 

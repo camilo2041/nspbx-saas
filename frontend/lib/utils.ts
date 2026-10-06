@@ -7,6 +7,7 @@ export function statusBadge(status: string): { label: string; color: string } {
     pending: { label: "Pendiente", color: "amber" },
     dialing: { label: "Marcando", color: "blue" },
     answered: { label: "Contestada", color: "green" },
+    voicemail: { label: "Buzón de voz", color: "blue" },
     busy: { label: "Ocupado", color: "red" },
     noanswer: { label: "Sin respuesta", color: "slate" },
     failed: { label: "Falló", color: "red" },

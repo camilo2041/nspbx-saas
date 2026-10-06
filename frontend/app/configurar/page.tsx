@@ -99,6 +99,7 @@ export default function ConfigurarPage() {
   const [horario, setHorario] = useState<string | null>(HORARIO_OFICINA);
   const [numero, setNumero] = useState("");
   const [reglasColombia, setReglasColombia] = useState(false);
+  const [conBuzon, setConBuzon] = useState(true);
   const [progreso, setProgreso] = useState<Paso[] | null>(null);
   const [credenciales, setCredenciales] = useState<Credencial[]>([]);
   const [error, setError] = useState("");
@@ -193,14 +194,23 @@ export default function ConfigurarPage() {
     // 3. Grupo de atención con todo el equipo
     const agentes = [...new Set([...extensiones.map((e) => e.number), ...nuevasExt])];
     let numeroGrupo = "";
+    // Buzón de la primera persona del equipo: ahí dejan el mensaje si nadie
+    // contesta en un minuto o si llaman fuera de horario.
+    const buzonDe = conBuzon ? agentes[0] : "";
     if (agentes.length) {
       await intentar(`Crear el grupo de atención «${elegido.grupo}»`, async () => {
         let ultimo: unknown = null;
         for (let n = 8000; n < 8020; n++) {
           try {
-            await api.post("/api/queues", { name: elegido.grupo, extension: String(n), strategy: "ring-all", agents: agentes });
+            await api.post("/api/queues", {
+              name: elegido.grupo,
+              extension: String(n),
+              strategy: "ring-all",
+              agents: agentes,
+              ...(buzonDe ? { failover_extension: `*99${buzonDe}`, max_wait_time: 60, max_wait_time_with_no_agent: 10 } : {}),
+            });
             numeroGrupo = String(n);
-            return `Número interno ${n}, con ${agentes.length} persona(s).`;
+            return `Número interno ${n}, con ${agentes.length} persona(s)${buzonDe ? `; si nadie contesta en un minuto, al buzón de la ${buzonDe}` : ""}.`;
           } catch (e) {
             ultimo = e;
             // Número ocupado: se prueba el siguiente. Otro error: se corta.
@@ -222,8 +232,8 @@ export default function ConfigurarPage() {
           priority: numero.trim() ? 10 : 100,
           enabled: true,
           horario: conHorario ? horario : null,
-          fuera_horario_tipo: conHorario ? "hangup" : null,
-          fuera_horario_valor: null,
+          fuera_horario_tipo: conHorario ? (buzonDe ? "voicemail" : "hangup") : null,
+          fuera_horario_valor: conHorario && buzonDe ? buzonDe : null,
         });
         return numero.trim() ? `Las llamadas al ${numero.trim()} suenan en el grupo.` : "Toda llamada que entre suena en el grupo.";
       });
@@ -392,7 +402,9 @@ export default function ConfigurarPage() {
             />
             <div className="rounded-xl border border-line p-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-fg-soft">Solo en horario de atención (fuera de él, se cuelga)</span>
+                <span className="text-sm text-fg-soft">
+                  Solo en horario de atención (fuera de él, {conBuzon ? "dejan un mensaje de voz" : "se cuelga"})
+                </span>
                 <Toggle checked={conHorario} onChange={setConHorario} />
               </div>
               {conHorario && (
@@ -401,6 +413,11 @@ export default function ConfigurarPage() {
                 </div>
               )}
             </div>
+            <Check
+              checked={conBuzon}
+              onChange={setConBuzon}
+              label="Si nadie contesta en un minuto (o llaman fuera de horario), que dejen un mensaje de voz"
+            />
             <Check
               checked={reglasColombia}
               onChange={setReglasColombia}

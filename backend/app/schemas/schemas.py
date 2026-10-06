@@ -572,6 +572,9 @@ def _did(v: str) -> str:
     v = v.strip()
     if v.lower() == "any":
         return "any"
+    # Sin espacios ni guiones, y sin el +57 de adelante (ver did_canonico):
+    # da igual cómo lo escriba la persona o lo mande el proveedor.
+    v = val.did_canonico(v)
     if not val.DID_RE.fullmatch(v):
         raise ValueError('El número entrante debe tener solo dígitos, +, * o # (o "any")')
     return v
@@ -618,19 +621,19 @@ HorarioAtencion = Annotated[Optional[str], Field(default=None, max_length=500), 
 class InboundRouteBase(BaseModel):
     name: NombreVisible
     did_pattern: DidEntrante
-    destination_type: str = Field(..., pattern="^(extension|queue|voicebot|hangup)$")
+    destination_type: str = Field(..., pattern="^(extension|voicemail|queue|voicebot|hangup)$")
     destination_value: Optional[DestinoRuta] = None
     priority: int = Field(default=10, ge=0, le=1000)
     enabled: bool = True
     horario: HorarioAtencion = None
-    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|queue|voicebot|hangup)$")
+    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|voicemail|queue|voicebot|hangup)$")
     fuera_horario_valor: Optional[DestinoRuta] = None
 
     @model_validator(mode="after")
     def _destino_coherente(self):
         if not val.destino_valido(self.destination_type, self.destination_value):
             raise ValueError(
-                "El destino no corresponde al tipo: extensión (dígitos), cola (número) "
+                "El destino no corresponde al tipo: extensión o buzón (dígitos), cola (número) "
                 "o voizbot (bot_N)"
             )
         return self
@@ -643,12 +646,12 @@ class InboundRouteCreate(InboundRouteBase):
 class InboundRouteUpdate(BaseModel):
     name: Optional[NombreVisible] = None
     did_pattern: Optional[DidEntrante] = None
-    destination_type: Optional[str] = Field(default=None, pattern="^(extension|queue|voicebot|hangup)$")
+    destination_type: Optional[str] = Field(default=None, pattern="^(extension|voicemail|queue|voicebot|hangup)$")
     destination_value: Optional[DestinoRuta] = None
     priority: Optional[int] = Field(default=None, ge=0, le=1000)
     enabled: Optional[bool] = None
     horario: HorarioAtencion = None
-    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|queue|voicebot|hangup)$")
+    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|voicemail|queue|voicebot|hangup)$")
     fuera_horario_valor: Optional[DestinoRuta] = None
 
 

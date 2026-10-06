@@ -54,6 +54,11 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/auth/sesiones` | sesión (la propia cuenta) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/auth/sesiones/cerrar-todas` | sesión (la propia cuenta) | ✓ | ✓ | ✓ | ✓ |
 | DELETE | `/api/auth/sesiones/{sesion_id}` | sesión (la propia cuenta) | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/buzon` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/buzon/resumen` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| DELETE | `/api/buzon/{mensaje_id}` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| PUT | `/api/buzon/{mensaje_id}` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/buzon/{mensaje_id}/audio` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls/dias` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls/serie` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |

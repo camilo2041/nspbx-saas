@@ -1487,3 +1487,26 @@ class NodoFreeswitch(Base):
     capacidad_agentes: Mapped[int] = mapped_column(Integer, default=200, server_default="200")
     activo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MensajeBuzon(Base):
+    """Un mensaje de buzón de voz: alguien llamó a una extensión, nadie
+    contestó (o estaba en «no molestar») y dejó un mensaje grabado.
+
+    Lo crea el CDR de esa llamada (api/calls.py:receive_cdr) cuando trae
+    `nspbx_buzon_ext`, que fija el dialplan al mandar la llamada al buzón
+    (services/config_generator.py:_acciones_buzon). El audio vive en la
+    carpeta de grabaciones de la empresa (t<id>/buzon/<ext>/...)."""
+
+    __tablename__ = "buzon_mensajes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    extension: Mapped[str] = mapped_column(String(20), index=True)
+    call_uuid: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    caller_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    caller_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ruta: Mapped[str] = mapped_column(String(500))
+    duracion: Mapped[int] = mapped_column(Integer, default=0)  # segundos de mensaje
+    escuchado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -24,7 +24,7 @@ import { EditorHorario } from "@/components/editor-horario";
 import { api } from "@/lib/api";
 import { Extension, InboundRoute, Queue, VoiceBot } from "@/lib/types";
 
-type DestType = "extension" | "queue" | "voicebot" | "hangup";
+type DestType = "extension" | "voicemail" | "queue" | "voicebot" | "hangup";
 
 const empty: Omit<InboundRoute, "id" | "created_at"> = {
   name: "",
@@ -88,6 +88,10 @@ export default function InboundRoutesPage() {
   };
 
   const destOptions = (type: DestType) => {
+    if (type === "voicemail")
+      return extensions
+        .filter((e) => e.voicemail)
+        .map((e) => ({ value: e.number, label: `${e.number} — ${e.caller_id_name || "sin nombre"}` }));
     if (type === "extension")
       return extensions.map((e) => ({ value: e.number, label: `${e.number} — ${e.caller_id_name || "sin nombre"}` }));
     if (type === "queue") return queues.map((q) => ({ value: q.extension, label: `${q.extension} — ${q.name}` }));
@@ -138,6 +142,10 @@ export default function InboundRoutesPage() {
     if (r.destination_type === "extension") {
       const ext = extensions.find((e) => e.number === r.destination_value);
       return `Ext. ${r.destination_value}${ext?.caller_id_name ? ` (${ext.caller_id_name})` : ""}`;
+    }
+    if (r.destination_type === "voicemail") {
+      const ext = extensions.find((e) => e.number === r.destination_value);
+      return `Buzón de ${ext?.caller_id_name || `la ext. ${r.destination_value}`}`;
     }
     if (r.destination_type === "queue") {
       const q = queues.find((q) => q.extension === r.destination_value);
@@ -277,7 +285,7 @@ export default function InboundRoutesPage() {
               value={form.did_pattern}
               onChange={(v) => setForm({ ...form, did_pattern: v })}
               placeholder="6017654321"
-              hint="Tal como te lo entrega el proveedor (técnico: DID). Si no estás seguro, usa «Cualquier número»."
+              hint="Tu número con o sin +57 (técnico: DID): da igual cómo lo mande el proveedor. Si no estás seguro, usa «Cualquier número»."
               required
               mono
             />
@@ -291,6 +299,7 @@ export default function InboundRoutesPage() {
             }}
             options={[
               { value: "extension", label: "Una persona (su extensión)" },
+              { value: "voicemail", label: "El buzón de voz de una persona (deja un mensaje)" },
               { value: "queue", label: "Un grupo de atención (suena en varias personas)" },
               { value: "voicebot", label: "El voizbot (contesta solo)" },
               { value: "hangup", label: "Colgar" },
@@ -298,7 +307,7 @@ export default function InboundRoutesPage() {
           />
           {form.destination_type !== "hangup" && (
             <Select
-              label={form.destination_type === "queue" ? "¿Qué grupo?" : form.destination_type === "voicebot" ? "¿Qué voizbot?" : "¿Quién?"}
+              label={form.destination_type === "queue" ? "¿Qué grupo?" : form.destination_type === "voicebot" ? "¿Qué voizbot?" : form.destination_type === "voicemail" ? "¿El buzón de quién?" : "¿Quién?"}
               value={destPick}
               onChange={setDestPick}
               placeholder="— Elige —"
@@ -330,6 +339,7 @@ export default function InboundRoutesPage() {
                   onChange={(v) => setForm({ ...form, fuera_horario_tipo: v as DestType, fuera_horario_valor: "" })}
                   options={[
                     { value: "hangup", label: "Colgar" },
+                    { value: "voicemail", label: "Un buzón de voz (dejan un mensaje)" },
                     { value: "voicebot", label: "El voizbot (puede tomar el recado)" },
                     { value: "extension", label: "Una persona (por ejemplo, de guardia)" },
                     { value: "queue", label: "Un grupo de atención" },

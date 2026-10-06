@@ -27,6 +27,7 @@ const SERIES: { id: Serie; label: string; color: string }[] = [
 
 const ESTADO: Record<string, { label: string; tono: string }> = {
   answered: { label: "Contestada", tono: "bg-ok-soft text-ok-text" },
+  voicemail: { label: "Dejó mensaje", tono: "bg-info-soft text-info-text" },
   no_answer: { label: "Sin respuesta", tono: "bg-warn-soft text-warn-text" },
   busy: { label: "Ocupado", tono: "bg-warn-soft text-warn-text" },
   failed: { label: "Fallida", tono: "bg-danger-soft text-danger-text" },

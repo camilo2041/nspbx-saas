@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, nodos as nodos_api, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, buzon as buzon_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, nodos as nodos_api, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -30,7 +30,7 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, NodoFreeswitch, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import agentes, esl, integraciones, predictivo, reportes_programados, supervision, tiempo_real, voice_prompts, xml_endpoints
+from app.services import agentes, esl, integraciones, musica_espera, predictivo, reportes_programados, supervision, tiempo_real, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
 from app.services.bus import bus
 from app.services.lider import lider
@@ -362,6 +362,8 @@ _TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
     "entregas_webhook",
     "reportes_programados",
     "monitoreos",
+    # Buzón de voz (revisión 0020)
+    "buzon_mensajes",
 ]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
@@ -637,13 +639,27 @@ async def lifespan(app: FastAPI):
         # mod_callcenter guarda colas/agentes en memoria — se pierden en cada
         # reinicio de FreeSWITCH, así que hay que reescribir su config y
         # recargar el módulo al arrancar el backend.
+        # Los avisos de voz ANTES que las colas: el aviso periódico de cada
+        # grupo («Gracias por esperar») solo se configura si su audio existe.
+        for t in tenantes_rows:
+            await voice_prompts.ensure_prompts(session, t.id)
         queues_rows = (await session.execute(select(Queue))).scalars().all()
         await apply_queues(queues_rows, dominios)
         await session.commit()
         await _asegurar_admin(session)
         await _asegurar_plataforma(session)
-        for t in tenantes_rows:
-            await voice_prompts.ensure_prompts(session, t.id)
+
+    async def _musica_de_espera() -> None:
+        """Se sintetiza una sola vez (unos segundos): en segundo plano para no
+        demorar el arranque (ver services/musica_espera.py)."""
+        try:
+            if await asyncio.to_thread(musica_espera.asegurar):
+                # local_stream no vuelve a mirar una carpeta que no existía.
+                await esl.api("reload mod_local_stream")
+        except Exception as exc:
+            logger.warning("Música de espera: %s", exc)
+
+    tarea_musica = asyncio.create_task(_musica_de_espera())  # noqa: F841 (referencia viva)
     # Lo que hace UNA sola réplica (services/lider.py): marcar, procesar los
     # eventos de FreeSWITCH, webhooks, reportes y mantenimiento. Con una
     # réplica, toma el liderazgo acá mismo; con varias, la que no lo tiene
@@ -871,6 +887,7 @@ app.include_router(
 )
 app.include_router(appointments_api.router)  # permisos por endpoint: el agente de IA entra acá
 app.include_router(calls_api.router)  # permisos por endpoint: /fs/cdr lo llama FreeSWITCH
+app.include_router(buzon_api.router)  # permisos por endpoint (los mismos de ver llamadas)
 # La lista de exclusión de app/core/auth.py deja pasar /api/webcall/.
 app.include_router(webcall_api.router)
 app.include_router(assistant.router)  # solo lectura; recorta por rol dentro

@@ -252,7 +252,10 @@ export default function ExtensionsPage() {
             onChange={(v) => setForm({ ...form, caller_id_name: v })}
           />
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
-            <span className="text-sm text-fg-soft">Buzón de voz</span>
+            <span className="text-sm text-fg-soft">
+              Buzón de voz
+              <span className="block text-xs text-muted">Si no contesta en 30 s, quien llama puede dejar un mensaje.</span>
+            </span>
             <Toggle checked={form.voicemail} onChange={(v) => setForm({ ...form, voicemail: v })} />
           </div>
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">

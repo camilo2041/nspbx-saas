@@ -29,6 +29,7 @@ import { tiempoCorto } from "@/lib/utils";
 
 const estados: Record<string, { label: string; color: string }> = {
   answered: { label: "Contestada", color: "green" },
+  voicemail: { label: "Dejó mensaje", color: "blue" },
   no_answer: { label: "Sin respuesta", color: "amber" },
   busy: { label: "Ocupado", color: "amber" },
   rejected: { label: "Rechazada", color: "red" },
