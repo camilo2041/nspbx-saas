@@ -808,6 +808,8 @@ export interface EstadoConsola {
     telefono: string | null;
     contestada_at: string | null;
     pausa_pendiente_id: number | null;
+    en_espera?: boolean;
+    consulta_destino?: string | null;
     token_audio: string | null;
     extension: string | null;
   } | null;
@@ -1069,4 +1071,9 @@ export interface MensajeBuzon {
   duracion: number;
   escuchado: boolean;
   created_at: string | null;
+}
+
+export interface DestinosTransferencia {
+  extensiones: { numero: string; nombre: string | null; buzon: boolean }[];
+  grupos: { numero: string; nombre: string }[];
 }

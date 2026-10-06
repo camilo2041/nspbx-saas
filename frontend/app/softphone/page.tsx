@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge, Button, Card, CardBody, CardHeader, ErrorBanner, Note, PageHeader, Toggle } from "@/components/ui";
+import { ControlesLlamada } from "@/components/controles-llamada";
 import { useSoftphone, resolverServidorSip } from "@/lib/softphone-context";
 
 const DIALPAD: { digit: string; letters?: string }[] = [
@@ -228,6 +229,7 @@ export default function SoftphonePage() {
                     {muted ? "Reactivar mic" : "Silenciar"}
                   </Button>
                 </div>
+                <ControlesLlamada />
               </div>
             )}
 

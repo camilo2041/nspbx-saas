@@ -79,6 +79,12 @@ async def _exigir_numeros_libres(
         raise HTTPException(status_code=400, detail="El desborde no puede ser la misma cola")
 
 
+async def _todas(session: AsyncSession) -> list[Queue]:
+    """Las colas de la empresa: los parámetros de un agente salen de todos
+    sus grupos (queues_sync.parametros_agente)."""
+    return list((await session.execute(select(Queue))).scalars().all())
+
+
 @router.get("")
 async def list_queues(session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(Queue).order_by(Queue.id))
@@ -99,7 +105,7 @@ async def create_queue(payload: QueueCreate, session: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail="Nombre o extensión de cola duplicados")
     await session.refresh(queue)
     await _rewrite_conf_file(session)
-    await sync_queue(queue, await _dominio_de(session, queue.tenant_id))
+    await sync_queue(queue, await _dominio_de(session, queue.tenant_id), await _todas(session))
     return _out(queue)
 
 
@@ -140,7 +146,7 @@ async def update_queue(queue_id: int, payload: QueueUpdate, session: AsyncSessio
     if old_name != queue.name:
         # Si cambió el nombre, la cola vieja queda huérfana en mod_callcenter.
         await remove_queue(old_name, await _dominio_de(session, queue.tenant_id))
-    await sync_queue(queue, await _dominio_de(session, queue.tenant_id))
+    await sync_queue(queue, await _dominio_de(session, queue.tenant_id), await _todas(session))
     return _out(queue)
 
 

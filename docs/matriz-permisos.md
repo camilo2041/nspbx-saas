@@ -144,6 +144,12 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/integraciones/webhooks/{webhook_id}/entregas` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/integraciones/webhooks/{webhook_id}/probar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/integraciones/webhooks/{webhook_id}/rotar-secreto` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/llamada/destinos` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/espera` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/transferencia/cancelar` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/transferencia/completar` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/transferencia/conferencia` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/transferir` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
 | GET | `/api/outbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/outbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | DELETE | `/api/outbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |

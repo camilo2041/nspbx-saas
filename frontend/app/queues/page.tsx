@@ -149,6 +149,14 @@ export default function QueuesPage() {
     return `${v}${espera}`;
   };
 
+  // Personas de este grupo que están también en otros (sus tiempos se combinan).
+  const compartidas = form.agents
+    .map((n) => ({
+      persona: extensions.find((e) => e.number === n)?.caller_id_name || n,
+      grupos: items.filter((q) => q.id !== editing?.id && q.enabled && q.agents.includes(n)).map((q) => q.name),
+    }))
+    .filter((c) => c.grupos.length > 0);
+
   const tipoForm = tipoDesborde(form.failover_extension, extensions, items);
   const cambiarDesborde = (tipo: Desborde, valor = "") =>
     setForm({
@@ -383,6 +391,12 @@ export default function QueuesPage() {
               Opciones avanzadas <span className="text-xs font-normal text-muted">(tiempos de espera y timbre)</span>
             </summary>
             <div className="grid grid-cols-2 gap-3 border-t border-line p-3">
+              {compartidas.length > 0 && (
+                <p className="col-span-2 rounded-lg bg-surface-2 px-3 py-2 text-xs text-fg-soft">
+                  {compartidas.map((c) => `${c.persona} también está en ${c.grupos.join(", ")}`).join(". ")}. A una persona
+                  que está en varios grupos se le aplica el valor más alto de estos tres tiempos entre todos sus grupos.
+                </p>
+              )}
               <Input
                 label="Segundos que suena en cada persona"
                 type="number"

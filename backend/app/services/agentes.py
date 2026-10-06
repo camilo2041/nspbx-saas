@@ -187,6 +187,8 @@ def foto(vivo: AgenteVivo) -> dict:
         "telefono": vivo.telefono,
         "contestada_at": vivo.contestada_at,
         "pausa_pendiente_id": vivo.pausa_pendiente_id,
+        "en_espera": bool(vivo.en_espera),
+        "consulta_destino": vivo.consulta_destino,
     }
 
 
@@ -202,7 +204,8 @@ def _publicar(vivo: AgenteVivo) -> None:
 
 
 def _sin_llamada() -> dict:
-    return {"campaign_id": None, "lead_id": None, "call_uuid": None, "telefono": None, "contestada_at": None}
+    return {"campaign_id": None, "lead_id": None, "call_uuid": None, "telefono": None, "contestada_at": None,
+            "en_espera": False, "consulta_uuid": None, "consulta_destino": None}
 
 
 # --- FreeSWITCH -------------------------------------------------------------------------
@@ -642,7 +645,7 @@ def _resultado(causa: str) -> str:
 
 async def _al_colgar(session, vivo: AgenteVivo, causa: str) -> None:
     if vivo.estado == EN_LLAMADA:
-        await _transicion(session, vivo, DISPO)
+        await _transicion(session, vivo, DISPO, en_espera=False, consulta_uuid=None, consulta_destino=None)
         return
     if vivo.estado != TIMBRANDO:
         return

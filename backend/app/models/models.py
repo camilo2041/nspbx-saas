@@ -1329,6 +1329,12 @@ class AgenteVivo(Base):
     pausa_pendiente_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Antes de marcar a mano desde la pausa: a qué vuelve después.
     volver_a_pausa_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # El cliente está oyendo música (en espera) fuera de la sala del agente.
+    en_espera: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Transferencia consultada: la persona a la que se consulta, en la sala
+    # del agente mientras el cliente espera (services/transferencias.py).
+    consulta_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    consulta_destino: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
 class Callback(Base):

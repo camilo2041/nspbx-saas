@@ -187,7 +187,9 @@ async def _ensure_event_listener(nodo: int | None = None):
         # para las llamadas en vivo (services/tiempo_real.py), SOLO en la
         # réplica líder: si dos los procesaran, cada agente cambiaría de
         # estado dos veces (services/lider.py).
-        canal = f" {' '.join(EVENTOS)}" if lider.es_lider else ""
+        # CUSTOM callcenter::info: alguien entró a un grupo de atención (aviso
+        # a la app móvil, services/push_colas.py).
+        canal = f" {' '.join(EVENTOS)} CUSTOM callcenter::info" if lider.es_lider else ""
         writer.write(f"event plain BACKGROUND_JOB{canal}\n\n".encode())
         await writer.drain()
         await _read_headers_raw(reader)  # command/reply del "event"
@@ -267,6 +269,19 @@ async def _a_tiempo_real(cabeceras: str) -> None:
         await monitoreo.recibir(ev)
     except Exception:
         logger.exception("Evento de canal no procesado por el monitoreo")
+    if ev.get("Event-Name") == "CUSTOM":
+        from app.services import push_colas
+
+        # En una tarea aparte: el push espera a Apple/Google y la fila de
+        # eventos no puede frenarse por eso.
+        asyncio.create_task(_push_colas_seguro(push_colas, ev))
+
+
+async def _push_colas_seguro(push_colas, ev: dict[str, str]) -> None:
+    try:
+        await push_colas.recibir(ev)
+    except Exception:
+        logger.exception("Aviso a la app móvil por una llamada de grupo no enviado")
 
 
 async def cerrar_eventos() -> None:

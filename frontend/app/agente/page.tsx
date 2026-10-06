@@ -19,6 +19,7 @@ import {
   StatusDot,
   Textarea,
 } from "@/components/ui";
+import { ControlesLlamada } from "@/components/controles-llamada";
 import { api } from "@/lib/api";
 import { esperarSesionAgente, useSoftphone } from "@/lib/softphone-context";
 import { EstadoAgente, EstadoConsola } from "@/lib/types";
@@ -372,6 +373,11 @@ export default function ConsolaAgente() {
             )}
           </div>
         </div>
+        {agente.estado === "EN_LLAMADA" && (
+          <div className="border-t border-line px-5 pb-3">
+            <ControlesLlamada agente={agente} onCambio={cargar} />
+          </div>
+        )}
         {libre && (
           <div className="flex flex-wrap items-end gap-2 border-t border-line px-5 py-3">
             <div className="w-56">
