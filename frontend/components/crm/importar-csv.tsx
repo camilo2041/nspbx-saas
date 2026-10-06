@@ -118,7 +118,7 @@ export function ImportarCsv({ campos, onImportado }: { campos: CampoContacto[]; 
     <Card>
       <CardHeader
         title="Importar contactos"
-        subtitle="Archivo CSV con encabezados (Excel: Guardar como → CSV). Separado por comas o punto y coma; hasta 50.000 filas."
+        subtitle="Excel (.xlsx) o CSV, con los nombres de las columnas en la primera fila; hasta 50.000 filas."
         actions={
           vista ? (
             <Button size="sm" variant="secondary" onClick={reiniciar}>
@@ -138,12 +138,12 @@ export function ImportarCsv({ campos, onImportado }: { campos: CampoContacto[]; 
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-line-strong px-6 py-10 text-center">
             <p className="text-sm text-fg-soft">Elige el archivo. Primero verás una vista previa: no se guarda nada hasta confirmar.</p>
             <Button onClick={() => archivoRef.current?.click()} loading={trabajando}>
-              Elegir archivo CSV
+              Elegir archivo (Excel o CSV)
             </Button>
             <input
               ref={archivoRef}
               type="file"
-              accept=".csv,.txt,text/csv"
+              accept=".xlsx,.csv,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];

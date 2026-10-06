@@ -1,4 +1,4 @@
-"""Importar contactos desde un CSV (y, si se elige, cargarlos en una campaña).
+"""Importar contactos desde un CSV o un Excel (.xlsx) (y, si se elige, cargarlos en una campaña).
 
 Flujo: `leer` el archivo → el usuario dice qué columna va a qué campo
 (`sugerir_mapeo` propone uno) → `importar` crea o actualiza contactos y
@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from app.core import validacion
 from app.models import Contacto
-from app.services import crm
+from app.services import crm, excel
 
 MAX_BYTES = 5 * 1024 * 1024
 MAX_FILAS = 50_000
@@ -43,6 +43,20 @@ class Archivo:
 def leer(contenido: bytes) -> Archivo:
     if len(contenido) > MAX_BYTES:
         raise ErrorDeArchivo(f"El archivo pasa de {MAX_BYTES // (1024 * 1024)} MB")
+    # Excel (.xlsx) se lee directo: pedir «Guardar como CSV» era un paso
+    # más en el que la gente se perdía (y Excel en español lo guarda con ;
+    # y en otra codificación). Ver services/excel.py.
+    if excel.es_xls_viejo(contenido):
+        raise ErrorDeArchivo("Es un Excel antiguo (.xls): ábrelo en Excel y guárdalo como .xlsx o CSV")
+    if excel.es_xlsx(contenido):
+        try:
+            columnas, filas = excel.leer(contenido, MAX_FILAS)
+        except excel.ErrorExcel as exc:
+            raise ErrorDeArchivo(str(exc)) from None
+        columnas = [c.strip() for c in columnas]
+        if not any(columnas):
+            raise ErrorDeArchivo("La primera fila tiene que traer los nombres de las columnas")
+        return Archivo(columnas=columnas, filas=filas)
     try:
         texto = contenido.decode("utf-8-sig")
     except UnicodeDecodeError:
