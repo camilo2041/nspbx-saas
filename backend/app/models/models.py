@@ -1525,3 +1525,21 @@ class MensajeBuzon(Base):
     duracion: Mapped[int] = mapped_column(Integer, default=0)  # segundos de mensaje
     escuchado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SesionWebcall(Base):
+    """Credencial SIP temporal de un visitante del widget de llamada web
+    (services/webcall.py). En la base y no en memoria: con varias réplicas,
+    el directorio de FreeSWITCH puede preguntarle a una que no la creó."""
+
+    __tablename__ = "webcall_sesiones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(20), unique=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    password: Mapped[str] = mapped_column(TextoCifrado())
+    ip: Mapped[str] = mapped_column(String(64), index=True)
+    creada: Mapped[float] = mapped_column(Float, index=True)  # epoch (time.time())
+    registrada: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Colgó o se cerró: ya no cuenta como activa, pero sigue para el límite por IP.
+    terminada: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

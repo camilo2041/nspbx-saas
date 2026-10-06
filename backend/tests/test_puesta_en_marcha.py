@@ -9,7 +9,7 @@ from app.services import esl
 def freeswitch(monkeypatch):
     estado = {"gateway": "REGED", "registros": ""}
 
-    async def gateway_status(nombre):
+    async def gateway_status(nombre, tenant_id=None):
         return {"state": estado["gateway"]}
 
     async def api(cmd, **_kw):

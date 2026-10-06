@@ -465,10 +465,11 @@ async def internal_profile_ip() -> str | None:
     return m.group(1) if m else None
 
 
-async def gateway_status(name: str) -> dict:
-    """Consulta el estado real de una troncal (gateway) vía ESL."""
+async def gateway_status(name: str, tenant_id: int | None = None) -> dict:
+    """Consulta el estado real de una troncal (gateway) vía ESL, en el
+    servidor de su empresa (sin `tenant_id`, el del contexto en curso)."""
     validacion.exigir(validacion.NOMBRE_RE, name, "Nombre de troncal")
-    body = await api(f"sofia status gateway {name}")
+    body = await api(f"sofia status gateway {name}", tenant_id=tenant_id)
     out: dict = {"state": None, "status": None, "ping_ms": None, "contact_ip": None}
     if "Invalid Gateway" in body or not body.strip():
         return out

@@ -364,6 +364,8 @@ _TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
     "monitoreos",
     # Buzón de voz (revisión 0020)
     "buzon_mensajes",
+    # Widget de llamada web (revisión 0023)
+    "webcall_sesiones",
 ]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
@@ -654,8 +656,9 @@ async def lifespan(app: FastAPI):
         demorar el arranque (ver services/musica_espera.py)."""
         try:
             if await asyncio.to_thread(musica_espera.asegurar):
-                # local_stream no vuelve a mirar una carpeta que no existía.
-                await esl.api("reload mod_local_stream")
+                # local_stream no vuelve a mirar una carpeta que no existía. En
+                # todos los servidores: la carpeta de sonidos es compartida.
+                await esl.api_todos("reload mod_local_stream")
         except Exception as exc:
             logger.warning("Música de espera: %s", exc)
 

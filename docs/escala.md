@@ -56,6 +56,12 @@ espera (`pg_advisory_xact_lock` en `main.migrar`).
 | `webhooks` | Invalidar la caché de suscriptores al crear, editar o borrar un webhook. |
 | `nodos` | Invalidar el directorio de servidores FreeSWITCH al cambiar un servidor o mover una empresa (§4). |
 
+Las sesiones del widget de llamada web están en la tabla `webcall_sesiones`
+(antes, en memoria de un proceso): el directorio de FreeSWITCH las encuentra
+aunque la petición la atienda otra réplica, y el tope de llamadas por empresa
+y el límite por IP son los mismos para todas. El límite de preguntas al
+asistente sí es por réplica (con dos réplicas, como mucho el doble).
+
 Las escuchas del supervisor (escuchar, susurrar, intervenir) están en la
 tabla `monitoreos`: la petición la atiende cualquier réplica y los eventos los
 procesa la líder. La regla «un supervisor por agente» la garantiza la base
@@ -156,8 +162,12 @@ Si algún día una sola empresa pasa de 200 agentes, ahí toca B.
   Si se cae la conexión con uno, el tablero en vivo descarta solo sus
   llamadas; los demás siguen.
 - **Lo de la plataforma llega a todos**: recargar la configuración
-  (`reloadxml`), colgar las huérfanas del predictivo al tomar el liderazgo,
-  cortar una extensión. Un servidor caído no impide que los demás lo reciban.
+  (`reloadxml`, también al guardar un grupo de atención), la música de
+  espera, colgar las huérfanas del predictivo al tomar el liderazgo, cortar
+  una extensión.
+- **Lo que corre sin empresa en contexto** (los workers) pasa la empresa a
+  mano: por ejemplo, la alerta de proveedor desconectado pregunta el estado
+  de cada troncal en el servidor de su empresa. Un servidor caído no impide que los demás lo reciban.
 - **El tope de canales de la plataforma** (`MAX_CONCURRENT_CALLS_GLOBAL`)
   protege la troncal compartida, así que se compara con la suma de canales de
   todos los servidores. Si el principal no responde no se marca (como antes);

@@ -62,7 +62,8 @@ async def _rewrite_conf_file(session: AsyncSession) -> None:
             dominios = await dominios_tenants(admin)
         write_callcenter_conf(rows, dominios)
         try:
-            await esl.api("reloadxml")
+            # En todos los servidores: el archivo es uno para todas las empresas.
+            await esl.reloadxml()
         except Exception:
             pass
 

@@ -202,7 +202,10 @@ async def detectar_operacion(session, ahora: datetime | None = None) -> list[tup
     ).scalars().all()
     for t in troncales:
         try:
-            estado = (await esl.gateway_status(nombre_gateway(t.name, empresas[t.tenant_id].slug))).get("state")
+            # En el servidor de esa empresa: el worker no tiene empresa en contexto.
+            estado = (
+                await esl.gateway_status(nombre_gateway(t.name, empresas[t.tenant_id].slug), tenant_id=t.tenant_id)
+            ).get("state")
         except Exception:
             # Sin FreeSWITCH no se sabe: no se alerta por eso (lo ve la plataforma).
             continue

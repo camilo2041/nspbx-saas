@@ -134,17 +134,19 @@ async def test_proveedor_desconectado(zeta, monkeypatch):
         await s.commit()
     pedidos = []
 
-    async def estado(nombre):
-        pedidos.append(nombre)
+    async def estado(nombre, tenant_id=None):
+        pedidos.append((nombre, tenant_id))
         return {"state": "FAIL_WAIT"}
 
     monkeypatch.setattr(esl, "gateway_status", estado)
     async with async_session() as s:
         detalle = _de(await alertas.detectar_operacion(s), zeta["tenant"])["troncal_caida"]
     assert "«claro»" in detalle
-    assert not any(p.endswith("porip") for p in pedidos)  # sin registro no hay estado que mirar
+    assert not any(n.endswith("porip") for n, _ in pedidos)  # sin registro no hay estado que mirar
+    # Se pregunta en el servidor de la empresa de la troncal.
+    assert {t for n, t in pedidos if n.endswith("claro")} == {zeta["tenant"]}
 
-    async def conectado(nombre):
+    async def conectado(nombre, tenant_id=None):
         return {"state": "REGED"}
 
     monkeypatch.setattr(esl, "gateway_status", conectado)
