@@ -317,8 +317,8 @@ export default function TrunksPage() {
             label="Nombre"
             value={form.name}
             onChange={(v) => setForm({ ...form, name: v })}
-            placeholder="Claro, Tigo, Línea principal…"
-            hint="Solo para reconocerlo en el panel."
+            placeholder="claro, tigo, linea-principal…"
+            hint="Para reconocerlo en el panel. Sin espacios ni tildes: letras, números, punto, guion."
             required
           />
           <div>

@@ -86,6 +86,11 @@ export function PuestaEnMarcha({ delay = 0 }: { delay?: number }) {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {!estado.listo && (
+            <Link href="/configurar" className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white">
+              Configuración guiada
+            </Link>
+          )}
           <button type="button" className="text-xs font-medium text-brand underline" onClick={() => setAbierta(!abierta)}>
             {abierta ? "Contraer" : "Ver pasos"}
           </button>

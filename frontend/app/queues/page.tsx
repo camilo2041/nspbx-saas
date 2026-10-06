@@ -233,6 +233,7 @@ export default function QueuesPage() {
             value={form.name}
             onChange={(v) => setForm({ ...form, name: v })}
             placeholder="ventas, soporte…"
+            hint="Sin espacios ni tildes: letras, números, punto, guion."
             required
           />
 
