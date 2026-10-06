@@ -15,6 +15,7 @@ import {
   PageHeader,
   Segmented,
   Select,
+  StatCard,
   Table,
   TableSkeleton,
   Td,
@@ -32,17 +33,18 @@ import {
   ReporteProgramado,
 } from "@/lib/types";
 
-type Vista = "agentes" | "campanas" | "disposiciones" | "cumplimiento" | "programados";
+type Vista = "agentes" | "campanas" | "entrantes" | "disposiciones" | "cumplimiento" | "programados";
 
 const VISTAS: { value: Vista; label: string }[] = [
   { value: "agentes", label: "Agentes" },
   { value: "campanas", label: "Campañas" },
+  { value: "entrantes", label: "Llamadas entrantes" },
   { value: "disposiciones", label: "Disposiciones" },
   { value: "cumplimiento", label: "Cumplimiento" },
   { value: "programados", label: "Programados" },
 ];
 
-const NOMBRE_TIPO: Record<string, string> = { agentes: "Agentes", campanas: "Campañas", disposiciones: "Disposiciones", cumplimiento: "Cumplimiento" };
+const NOMBRE_TIPO: Record<string, string> = { agentes: "Agentes", campanas: "Campañas", entrantes: "Llamadas entrantes", disposiciones: "Disposiciones", cumplimiento: "Cumplimiento" };
 const FRECUENCIAS: Record<string, string> = { diaria: "Cada día (el día anterior)", semanal: "Cada lunes (la semana anterior)", mensual: "Cada día 1 (el mes anterior)" };
 
 function hoyMenos(dias: number): string {
@@ -77,6 +79,7 @@ export default function ReportesPage() {
   const [agrupar, setAgrupar] = useState("campana");
   const [maxSemana, setMaxSemana] = useState("1");
   const [soloCobranza, setSoloCobranza] = useState(true);
+  const [umbral, setUmbral] = useState("20");
   const [campanas, setCampanas] = useState<CampaignWithStats[]>([]);
   // Cada respuesta va con la consulta que la pidió y solo se dibuja si es la
   // vigente. Antes, al cambiar de pestaña se dibujaba un instante la vista
@@ -99,7 +102,8 @@ export default function ReportesPage() {
   const consulta = useCallback(
     (extra: Record<string, string> = {}) => {
       const qs = new URLSearchParams({ desde, hasta, ...extra });
-      if (campana && vista !== "cumplimiento") qs.set("campaign_id", campana);
+      if (campana && vista !== "cumplimiento" && vista !== "entrantes") qs.set("campaign_id", campana);
+      if (vista === "entrantes") qs.set("umbral_s", String(Math.min(600, Math.max(1, Number(umbral) || 20))));
       if (vista === "disposiciones") qs.set("agrupar", agrupar);
       if (vista === "cumplimiento") {
         qs.set("max_contactos_semana", maxSemana || "1");
@@ -107,7 +111,7 @@ export default function ReportesPage() {
       }
       return `/api/reportes/${vista}?${qs.toString()}`;
     },
-    [desde, hasta, campana, vista, agrupar, maxSemana, soloCobranza]
+    [desde, hasta, campana, vista, agrupar, maxSemana, soloCobranza, umbral]
   );
 
   const clave = vista === "programados" ? "" : consulta();
@@ -159,7 +163,16 @@ export default function ReportesPage() {
             <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-5">
               <Input label="Desde" type="date" value={desde} onChange={setDesde} />
               <Input label="Hasta" type="date" value={hasta} onChange={setHasta} />
-              {vista !== "cumplimiento" && (
+              {vista === "entrantes" && (
+                <Input
+                  label="Contestar antes de (seg)"
+                  type="number"
+                  value={umbral}
+                  onChange={setUmbral}
+                  hint="La meta del nivel de servicio. Lo típico: 20 s."
+                />
+              )}
+              {vista !== "cumplimiento" && vista !== "entrantes" && (
                 <Select
                   label="Campaña"
                   value={campana}
@@ -212,6 +225,8 @@ export default function ReportesPage() {
             <Agentes filas={datos.filas} total={datos.total} />
           ) : vista === "campanas" ? (
             <Campanas filas={datos.filas} total={datos.total} />
+          ) : vista === "entrantes" ? (
+            <Entrantes d={datos} />
           ) : vista === "disposiciones" ? (
             <Disposiciones filas={datos.filas} total={datos.total} callbacks={datos.callbacks} />
           ) : (
@@ -312,6 +327,150 @@ function Campanas({ filas, total }: { filas: FilaCampanaReporte[]; total: Record
       </Table>
       <p className="px-5 py-3 text-xs text-muted">Conversión: ventas y promesas de pago sobre las llamadas dispuestas con conversación con una persona.</p>
     </Card>
+  );
+}
+
+interface MedidasEntrantes {
+  ofrecidas: number;
+  atendidas: number;
+  atendidas_en_umbral?: number;
+  abandonadas: number;
+  desbordadas: number;
+  nivel_servicio_pct: number | null;
+  atencion_pct: number | null;
+  abandono_pct: number | null;
+  espera_promedio_s: number | null;
+  espera_max_s: number;
+  espera_abandono_s: number | null;
+  conversacion_promedio_s: number | null;
+}
+
+interface ReporteEntrantes {
+  umbral_s: number;
+  filas: (MedidasEntrantes & { cola: string })[];
+  total: MedidasEntrantes;
+  por_hora: { hora: number; ofrecidas: number; atendidas: number; abandonadas: number; nivel_servicio_pct: number | null }[];
+  por_agente: { extension: string; nombre: string; atendidas: number; espera_promedio_s: number | null; conversacion_promedio_s: number | null }[];
+}
+
+const seg = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v)} s`);
+
+/** Llamadas que entraron a grupos de atención (services/reportes.entrantes). */
+function Entrantes({ d }: { d: ReporteEntrantes }) {
+  const [hora, setHora] = useState<number | null>(null);
+  if (!d.total.ofrecidas)
+    return (
+      <Card>
+        <EmptyState
+          title="Sin llamadas a grupos de atención en el rango"
+          hint="Aquí se ven las llamadas que entran a un grupo (Ventas, Soporte…): cuántas se atienden a tiempo, cuántas cuelgan esperando y cuánto esperan."
+        />
+      </Card>
+    );
+  const t = d.total;
+  const max = Math.max(1, ...d.por_hora.map((h) => h.ofrecidas));
+  const conDatos = d.por_hora.filter((h) => h.ofrecidas > 0);
+  const desde = conDatos.length ? conDatos[0].hora : 0;
+  const hasta = conDatos.length ? conDatos[conDatos.length - 1].hora : 23;
+  const visibles = d.por_hora.filter((h) => h.hora >= desde && h.hora <= hasta);
+  const elegida = hora == null ? null : d.por_hora[hora];
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          label={`Atendidas antes de ${d.umbral_s} s`}
+          value={pct(t.nivel_servicio_pct)}
+          color="emerald"
+          hint={`${t.atendidas_en_umbral ?? 0} de ${t.ofrecidas} (nivel de servicio)`}
+        />
+        <StatCard label="Colgaron esperando" value={pct(t.abandono_pct)} color="rose" hint={`${t.abandonadas} llamada(s)`} />
+        <StatCard label="Espera media" value={seg(t.espera_promedio_s)} color="sky" hint={`Máxima: ${seg(t.espera_max_s)}`} />
+        <StatCard
+          label="Llamadas a grupos"
+          value={t.ofrecidas}
+          color="violet"
+          hint={`${t.atendidas} atendidas · ${t.desbordadas} pasaron a «si nadie contesta»`}
+        />
+      </div>
+
+      <Card>
+        <CardHeader
+          title="Llamadas por hora del día"
+          subtitle={
+            elegida
+              ? `${String(elegida.hora).padStart(2, "0")}:00 · ${elegida.ofrecidas} llamada(s) · ${elegida.atendidas} atendidas · ${elegida.abandonadas} colgaron · nivel de servicio ${pct(elegida.nivel_servicio_pct)}`
+              : "Pasa el mouse por una barra para ver el detalle. Sirve para saber a qué horas hace falta más gente."
+          }
+        />
+        <div className="px-5 pb-4">
+          <div className="flex h-40 items-end gap-[2px] border-b border-line" role="list" aria-label="Llamadas por hora">
+            {visibles.map((h) => (
+              <div
+                key={h.hora}
+                role="listitem"
+                tabIndex={0}
+                aria-label={`${h.hora}:00, ${h.ofrecidas} llamadas, ${h.abandonadas} colgaron`}
+                onMouseEnter={() => setHora(h.hora)}
+                onMouseLeave={() => setHora(null)}
+                onFocus={() => setHora(h.hora)}
+                onBlur={() => setHora(null)}
+                className="flex h-full flex-1 cursor-default items-end"
+              >
+                <div
+                  className={`w-full rounded-t-[4px] transition-colors ${hora === h.hora ? "bg-brand-text" : "bg-brand"}`}
+                  style={{ height: `${(h.ofrecidas / max) * 100}%`, minHeight: h.ofrecidas ? 2 : 0 }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-1 flex gap-[2px] text-[10px] tabular-nums text-muted">
+            {visibles.map((h) => (
+              <span key={h.hora} className="flex-1 text-center">
+                {h.hora % 2 === 0 || visibles.length <= 12 ? h.hora : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title="Por grupo de atención" subtitle={`Nivel de servicio: atendidas antes de ${d.umbral_s} s, sin contar a quien colgó en menos de 5 s.`} />
+        <Table head={["Grupo", "Llamadas", "Atendidas", "A tiempo", "Colgaron", "Pasaron a «si nadie contesta»", "Espera media", "Espera máx.", "Conversación media"]}>
+          {d.filas.map((f) => (
+            <Tr key={f.cola}>
+              <Td strong>{f.cola}</Td>
+              <Td>{f.ofrecidas}</Td>
+              <Td>{f.atendidas}</Td>
+              <Td>{pct(f.nivel_servicio_pct)}</Td>
+              <Td>
+                {f.abandonadas} <span className="text-xs text-muted">({pct(f.abandono_pct)})</span>
+              </Td>
+              <Td>{f.desbordadas}</Td>
+              <Td>{seg(f.espera_promedio_s)}</Td>
+              <Td>{seg(f.espera_max_s)}</Td>
+              <Td mono>{f.conversacion_promedio_s == null ? "—" : horas(f.conversacion_promedio_s)}</Td>
+            </Tr>
+          ))}
+        </Table>
+      </Card>
+
+      {d.por_agente.length > 0 && (
+        <Card>
+          <CardHeader title="Quién atendió" />
+          <Table head={["Persona", "Extensión", "Atendidas", "Espera media del cliente", "Conversación media"]}>
+            {d.por_agente.map((a) => (
+              <Tr key={a.extension}>
+                <Td strong>{a.nombre}</Td>
+                <Td mono>{a.extension}</Td>
+                <Td>{a.atendidas}</Td>
+                <Td>{seg(a.espera_promedio_s)}</Td>
+                <Td mono>{a.conversacion_promedio_s == null ? "—" : horas(a.conversacion_promedio_s)}</Td>
+              </Tr>
+            ))}
+          </Table>
+        </Card>
+      )}
+    </div>
   );
 }
 

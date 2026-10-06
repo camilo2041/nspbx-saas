@@ -7,6 +7,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { AyudaPantalla } from "@/components/ayuda-pantalla";
 import { AssistantWidget } from "@/components/assistant-widget";
 import { CommandPalette } from "@/components/command-palette";
+import { FichaCliente } from "@/components/ficha-cliente";
 import { FloatingCallWidget } from "@/components/floating-call-widget";
 import { IncomingCallBanner } from "@/components/incoming-call-banner";
 import { ThemeToggle } from "@/components/theme";
@@ -436,6 +437,7 @@ export default function SidebarLayout({ children }: { children: ReactNode }) {
       <SoftphoneProvider>
         <IncomingCallBanner />
         <FloatingCallWidget />
+        <FichaCliente />
         <AssistantWidget />
         <Marco>{children}</Marco>
       </SoftphoneProvider>

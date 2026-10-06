@@ -274,6 +274,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         lead_id=lead_id,
         disposicion_id=disposicion_id,
         abandonada=True if variables.get("nspbx_abandonada") == "true" else None,
+        **datos_de_cola(variables),
     )
     if variables.get("nspbx_buzon_ext"):
         # La llamada terminó en el buzón: no es una «contestada» aunque el
@@ -291,6 +292,43 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     if mensaje is not None:
         asyncio.create_task(buzon.avisar(tenant_id, mensaje.id))
     return {"ok": True}
+
+
+def _epoch(valor) -> int | None:
+    try:
+        n = int(float(valor or 0))
+    except (TypeError, ValueError):
+        return None
+    return n or None
+
+
+def datos_de_cola(variables: dict) -> dict:
+    """Grupo, espera y resultado de una llamada que pasó por mod_callcenter
+    (variables cc_* que deja en la pata del cliente). Vacío si no pasó.
+
+    - atendida: un agente contestó (cc_queue_answered_epoch).
+    - desbordada: se acabó la espera (TIMEOUT / NO_AGENT_TIMEOUT) y siguió al
+      destino de «si nadie contesta».
+    - abandonada: quien llamaba colgó esperando (BREAK_OUT u otra causa).
+    """
+    if (variables.get("cc_side") or "member") != "member":
+        return {}  # la pata del agente también lleva cc_queue: se cuenta una vez
+    cola, _, _ = (variables.get("cc_queue") or "").partition("@")
+    entro = _epoch(variables.get("cc_queue_joined_epoch"))
+    if not cola or not entro or len(cola) > 100:
+        return {}
+    contesto = _epoch(variables.get("cc_queue_answered_epoch"))
+    if contesto:
+        agente = (variables.get("cc_agent") or "").partition("@")[0][:20] or None
+        return {"cola": cola, "cola_espera_s": max(0, contesto - entro), "cola_resultado": "atendida", "cola_agente": agente}
+    salio = (
+        _epoch(variables.get("cc_queue_canceled_epoch"))
+        or _epoch(variables.get("cc_queue_terminated_epoch"))
+        or (_epoch(variables.get("end_epoch")))
+    )
+    motivo = (variables.get("cc_cancel_reason") or "").upper()
+    resultado = "desbordada" if motivo in ("TIMEOUT", "NO_AGENT_TIMEOUT", "EXIT_WITH_KEY") else "abandonada"
+    return {"cola": cola, "cola_espera_s": max(0, (salio or entro) - entro), "cola_resultado": resultado, "cola_agente": None}
 
 
 async def _agente_de_cdr(session: AsyncSession, variables: dict, tenant_id: int, uuid: str):

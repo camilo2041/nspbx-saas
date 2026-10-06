@@ -96,6 +96,17 @@ function Contactos({ campos, gestiona, version }: { campos: CampoContacto[]; ges
   const [nuevo, setNuevo] = useState<DatosContacto | null>(null);
   const [guardando, setGuardando] = useState(false);
 
+  // Desde la ficha de quien llama (components/ficha-cliente.tsx):
+  // ?contacto=<id> abre la ficha; ?nuevo=<teléfono> abre «Nuevo» con el número.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const id = Number(p.get("contacto"));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (id > 0) setAbierto(id);
+    const tel = p.get("nuevo");
+    if (tel && gestiona) setNuevo({ ...contactoVacio, telefono: tel.slice(0, 40) });
+  }, [gestiona]);
+
   const cargar = useCallback(async (busqueda: string, desde: number) => {
     setCargando(true);
     try {

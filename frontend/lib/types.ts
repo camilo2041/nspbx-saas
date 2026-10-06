@@ -1005,7 +1005,7 @@ export interface Cumplimiento {
 export interface ReporteProgramado {
   id: number;
   nombre: string;
-  tipo: "agentes" | "campanas" | "disposiciones" | "cumplimiento";
+  tipo: "agentes" | "campanas" | "disposiciones" | "cumplimiento" | "entrantes";
   frecuencia: "diaria" | "semanal" | "mensual";
   hora: number;
   destinatarios: string;

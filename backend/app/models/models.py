@@ -479,7 +479,10 @@ class CallLog(Base):
     __tablename__ = "call_logs"
     # Reportes por campaña y rango (services/reportes.py). El de empresa y
     # fecha lo crea main._COLUMN_PATCHES desde antes.
-    __table_args__ = (Index("ix_call_logs_campana_inicio", "campaign_id", "started_at"),)
+    __table_args__ = (
+        Index("ix_call_logs_campana_inicio", "campaign_id", "started_at"),
+        Index("ix_call_logs_cola_inicio", "cola", "started_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = _tenant_fk()
@@ -529,6 +532,12 @@ class CallLog(Base):
     disposicion_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # El cliente contestó y no hubo agente a tiempo (predictivo).
     abandonada: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Entró a un grupo de atención (mod_callcenter: variables cc_* del CDR).
+    # Base del reporte de entrantes (services/reportes.entrantes).
+    cola: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    cola_espera_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cola_resultado: Mapped[str | None] = mapped_column(String(12), nullable=True)  # atendida|abandonada|desbordada
+    cola_agente: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     campaign: Mapped["Campaign | None"] = relationship(back_populates="calls")
 
@@ -1439,7 +1448,7 @@ class ReporteProgramado(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = _tenant_fk()
     nombre: Mapped[str] = mapped_column(String(80))
-    tipo: Mapped[str] = mapped_column(String(20))  # agentes|campanas|disposiciones|cumplimiento
+    tipo: Mapped[str] = mapped_column(String(20))  # agentes|campanas|disposiciones|cumplimiento|entrantes
     frecuencia: Mapped[str] = mapped_column(String(10))  # diaria|semanal|mensual
     hora: Mapped[int] = mapped_column(Integer, default=7, server_default="7")  # hora local de envío
     destinatarios: Mapped[str] = mapped_column(Text)

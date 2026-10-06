@@ -129,6 +129,10 @@ def _resumen(tipo: str, datos: dict) -> list[str]:
         return [f"Intentos: {t.get('intentos', 0)}", f"Contestadas: {t.get('contestadas', 0)}",
                 f"Abandono: {t.get('abandono_pct') if t.get('abandono_pct') is not None else '—'} %",
                 f"Conversión: {t.get('conversion_pct') if t.get('conversion_pct') is not None else '—'} %"]
+    if tipo == "entrantes":
+        return [f"Llamadas a grupos: {t.get('ofrecidas', 0)}", f"Atendidas: {t.get('atendidas', 0)}",
+                f"Nivel de servicio ({datos['umbral_s']} s): {t.get('nivel_servicio_pct') if t.get('nivel_servicio_pct') is not None else '—'} %",
+                f"Abandono: {t.get('abandono_pct') if t.get('abandono_pct') is not None else '—'} %"]
     if tipo == "disposiciones":
         return [f"Llamadas dispuestas: {datos['total']}", f"Callbacks cumplidos: {datos['callbacks']['hechos']} de {datos['callbacks']['total']}"]
     return [f"Días con abandono sobre el objetivo: {datos['abandono_incumplido']}",

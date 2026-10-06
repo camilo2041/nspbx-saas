@@ -36,6 +36,7 @@ from app.models import (
     CodigoPausa,
     Disposicion,
     EstadoAgente,
+    Extension,
     Lista,
     MetricaCampana,
     SesionAgente,
@@ -253,6 +254,95 @@ async def campanas(session, r: Rango, campaign_id: int | None = None) -> dict:
     return {"filas": filas, "total": total}
 
 
+# --- Entrantes (grupos de atención) ------------------------------------------------------------
+# Del CDR de cada llamada que pasó por un grupo (api/calls.py:datos_de_cola).
+# Nivel de servicio: atendidas dentro de `umbral_s` sobre las ofrecidas,
+# sin contar los abandonos de menos de ABANDONO_CORTO_S (colgó al instante:
+# número equivocado, no es algo que el grupo pudiera atender).
+
+ABANDONO_CORTO_S = 5
+
+
+async def entrantes(session, r: Rango, umbral_s: int = 20, cola: str | None = None) -> dict:
+    umbral_s = max(1, min(int(umbral_s or 20), 600))
+    filtro = [CallLog.cola.is_not(None), CallLog.started_at >= r.ini, CallLog.started_at < r.fin]
+    if cola:
+        filtro.append(CallLog.cola == cola)
+    atendida = CallLog.cola_resultado == "atendida"
+    abandonada = CallLog.cola_resultado == "abandonada"
+    espera = func.coalesce(CallLog.cola_espera_s, 0)
+    medidas = (
+        func.count(),
+        _cuenta(atendida),
+        _cuenta(atendida & (espera <= umbral_s)),
+        _cuenta(abandonada),
+        _cuenta(abandonada & (espera < ABANDONO_CORTO_S)),
+        _cuenta(CallLog.cola_resultado == "desbordada"),
+        func.coalesce(func.sum(case((atendida, espera), else_=0)), 0),
+        func.max(espera),
+        func.coalesce(func.sum(case((abandonada, espera), else_=0)), 0),
+        func.coalesce(func.sum(case((atendida, CallLog.billsec), else_=0)), 0),
+    )
+
+    def fila(ofrecidas, atendidas, en_umbral, aband, aband_corto, desbordadas, espera_atendidas, espera_max, espera_aband, hablado):
+        base_sl = ofrecidas - aband_corto
+        return {
+            "ofrecidas": ofrecidas, "atendidas": atendidas, "abandonadas": aband, "desbordadas": desbordadas,
+            "atendidas_en_umbral": en_umbral,
+            "nivel_servicio_pct": _pct(en_umbral, base_sl),
+            "atencion_pct": _pct(atendidas, ofrecidas),
+            "abandono_pct": _pct(aband, ofrecidas),
+            "espera_promedio_s": _promedio(float(espera_atendidas), atendidas),
+            "espera_max_s": int(espera_max or 0),
+            "espera_abandono_s": _promedio(float(espera_aband), aband),
+            "conversacion_promedio_s": _promedio(float(hablado), atendidas),
+        }
+
+    por_cola = (await session.execute(select(CallLog.cola, *medidas).where(*filtro).group_by(CallLog.cola))).all()
+    filas = [{"cola": c, **fila(*m)} for c, *m in por_cola]
+    filas.sort(key=lambda f: f["cola"].lower())
+    total_sql = (await session.execute(select(*medidas).where(*filtro))).one()
+    total = fila(*total_sql)
+
+    hora = func.extract("hour", func.timezone(business_tz().key, func.timezone("UTC", CallLog.started_at)))
+    por_hora_sql = (
+        await session.execute(
+            select(hora, func.count(), _cuenta(atendida), _cuenta(abandonada), _cuenta(atendida & (espera <= umbral_s)))
+            .where(*filtro)
+            .group_by(hora)
+        )
+    ).all()
+    horas = {int(h): (n, a, ab, u) for h, n, a, ab, u in por_hora_sql}
+    por_hora = [
+        {"hora": h, "ofrecidas": horas.get(h, (0, 0, 0, 0))[0], "atendidas": horas.get(h, (0, 0, 0, 0))[1],
+         "abandonadas": horas.get(h, (0, 0, 0, 0))[2],
+         "nivel_servicio_pct": _pct(horas[h][3], horas[h][0]) if h in horas else None}
+        for h in range(24)
+    ]
+
+    por_agente_sql = (
+        await session.execute(
+            select(CallLog.cola_agente, func.count(), func.sum(espera), func.sum(CallLog.billsec))
+            .where(*filtro, atendida, CallLog.cola_agente.is_not(None))
+            .group_by(CallLog.cola_agente)
+        )
+    ).all()
+    nombres = dict(
+        (await session.execute(select(Extension.number, Extension.caller_id_name).where(
+            Extension.number.in_([a for a, *_ in por_agente_sql] or ["-"])
+        ))).all()
+    )
+    por_agente = sorted(
+        (
+            {"extension": a, "nombre": nombres.get(a) or a, "atendidas": n,
+             "espera_promedio_s": _promedio(float(e or 0), n), "conversacion_promedio_s": _promedio(float(h or 0), n)}
+            for a, n, e, h in por_agente_sql
+        ),
+        key=lambda f: -f["atendidas"],
+    )
+    return {"umbral_s": umbral_s, "filas": filas, "total": total, "por_hora": por_hora, "por_agente": por_agente}
+
+
 # --- Disposiciones -----------------------------------------------------------------------------
 
 AGRUPAR = ("campana", "agente", "lista")
@@ -445,6 +535,12 @@ COLUMNAS = {
         ("telefono", "Teléfono"), ("semana", "Semana"), ("intentos", "Intentos"), ("contestadas", "Contestadas"),
         ("campanas", "Campañas"),
     ],
+    "entrantes": [
+        ("cola", "Grupo"), ("ofrecidas", "Ofrecidas"), ("atendidas", "Atendidas"), ("abandonadas", "Abandonadas"),
+        ("desbordadas", "Desbordadas"), ("nivel_servicio_pct", "Nivel de servicio %"), ("atencion_pct", "Atención %"),
+        ("abandono_pct", "Abandono %"), ("espera_promedio_s", "Espera media (s)"), ("espera_max_s", "Espera máxima (s)"),
+        ("espera_abandono_s", "Espera antes de colgar (s)"), ("conversacion_promedio_s", "Conversación media (s)"),
+    ],
     "fuera_de_horario": [("fecha", "Fecha"), ("campana", "Campaña"), ("telefono", "Teléfono"), ("agente_id", "Agente")],
 }
 
@@ -457,6 +553,8 @@ async def generar(session, tipo: str, r: Rango, **filtros) -> dict:
         return await campanas(session, r, filtros.get("campaign_id"))
     if tipo == "disposiciones":
         return await disposiciones(session, r, filtros.get("agrupar") or "campana", filtros.get("campaign_id"))
+    if tipo == "entrantes":
+        return await entrantes(session, r, filtros.get("umbral_s") or 20, filtros.get("cola"))
     if tipo == "cumplimiento":
         return await cumplimiento(session, r, filtros.get("max_contactos_semana") or 1, filtros.get("solo_cobranza", True))
     raise RangoInvalido("Reporte desconocido")
@@ -472,5 +570,5 @@ def csv_de(tipo: str, datos: dict, seccion: str | None = None) -> str:
     return a_csv(datos["filas"], COLUMNAS[tipo])
 
 
-TIPOS = ("agentes", "campanas", "disposiciones", "cumplimiento")
+TIPOS = ("agentes", "campanas", "disposiciones", "cumplimiento", "entrantes")
 

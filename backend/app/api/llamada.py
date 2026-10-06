@@ -2,7 +2,7 @@
 transferirla (ver services/transferencias.py). Siempre sobre la llamada
 PROPIA: el usuario solo actúa sobre su extensión o su sesión de agente."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,7 @@ from app.core import permissions
 from app.core.auth import requiere
 from app.core.database import get_session
 from app.models import User
-from app.services import transferencias
+from app.services import ficha as ficha_svc, transferencias
 
 router = APIRouter(prefix="/api/llamada", tags=["llamada"])
 
@@ -63,3 +63,13 @@ async def cancelar(session: AsyncSession = Depends(get_session), usuario: User =
 @router.post("/transferencia/conferencia")
 async def conferencia(session: AsyncSession = Depends(get_session), usuario: User = _USUARIO):
     return await _hacer(transferencias.unir_a_los_tres(session, usuario))
+
+
+@router.get("/ficha")
+async def ficha(
+    numero: str = Query(min_length=1, max_length=40),
+    session: AsyncSession = Depends(get_session),
+    usuario: User = _USUARIO,
+):
+    """Quién llama: la ficha del CRM, sus últimas notas y llamadas."""
+    return await ficha_svc.ficha(session, numero, usuario)

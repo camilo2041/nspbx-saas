@@ -20,7 +20,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from app.core.clock import business_tz
 from app.core.config import settings
@@ -148,7 +148,117 @@ async def detectar(session, ahora: datetime | None = None) -> list[tuple[int, st
     return hallazgos
 
 
+# --- Operación: lo que hace que la central deje de atender ----------------------------------
+# Mismo canal que las de fraude (security_alerts, webhook) y, además, correo a
+# los administradores de la empresa: a quien no mira el panel le llega igual.
+
+LICENCIA_DIAS_AVISO = 7
+ABANDONO_VENTANA = timedelta(minutes=30)
+ABANDONO_MIN_LLAMADAS = 5
+ABANDONO_PCT = 30
+# Estados de un gateway de sofia que significan «no está conectado».
+_GATEWAY_CAIDO = ("FAIL_WAIT", "FAILED", "UNREGED", "NOAVAIL", "DOWN")
+# Silencio propio por tipo (el resto usa SILENCIO).
+SILENCIO_POR_TIPO = {"licencia_vence": timedelta(hours=24), "licencia_vencida": timedelta(hours=24)}
+
+TITULOS = {
+    "pico": "Pico de llamadas salientes",
+    "madrugada": "Llamadas salientes de madrugada",
+    "destino_nuevo": "Destino internacional nuevo",
+    "cupo": "Cerca del cupo diario de minutos",
+    "troncal_caida": "Proveedor de telefonía desconectado",
+    "licencia_vence": "La licencia está por vencer",
+    "licencia_vencida": "La licencia venció",
+    "abandono_alto": "Muchas llamadas colgaron esperando",
+}
+
+
+async def detectar_operacion(session, ahora: datetime | None = None) -> list[tuple[int, str, str]]:
+    from app.models import Trunk
+    from app.services import esl
+    from app.services.gateways import nombre_gateway
+
+    ahora = ahora or datetime.utcnow()
+    hallazgos: list[tuple[int, str, str]] = []
+    empresas = {t.id: t for t in (await session.execute(select(Tenant).where(Tenant.enabled.is_(True)))).scalars().all()}
+
+    # Licencia por vencer o vencida (sin licencia vigente no se puede guardar nada).
+    for lic in (await session.execute(select(License).where(License.tenant_id.in_(list(empresas) or [0])))).scalars().all():
+        if lic.expires_at is None:
+            continue
+        if lic.expires_at <= ahora:
+            hallazgos.append((lic.tenant_id, "licencia_vencida",
+                              "La licencia venció: no se pueden guardar cambios hasta renovarla"))
+        elif lic.expires_at <= ahora + timedelta(days=LICENCIA_DIAS_AVISO):
+            dias = max(1, (lic.expires_at - ahora).days)
+            hallazgos.append((lic.tenant_id, "licencia_vence", f"La licencia vence en {dias} día(s)"))
+
+    # Proveedor de telefonía desconectado (solo las troncales que registran).
+    troncales = (
+        await session.execute(
+            select(Trunk).where(Trunk.enabled.is_(True), Trunk.register_enabled.is_(True),
+                                Trunk.tenant_id.in_(list(empresas) or [0]))
+        )
+    ).scalars().all()
+    for t in troncales:
+        try:
+            estado = (await esl.gateway_status(nombre_gateway(t.name, empresas[t.tenant_id].slug))).get("state")
+        except Exception:
+            # Sin FreeSWITCH no se sabe: no se alerta por eso (lo ve la plataforma).
+            continue
+        if estado in _GATEWAY_CAIDO:
+            hallazgos.append((t.tenant_id, "troncal_caida",
+                              f"El proveedor «{t.name}» no está conectado ({estado}): no entran ni salen llamadas por él"))
+
+    # Muchos colgando en la fila de un grupo en la última media hora.
+    filas = (
+        await session.execute(
+            select(CallLog.tenant_id, CallLog.cola, func.count(),
+                   func.sum(case((CallLog.cola_resultado == "abandonada", 1), else_=0)))
+            .where(CallLog.cola.is_not(None), CallLog.started_at >= ahora - ABANDONO_VENTANA)
+            .group_by(CallLog.tenant_id, CallLog.cola)
+        )
+    ).all()
+    for tid, cola, n, abandonadas in filas:
+        abandonadas = int(abandonadas or 0)
+        if n >= ABANDONO_MIN_LLAMADAS and 100 * abandonadas >= ABANDONO_PCT * n:
+            hallazgos.append((tid, "abandono_alto",
+                              f"Grupo «{cola}»: {abandonadas} de {n} llamadas colgaron esperando en la última media hora"))
+    return hallazgos
+
+
+async def _correo(alerta: SecurityAlert, empresa: str) -> None:
+    """A los administradores de la empresa con correo (si hay SMTP)."""
+    from app.core import permissions
+    from app.core.database import async_session
+    from app.models import User
+    from app.services import reportes_programados
+
+    if not reportes_programados.correo_configurado():
+        return
+    async with async_session() as session:
+        para = [
+            e for (e,) in (
+                await session.execute(
+                    select(User.email).where(User.tenant_id == alerta.tenant_id, User.role == permissions.ADMIN,
+                                             User.enabled.is_(True), User.email.is_not(None))
+                )
+            ).all() if e and "@" in e
+        ]
+    if not para:
+        return
+    titulo = TITULOS.get(alerta.kind, "Aviso de la central")
+    try:
+        await reportes_programados.enviar_correo(
+            para, f"[NSPBX] {titulo}",
+            f"{empresa}: {alerta.detail}\n\nLo ves también en el panel, en el Inicio (Avisos).", [],
+        )
+    except Exception as exc:
+        logger.warning("No se pudo enviar la alerta por correo: %s", exc)
+
+
 async def _avisar(alerta: SecurityAlert, empresa: str) -> None:
+    await _correo(alerta, empresa)
     if not settings.alertas_webhook_url:
         return
     texto = f"[NSPBX] {empresa}: {alerta.detail}"
@@ -170,15 +280,22 @@ async def revisar(session, ahora: datetime | None = None) -> list[SecurityAlert]
     SILENCIO) y avisa. Devuelve las alertas creadas."""
     ahora = ahora or datetime.utcnow()
     hallazgos = await detectar(session, ahora)
+    try:
+        hallazgos += await detectar_operacion(session, ahora)
+    except Exception:
+        logger.exception("No se pudieron revisar las alertas de operación")
     if not hallazgos:
         return []
+    mas_largo = max([SILENCIO, *SILENCIO_POR_TIPO.values()])
     recientes = {
         (tid, kind)
-        for tid, kind in (
+        for tid, kind, cuando in (
             await session.execute(
-                select(SecurityAlert.tenant_id, SecurityAlert.kind).where(SecurityAlert.created_at >= ahora - SILENCIO)
+                select(SecurityAlert.tenant_id, SecurityAlert.kind, SecurityAlert.created_at)
+                .where(SecurityAlert.created_at >= ahora - mas_largo)
             )
         ).all()
+        if cuando >= ahora - SILENCIO_POR_TIPO.get(kind, SILENCIO)
     }
     nombres = {t.id: t.name for t in (await session.execute(select(Tenant))).scalars().all()}
     creadas = []
@@ -189,7 +306,7 @@ async def revisar(session, ahora: datetime | None = None) -> list[SecurityAlert]
         alerta = SecurityAlert(tenant_id=tid, kind=kind, detail=detalle, created_at=ahora)
         session.add(alerta)
         creadas.append(alerta)
-        logger.warning("ALERTA de tráfico saliente en %s: %s", nombres.get(tid, tid), detalle)
+        logger.warning("ALERTA (%s) en %s: %s", kind, nombres.get(tid, tid), detalle)
     await session.commit()
     for alerta in creadas:
         await _avisar(alerta, nombres.get(alerta.tenant_id, str(alerta.tenant_id)))

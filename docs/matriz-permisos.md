@@ -146,6 +146,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | POST | `/api/integraciones/webhooks/{webhook_id}/rotar-secreto` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/llamada/destinos` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
 | POST | `/api/llamada/espera` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| GET | `/api/llamada/ficha` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
 | POST | `/api/llamada/transferencia/cancelar` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
 | POST | `/api/llamada/transferencia/completar` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
 | POST | `/api/llamada/transferencia/conferencia` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
@@ -183,6 +184,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/reportes/campanas` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/reportes/cumplimiento` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/reportes/disposiciones` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/reportes/entrantes` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/reportes/programados` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | POST | `/api/reportes/programados` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | DELETE | `/api/reportes/programados/{programado_id}` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
