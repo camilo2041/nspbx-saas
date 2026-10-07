@@ -90,7 +90,8 @@ async def test_sin_contestar_va_al_buzon_solo_si_la_extension_lo_tiene(cliente, 
     directo = ctx.find("extension[@name='nspbx_buzon_directo']")
     exp = directo.find("condition").get("expression")
     assert exp.startswith(r"^\*99(") and "4701" in exp and "4702" not in exp
-    assert directo.find(".//action[@application='set']").get("data") == "nspbx_buzon_ext=$1"
+    sets = [a.get("data") for a in directo.iter("action") if a.get("application") == "set"]
+    assert f"nspbx_tenant_id={mundo.alfa.id}" in sets and "nspbx_buzon_ext=$1" in sets
 
     # «No molestar» también deja mensaje si hay buzón.
     dnd = ctx.find("extension[@name='nspbx_dnd_cortar']")

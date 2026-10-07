@@ -21,6 +21,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { AuditTable } from "@/components/audit-table";
+import { PruebaHumo } from "@/components/prueba-humo";
 import { AvisosCsp } from "@/components/avisos-csp";
 import { ConsumoMensual } from "@/components/consumo-mensual";
 import { MoverEmpresa, ServidoresFreeswitch, nombreServidor } from "@/components/servidores-freeswitch";
@@ -117,6 +118,7 @@ export default function EmpresasPage() {
   // Servidores FreeSWITCH (docs/escala.md §4).
   const [nodos, setNodos] = useState<NodoFreeswitch[]>([]);
   const [moverEmpresa, setMoverEmpresa] = useState<Empresa | null>(null);
+  const [probarEmpresa, setProbarEmpresa] = useState<Empresa | null>(null);
 
   const abrirLicencia = (e: Empresa) => {
     const lic = e.licencia;
@@ -559,6 +561,9 @@ export default function EmpresasPage() {
                       <Button size="sm" variant="ghost" onClick={() => cerrarSesionesEmpresa(e)} title="Saca a todos sus usuarios de todos sus equipos">
                         Cerrar sesiones
                       </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setProbarEmpresa(e)} title="Llamadas de prueba dentro de su central">
+                        Probar la central
+                      </Button>
                       <Button size="sm" variant="secondary" onClick={() => abrirEditar(e)}>
                         Editar
                       </Button>
@@ -728,6 +733,7 @@ export default function EmpresasPage() {
           </div>
         </div>
       </Modal>
+      <PruebaHumo empresa={probarEmpresa} onCerrar={() => setProbarEmpresa(null)} />
       <MoverEmpresa empresa={moverEmpresa} nodos={nodos} onCerrar={() => setMoverEmpresa(null)} onCambio={load} />
       <ConsumoMensual plataforma />
       <AvisosCsp />

@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
-from app.services import buzon, deepgram, llm, sin_ruta, tiempos_llamada
+from app.services import buzon, deepgram, humo, llm, sin_ruta, tiempos_llamada
 from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
@@ -295,7 +295,8 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     except Exception:
         await session.rollback()  # carrera con otro POST del mismo uuid
         return {"ok": True}
-    if mensaje is not None:
+    # La prueba de humo (services/humo.py) deja mensajes de prueba: sin correo.
+    if mensaje is not None and not (caller or "").startswith(humo.PREFIJO):
         asyncio.create_task(buzon.avisar(tenant_id, mensaje.id))
     return {"ok": True}
 

@@ -141,6 +141,9 @@ def _acciones_buzon(condition: ET.Element, tenant_id: int, extension: str) -> No
     mismo aislamiento y el backend ya sabe servirlo."""
     carpeta = f"$${{recordings_dir}}/{carpeta_grabaciones(tenant_id)}/buzon/{extension}"
     ET.SubElement(condition, "action", attrib={"application": "answer"})
+    # La empresa explícita en el CDR: una llamada que entra directo al contexto
+    # (loopback, la prueba de humo) no trae el dominio de una ruta entrante.
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": f"nspbx_tenant_id={int(tenant_id)}"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": f"nspbx_buzon_ext={extension}"})
     ET.SubElement(
         condition,

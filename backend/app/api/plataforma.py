@@ -142,6 +142,29 @@ async def alertas_de_todas(session: AsyncSession = Depends(get_admin_session)):
     ]
 
 
+class PruebaHumo(BaseModel):
+    tenant_id: int
+    buzon: str | None = None
+    grupo: str | None = None
+
+
+@router.post("/humo")
+async def prueba_de_humo(datos: PruebaHumo, usuario: User = Depends(usuario_actual)):
+    """Llamadas de prueba dentro de la central de la empresa (services/humo.py).
+    Tarda hasta un par de minutos."""
+    from app.services import humo
+
+    for valor in (datos.buzon, datos.grupo):
+        if valor and not valor.isdigit():
+            raise HTTPException(status_code=422, detail="La extensión y el grupo son números")
+    try:
+        resultado = await humo.probar(datos.tenant_id, datos.buzon, datos.grupo)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    logger.info("Prueba de humo de %s por %s: %s", resultado["empresa"], usuario.username, "ok" if resultado["ok"] else "con fallos")
+    return resultado
+
+
 @router.get("/sin-ruta")
 async def numeros_sin_ruta(session: AsyncSession = Depends(get_admin_session)):
     """Números a los que entran llamadas por una troncal sin ninguna ruta de
