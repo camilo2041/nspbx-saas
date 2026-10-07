@@ -479,3 +479,88 @@ async def test_mensaje_nuevo_se_transcribe_y_avisa_al_celular(mundo, monkeypatch
             a = await ajustes_de(s, mundo.alfa.id)
             a.deepgram_api_key = None
             await s.commit()
+
+
+# --- G5: festivos y fechas especiales ------------------------------------------------------------
+
+from datetime import date as fecha_dia  # noqa: E402
+
+from app.models import FechaEspecial, SystemSettings  # noqa: E402
+from app.services import festivos, horario_marcacion  # noqa: E402
+
+_HORARIO = '{"mon": ["08:00", "18:00"], "tue": ["08:00", "18:00"], "wed": ["08:00", "18:00"], "thu": ["08:00", "18:00"], "fri": ["08:00", "18:00"]}'
+
+
+@pytest.fixture
+async def calendario(mundo):
+    yield
+    async with async_session() as s:
+        from .conftest import FECHA_ESPECIAL_SEMBRADA
+
+        await s.execute(delete(FechaEspecial).where(FechaEspecial.fecha != FECHA_ESPECIAL_SEMBRADA))
+        await s.execute(update(SystemSettings).values(festivos_cerrado=False))
+        await s.commit()
+    festivos.invalidar()
+    festivos._CACHE.clear()
+
+
+async def test_festivos_y_fechas_especiales(cliente, mundo, calendario):
+    cab = mundo.alfa.cabeceras(permissions.ADMIN)
+    cal = (await cliente.get("/api/festivos", headers=cab)).json()
+    assert cal["cerrar_festivos"] is False and len(cal["nacionales"]) == 8
+    assert (await cliente.put("/api/festivos", headers=cab, json={"cerrar_festivos": True})).status_code == 200
+    r = await cliente.post("/api/festivos/especiales", headers=cab,
+                           json={"fecha": "2026-12-24", "nombre": "Nochebuena", "franja": "08:00-12:00"})
+    assert r.status_code == 201
+    assert (await cliente.post("/api/festivos/especiales", headers=cab,
+                               json={"fecha": "2026-12-24", "nombre": "Otra"})).status_code == 409
+    assert (await cliente.post("/api/festivos/especiales", headers=cab,
+                               json={"fecha": "2026-12-30", "nombre": "Mala", "franja": "8 a 12"})).status_code == 422
+    await cliente.post("/api/festivos/especiales", headers=cab, json={"fecha": "2026-11-27", "nombre": "Inventario"})
+    # Otra empresa no ve ni toca las de alfa.
+    beta = (await cliente.get("/api/festivos", headers=mundo.beta.cabeceras(permissions.ADMIN))).json()
+    assert [f["nombre"] for f in beta["especiales"]] == [f"Cierre {mundo.beta.marca}"] and beta["cerrar_festivos"] is False
+    assert (await cliente.delete(f"/api/festivos/especiales/{r.json()['id']}",
+                                 headers=mundo.beta.cabeceras(permissions.ADMIN))).status_code == 404
+    # Un asesor no administra el calendario.
+    assert (await cliente.get("/api/festivos", headers=mundo.alfa.cabeceras(permissions.ASESOR))).status_code == 403
+
+    await festivos.refrescar(forzar=True)
+    a, b = mundo.alfa.id, mundo.beta.id
+    martes = datetime(2026, 11, 24, 10, 0)  # día hábil normal
+    festivo = datetime(2026, 12, 8, 10, 0)  # Inmaculada Concepción, martes
+    assert festivos.abierto(_HORARIO, a, martes) is True
+    assert festivos.abierto(_HORARIO, a, festivo) is False and festivos.abierto(_HORARIO, b, festivo) is True
+    # Sin horario es 24/7: el festivo no lo cierra.
+    assert festivos.abierto(None, a, festivo) is True
+    # Fecha cerrada todo el día y con franja.
+    assert festivos.abierto(_HORARIO, a, datetime(2026, 11, 27, 10, 0)) is False
+    assert festivos.abierto(_HORARIO, a, datetime(2026, 12, 24, 10, 0)) is True
+    assert festivos.abierto(_HORARIO, a, datetime(2026, 12, 24, 15, 0)) is False
+    assert festivos.motivo_cierre(a, datetime(2026, 11, 27, 10, 0)) == "Inventario"
+
+    # Las campañas: el día cerrado no marca; el 24, solo hasta el mediodía.
+    ajustes = SimpleNamespace(tenant_id=a, campaign_hours_weekdays="07:00-19:00", campaign_hours_saturday="08:00-15:00",
+                              campaign_sundays_holidays=False)
+    assert horario_marcacion.franja(ajustes, None, fecha_dia(2026, 11, 27)) is None
+    desde, hasta = horario_marcacion.franja(ajustes, None, fecha_dia(2026, 12, 24))
+    assert (desde.hour, hasta.hour) == (8, 12)
+    assert horario_marcacion.franja(SimpleNamespace(**{**vars(ajustes), "tenant_id": b}), None, fecha_dia(2026, 11, 27)) is not None
+
+
+async def test_ruta_entrante_cerrada_por_fecha_especial(cliente, mundo, calendario, monkeypatch):
+    from app.models import InboundRoute
+    from app.services import config_generator as cg
+
+    async with async_session() as s:
+        s.add(FechaEspecial(tenant_id=mundo.alfa.id, fecha=fecha_dia(2026, 11, 27), nombre="Inventario"))
+        await s.commit()
+    await festivos.refrescar(forzar=True)
+    ruta = SimpleNamespace(id=1, name="principal", tenant_id=mundo.alfa.id, did_pattern="6015550000", priority=0, enabled=True,
+                           destination_type="extension", destination_value="1000", horario=_HORARIO,
+                           fuera_horario_tipo="voicemail", fuera_horario_valor="1000")
+    monkeypatch.setattr("app.core.clock.now_local", lambda: datetime(2026, 11, 27, 10, 0))
+    publico = ET.Element("context", name="public")
+    cg._append_inbound_routes(publico, [ruta], {mundo.alfa.id: "ctx_alfa"}, {mundo.alfa.id: "alfa.test"})
+    transfer = publico.find(".//extension[@name='did_1_principal']//action[@application='transfer']").get("data")
+    assert transfer == "*991000 XML ctx_alfa"

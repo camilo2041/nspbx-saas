@@ -173,6 +173,14 @@ class Vigia:
 
         ahora = ahora or time.time()
         ahora_utc = datetime.utcnow()
+        # El calendario de las empresas (festivos y fechas especiales) que usa el
+        # marcador de campañas, que también corre en la líder.
+        try:
+            from app.services import festivos
+
+            await festivos.refrescar()
+        except Exception:
+            logger.exception("No se pudo refrescar el calendario de festivos")
         if self._recien_ascendida:
             # Las que quedaron «llamando» de una líder anterior vuelven a la fila.
             self._recien_ascendida = False

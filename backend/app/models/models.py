@@ -440,6 +440,9 @@ class SystemSettings(Base):
     # Salientes de los teléfonos solo en horario laboral (opcional). Fuera de
     # él, solo las extensiones con `outbound_after_hours` (ver salientes.py).
     outbound_hours_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Los festivos de Colombia cuentan como «cerrado» en las rutas entrantes,
+    # el bloque Horario del IVR y el widget web que tienen horario (services/festivos.py).
+    festivos_cerrado: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     outbound_hours_weekdays: Mapped[str] = mapped_column(String(11), default="07:00-19:00", server_default="07:00-19:00")
     outbound_hours_saturday: Mapped[str] = mapped_column(String(11), default="08:00-13:00", server_default="08:00-13:00")
     outbound_hours_sundays_holidays: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
@@ -1637,3 +1640,18 @@ class Devolucion(Base):
     proximo_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # no antes de esto (reintento)
     hecha_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     detalle: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
+class FechaEspecial(Base):
+    """Un día con horario distinto en la empresa: cierre por inventario, 24
+    y 31 de diciembre… (services/festivos.py). `franja` vacía = cerrado todo
+    el día; «08:00-12:00» = abierto solo en esa franja."""
+
+    __tablename__ = "fechas_especiales"
+    __table_args__ = (UniqueConstraint("tenant_id", "fecha", name="ux_fechas_especiales_tenant_fecha"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    fecha: Mapped[date] = mapped_column(Date, index=True)
+    nombre: Mapped[str] = mapped_column(String(80))
+    franja: Mapped[str | None] = mapped_column(String(11), nullable=True)

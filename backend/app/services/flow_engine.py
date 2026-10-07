@@ -124,6 +124,7 @@ def build_voicebot_flow_routes(
     flow = parse_flow(bot.flow_json)
     if not flow:
         return False
+    flow["_tenant_id"] = tenant_id  # para el calendario de la empresa (festivos) en los nodos «Horario»
     nodes_by_id = {str(n["id"]): n for n in flow["nodes"]}  # parse_flow ya garantiza que todos traen id seguro
     start = _start_node(flow)
     if not start:
@@ -287,9 +288,9 @@ def siguiente_por_horario(nodo: dict, flow: dict, nodes_by_id: dict, ahora=None)
     «cerrado». El dialplan se pide en cada llamada (xml_curl), así que basta
     mirar la hora al generarlo, como las rutas entrantes con horario."""
     from app.core.clock import now_local
-    from app.services import webcall
+    from app.services import festivos
 
-    abierto = webcall.is_open(nodo.get("data", {}).get("horario") or None, ahora or now_local())
+    abierto = festivos.abierto(nodo.get("data", {}).get("horario") or None, flow.get("_tenant_id"), ahora or now_local())
     salida = "abierto" if abierto else "cerrado"
     for e in flow["edges"]:
         if str(e.get("source")) == str(nodo["id"]) and str(e.get("sourceHandle", "")) == salida:

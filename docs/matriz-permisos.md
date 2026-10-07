@@ -143,6 +143,10 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/extensions/{extension_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | PUT | `/api/extensions/{extension_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/extensions/{extension_id}/call` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/festivos` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| PUT | `/api/festivos` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| POST | `/api/festivos/especiales` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| DELETE | `/api/festivos/especiales/{fecha_id}` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/inbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/inbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | DELETE | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |

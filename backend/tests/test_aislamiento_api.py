@@ -49,6 +49,7 @@ _RECURSO_POR_PARAMETRO = {
     "programado_id": "reporte_programado",
     "mensaje_id": "mensaje_buzon",
     "devolucion_id": "devolucion",
+    "fecha_id": "fecha_especial",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por

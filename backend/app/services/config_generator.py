@@ -941,7 +941,7 @@ def _append_inbound_routes(
     # robaba TODAS las llamadas entrantes, sin ningún error visible.
     ordered = sorted((r for r in routes if r.enabled), key=lambda r: (_es_comodin(r), r.priority, r.id))
     from app.core.clock import now_local
-    from app.services import webcall
+    from app.services import festivos
 
     ahora = now_local()
     exactas: list[tuple] = []
@@ -959,7 +959,7 @@ def _append_inbound_routes(
         # Horario de atención: el dialplan se arma en cada llamada (xml_curl),
         # así que basta mirar la hora de ahora.
         horario = getattr(route, "horario", None)
-        if horario and not webcall.is_open(horario, ahora):
+        if horario and not festivos.abierto(horario, route.tenant_id, ahora):
             tipo, valor = getattr(route, "fuera_horario_tipo", None) or "hangup", getattr(route, "fuera_horario_valor", None)
             if tipo != "hangup" and not validacion.destino_valido(tipo, valor):
                 tipo, valor = "hangup", None

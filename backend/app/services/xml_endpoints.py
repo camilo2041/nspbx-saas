@@ -154,6 +154,9 @@ async def fs_dialplan(session: AsyncSession = Depends(get_admin_session)):
     contexto `public` de entrantes. Misma razón que el directorio para la
     sesión del dueño: FreeSWITCH necesita la config de todas las empresas
     para enrutar entre ellas."""
+    from app.services import festivos
+
+    await festivos.refrescar()
     extensions = (await session.execute(select(Extension).where(Extension.enabled.is_(True)))).scalars().all()
     bots = (await session.execute(select(VoiceBot).where(VoiceBot.enabled.is_(True)))).scalars().all()
     trunks = (await session.execute(select(Trunk).where(Trunk.enabled.is_(True)).order_by(Trunk.id))).scalars().all()
