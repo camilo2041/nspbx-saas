@@ -287,6 +287,11 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         # canal se haya contestado para grabar el mensaje.
         call.status = "voicemail"
     session.add(call)
+    if variables.get("nspbx_pide_devolucion"):
+        # Marcó 1 en la fila: se anota para devolverle la llamada (services/vigia_colas.py).
+        from app.services import vigia_colas
+
+        await vigia_colas.anotar(session, variables, tenant_id, caller)
     mensaje = None
     if variables.get("nspbx_buzon_ext"):
         mensaje = await buzon.registrar(session, variables, tenant_id, uuid, caller, call.caller_name)

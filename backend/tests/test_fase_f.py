@@ -14,7 +14,7 @@ from app.core import cupos, permissions
 from app.core.config import settings
 from app.core.database import async_session
 from app.models import CallLog, CupoUso, MensajeBuzon, NumeroSinRuta, Queue, SecurityAlert, VoiceBot
-from app.services import alertas, esl, posicion_colas, sin_ruta, tts, voice_prompts
+from app.services import alertas, esl, posicion_colas, sin_ruta, tts, vigia_colas, voice_prompts
 from app.workers.maintenance import MaintenanceWorker
 
 from .conftest import FS_SECRET
@@ -109,14 +109,14 @@ def avisos_de_voz(tmp_path, monkeypatch):
 
 
 def test_audio_de_la_posicion(avisos_de_voz):
-    assert posicion_colas.audio_de(1) == (
+    assert vigia_colas.audio_de(1, False) == (
         f"file_string://{voice_prompts.FS_SIDE_SOUNDS_DIR}/prompts/cola_aviso.wav"
         f"!{voice_prompts.FS_SIDE_SOUNDS_DIR}/prompts/cola_delante_1.wav"
     )
     # Más de nueve: la frase «más de nueve» (acá, la de edge-tts en MP3).
-    assert posicion_colas.audio_de(12).endswith("/prompts/cola_delante_mas.mp3")
+    assert vigia_colas.audio_de(12, False).endswith("/prompts/cola_delante_mas.mp3")
     # Sin la frase de la posición, al menos «gracias por esperar».
-    assert posicion_colas.audio_de(5) == f"{voice_prompts.FS_SIDE_SOUNDS_DIR}/prompts/cola_aviso.wav"
+    assert vigia_colas.audio_de(5, False) == f"{voice_prompts.FS_SIDE_SOUNDS_DIR}/prompts/cola_aviso.wav"
 
 
 @pytest.fixture
@@ -140,22 +140,28 @@ async def test_anuncia_la_posicion_cada_tanto(monkeypatch, mundo, grupo_con_posi
         return _MIEMBROS if cmd.startswith("callcenter_config") else "+OK"
 
     monkeypatch.setattr(esl, "api", api)
-    a = posicion_colas.Anunciador()
+    a = vigia_colas.Vigia()
+
+    class Ciclo:
+        async def __call__(self, ahora):
+            return (await a.ciclo(ahora=ahora))["avisos"]
+
+    a_ciclo = Ciclo()
     # Recién llegados: todavía no (al entrar ya se les dijo).
-    assert await a.ciclo(ahora=1030) == 0
-    assert comandos[0] == (f"callcenter_config queue list members fila_f@{mundo.alfa.dominio}", mundo.alfa.id)
+    assert await a_ciclo(1030) == 0
+    assert (f"callcenter_config queue list members fila_f@{mundo.alfa.dominio}", mundo.alfa.id) in comandos
     # El primero que espera ya pasó PRIMERA_SEG: «eres el siguiente».
     comandos.clear()
-    assert await a.ciclo(ahora=1010 + posicion_colas.PRIMERA_SEG) == 1
+    assert await a_ciclo(1010 + posicion_colas.PRIMERA_SEG) == 1
     difusion = [c for c, _ in comandos if c.startswith("uuid_broadcast")]
     assert difusion == [
         "uuid_broadcast aaaaaaaa-0000-0000-0000-000000000002 file_string://"
         f"{voice_prompts.FS_SIDE_SOUNDS_DIR}/prompts/cola_aviso.wav!{voice_prompts.FS_SIDE_SOUNDS_DIR}/prompts/cola_delante_0.wav aleg"
     ]
     # Al ratito no se repite; a los CADA_SEG, sí (y al segundo le toca «hay una persona»).
-    assert await a.ciclo(ahora=1010 + posicion_colas.PRIMERA_SEG + 5) == 0
+    assert await a_ciclo(1010 + posicion_colas.PRIMERA_SEG + 5) == 0
     comandos.clear()
-    assert await a.ciclo(ahora=1050 + posicion_colas.PRIMERA_SEG + posicion_colas.CADA_SEG) == 2
+    assert await a_ciclo(1050 + posicion_colas.PRIMERA_SEG + posicion_colas.CADA_SEG) == 2
     assert any("000000000003" in c and "cola_delante_1.wav" in c for c, _ in comandos)
     # Lo que no es un uuid nunca llega a un comando.
     assert not any("hupall" in c for c, _ in comandos if c.startswith("uuid_broadcast"))

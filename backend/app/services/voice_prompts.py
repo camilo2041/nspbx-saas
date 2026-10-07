@@ -54,6 +54,9 @@ _TEXTOS = {
     "cola_delante_1": "Hay una persona antes que tú.",
     **{f"cola_delante_{n}": f"Hay {numero_a_palabras(n)} personas antes que tú." for n in range(2, 10)},
     "cola_delante_mas": "Hay más de nueve personas antes que tú. Gracias por esperar.",
+    # Devolución de llamada (services/vigia_colas.py).
+    "cola_devolucion_oferta": "Si prefieres que te devolvamos la llamada sin perder tu turno, marca 1.",
+    "cola_devolucion_ok": "Listo. Te llamaremos a este número apenas te toque. Ya puedes colgar.",
 }
 
 

@@ -30,7 +30,7 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, NodoFreeswitch, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import agentes, esl, integraciones, musica_espera, posicion_colas, predictivo, reportes_programados, supervision, tiempo_real, voice_prompts, xml_endpoints
+from app.services import agentes, esl, integraciones, musica_espera, predictivo, reportes_programados, supervision, tiempo_real, vigia_colas, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
 from app.services.bus import bus
 from app.services.lider import lider
@@ -369,6 +369,8 @@ _TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
     # Calidad de llamadas (revisión 0024)
     "criterios_calidad",
     "evaluaciones_llamada",
+    # Devolución de llamada desde la fila (revisión 0026)
+    "devoluciones",
 ]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
@@ -706,10 +708,10 @@ async def lifespan(app: FastAPI):
         # al reinicio porque vive en la base.
         integraciones.repartidor.start()
         reportes_programados.programador.start()
-        posicion_colas.anunciador.start()
+        vigia_colas.vigia.start()
 
     async def descender() -> None:
-        await posicion_colas.anunciador.stop()
+        await vigia_colas.vigia.stop()
         await reportes_programados.programador.stop()
         await integraciones.repartidor.stop()
         await predictivo.motor.stop()

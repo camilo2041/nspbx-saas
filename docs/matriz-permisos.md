@@ -216,6 +216,9 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | PUT | `/api/supervision/campanas/{campaign_id}/nivel` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
 | POST | `/api/supervision/campanas/{campaign_id}/pausar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
 | POST | `/api/supervision/campanas/{campaign_id}/reanudar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| GET | `/api/supervision/devoluciones` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/supervision/devoluciones/{devolucion_id}/cancelar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| GET | `/api/supervision/grupos` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/supervision/monitoreo` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
 | POST | `/api/supervision/monitoreo/colgar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
 | POST | `/api/supervision/monitoreo/modo` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |

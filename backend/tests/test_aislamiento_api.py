@@ -48,6 +48,7 @@ _RECURSO_POR_PARAMETRO = {
     "entrega_id": "entrega_webhook",
     "programado_id": "reporte_programado",
     "mensaje_id": "mensaje_buzon",
+    "devolucion_id": "devolucion",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por

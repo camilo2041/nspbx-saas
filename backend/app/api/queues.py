@@ -32,6 +32,7 @@ def _out(queue: Queue) -> dict:
         "record": queue.record,
         "failover_extension": queue.failover_extension,
         "announce_position": queue.announce_position,
+        "devolucion": bool(getattr(queue, "devolucion", False)),
         "enabled": queue.enabled,
         "created_at": queue.created_at,
     }

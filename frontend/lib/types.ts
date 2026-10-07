@@ -267,6 +267,7 @@ export interface Queue {
   record: boolean;
   failover_extension: string | null;
   announce_position: boolean;
+  devolucion?: boolean;
   enabled: boolean;
   created_at: string;
 }
@@ -907,6 +908,7 @@ export interface MiMonitoreo {
 
 export interface ResumenWallboard {
   generado_at: string;
+  grupos?: import("@/components/grupos-en-vivo").GrupoEnVivo[];
   empresa?: string;
   agentes: { conectados: number; listos: number; en_llamada: number; en_pausa: number; disposicion: number; pausas_excedidas: number };
   llamadas: { activas: number; timbrando: number; en_espera: number };

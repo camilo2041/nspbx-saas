@@ -732,6 +732,8 @@ class Queue(Base):
     record: Mapped[bool] = mapped_column(Boolean, default=False)
     failover_extension: Mapped[str | None] = mapped_column(String(30), nullable=True)
     announce_position: Mapped[bool] = mapped_column(Boolean, default=False)
+    # «Marca 1 y te devolvemos la llamada sin perder tu turno» (services/vigia_colas.py).
+    devolucion: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -1612,3 +1614,24 @@ class CupoUso(Base):
     clave: Mapped[str] = mapped_column(String(120), primary_key=True)
     ventana: Mapped[int] = mapped_column(BigInteger)  # epoch // duración de la ventana
     conteo: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Devolucion(Base):
+    """Alguien que esperaba en un grupo marcó 1 para que le devolvieran la
+    llamada (services/vigia_colas.py). Cuando le toca y hay un agente libre,
+    la central lo llama y lo pone de primero en la fila."""
+
+    __tablename__ = "devoluciones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    queue_id: Mapped[int | None] = mapped_column(ForeignKey("queues.id", ondelete="SET NULL"), nullable=True, index=True)
+    numero: Mapped[str] = mapped_column(String(30))
+    did: Mapped[str | None] = mapped_column(String(30), nullable=True)  # el número que había marcado
+    # pendiente | llamando | hecha | fallida | cancelada
+    estado: Mapped[str] = mapped_column(String(12), default="pendiente", server_default="pendiente", index=True)
+    intentos: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    pedida_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    proximo_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # no antes de esto (reintento)
+    hecha_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    detalle: Mapped[str | None] = mapped_column(String(200), nullable=True)

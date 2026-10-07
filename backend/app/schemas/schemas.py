@@ -814,6 +814,7 @@ class QueueBase(BaseModel):
     record: bool = False
     failover_extension: Optional[DestinoDesborde] = None
     announce_position: bool = False
+    devolucion: bool = False
     enabled: bool = True
 
 
@@ -835,6 +836,7 @@ class QueueUpdate(BaseModel):
     record: Optional[bool] = None
     failover_extension: Optional[DestinoDesborde] = None
     announce_position: Optional[bool] = None
+    devolucion: Optional[bool] = None
     enabled: Optional[bool] = None
 
 
@@ -855,6 +857,7 @@ class QueueOut(BaseModel):
     record: bool
     failover_extension: Optional[str] = None
     announce_position: bool
+    devolucion: bool = False
     enabled: bool
     created_at: datetime
 

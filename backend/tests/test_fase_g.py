@@ -150,3 +150,173 @@ async def test_mensaje_de_prueba_no_manda_correo(cliente, mundo, monkeypatch):
         async with async_session() as s:
             await s.execute(delete(MensajeBuzon).where(MensajeBuzon.ruta == ruta))
             await s.commit()
+
+
+# --- G2 y G3: vigía de los grupos y devolución de llamada ---------------------------------------
+
+import asyncio  # noqa: E402
+import xml.etree.ElementTree as ET  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from app.models import Devolucion  # noqa: E402
+from app.services import config_generator, vigia_colas, voice_prompts  # noqa: E402
+
+
+def test_dialplan_de_un_grupo_con_devolucion():
+    ctx = ET.Element("context", name="ctx_a")
+    q = SimpleNamespace(id=5, tenant_id=1, name="ventas", extension="8000", enabled=True, announce_position=False,
+                        devolucion=True, failover_extension="*99101")
+    config_generator._append_queue_routes(ctx, [q], "a.test")
+    ext = {e.get("name"): [f"{a.get('application')} {a.get('data')}" for a in e.iter("action")] for e in ctx}
+    assert ext["queue_ventas"][-3:] == [
+        "set cc_exit_keys=1", "callcenter ventas@a.test", "transfer cola_salida_8000_${cc_cancel_reason} XML ctx_a"]
+    assert "set nspbx_pide_devolucion=5" in ext["devolucion_ventas"] and ext["devolucion_ventas"][-1] == "hangup NORMAL_CLEARING"
+    # Sin la tecla, la salida de siempre (el desborde).
+    assert ext["cola_salida_ventas"] == ["transfer *99101 XML ctx_a"]
+    assert "set cc_base_score=100000" in ext["devolver_ventas"] and ext["devolver_ventas"][-1] == "transfer 8000 XML ctx_a"
+    # La tecla 1 lleva a la devolución antes que al desborde.
+    nombres = [e.get("name") for e in ctx]
+    assert nombres.index("devolucion_ventas") < nombres.index("cola_salida_ventas")
+    # Sin devolución, igual que antes.
+    ctx2 = ET.Element("context", name="ctx_a")
+    config_generator._append_queue_routes(ctx2, [SimpleNamespace(**{**vars(q), "devolucion": False})], "a.test")
+    assert [e.get("name") for e in ctx2] == ["queue_ventas"]
+
+
+@pytest.fixture
+async def grupo_devolucion(mundo):
+    async with async_session() as s:
+        q = Queue(tenant_id=mundo.alfa.id, name="devol_g", extension="8712", strategy="ring-all", agents='["1000"]',
+                  enabled=True, devolucion=True, announce_position=True)
+        s.add(q)
+        await s.commit()
+    yield q
+    async with async_session() as s:
+        await s.execute(delete(Devolucion).where(Devolucion.queue_id == q.id))
+        await s.execute(delete(Queue).where(Queue.id == q.id))
+        await s.commit()
+
+
+async def test_el_cdr_anota_la_devolucion(cliente, mundo, grupo_devolucion):
+    from .conftest import FS_SECRET
+
+    async def cdr(numero, uuid):
+        r = await cliente.post(f"/fs/cdr/{FS_SECRET}", json={"variables": {
+            "uuid": uuid, "nspbx_tenant_id": str(mundo.alfa.id), "direction": "inbound", "billsec": "40",
+            "caller_id_number": numero, "sip_req_user": "6015550000", "nspbx_pide_devolucion": str(grupo_devolucion.id),
+        }})
+        assert r.status_code == 200
+
+    await cdr("3005551234", "dv-1")
+    await cdr("3005551234", "dv-2")  # la pidió dos veces: una sola pendiente
+    await cdr("anonymous", "dv-3")  # sin número, no se puede devolver
+    async with async_session() as s:
+        filas = (await s.execute(select(Devolucion).where(Devolucion.queue_id == grupo_devolucion.id))).scalars().all()
+    assert [(d.numero, d.did, d.estado) for d in filas] == [("3005551234", "6015550000", "pendiente")]
+
+
+_AGENTES = "name|status|state|max_no_answer\n1000@x|Available|Waiting|3\n+OK\n"
+
+
+def _miembros(*filas):
+    cab = "queue|instance_id|uuid|session_uuid|cid_number|cid_name|system_epoch|joined_epoch|state|score"
+    return cab + "".join(f"\nq|i|m|{u}|{n}|X|0|{t}|Waiting|0" for u, n, t in filas) + "\n+OK\n"
+
+
+async def test_el_vigia_devuelve_la_llamada_cuando_le_toca(mundo, monkeypatch, grupo_devolucion, tmp_path):
+    monkeypatch.setattr(settings, "fs_sounds_dir", str(tmp_path))
+    (tmp_path / "prompts").mkdir()
+    for k in ("cola_aviso", "cola_delante_0", "cola_devolucion_oferta"):
+        (tmp_path / "prompts" / f"{k}.wav").write_bytes(b"RIFF")
+    import calendar
+
+    pedida = datetime.utcnow()
+    epoch_pedida = calendar.timegm(pedida.timetuple())
+    async with async_session() as s:
+        d = Devolucion(tenant_id=mundo.alfa.id, queue_id=grupo_devolucion.id, numero="3005551234", did="6015550000",
+                       pedida_at=pedida)
+        s.add(d)
+        await s.commit()
+    estado = {"miembros": _miembros(("aaaaaaaa-0000-0000-0000-000000000001", "3001112222", epoch_pedida - 30))}
+    comandos, originados = [], []
+
+    async def api(cmd, tenant_id=None, **kw):
+        comandos.append(cmd)
+        if "list members" in cmd:
+            return estado["miembros"] if "devol_g" in cmd else _miembros()
+        if "list agents" in cmd:
+            return _AGENTES
+        return "+OK"
+
+    async def bgapi_wait(cmd, timeout=40, tenant_id=None):
+        originados.append(cmd)
+        return "+OK uuid"
+
+    monkeypatch.setattr(esl, "api", api)
+    monkeypatch.setattr(esl, "bgapi_wait", bgapi_wait)
+    v = vigia_colas.Vigia()
+
+    # Alguien llegó antes de que la pidiera y sigue esperando: respeta su turno.
+    r = await v.ciclo(ahora=epoch_pedida + 20)
+    assert r["devoluciones"] == 0
+    foto = {g["nombre"]: g for g in v.foto(mundo.alfa.id)}["devol_g"]
+    assert (foto["esperando"], foto["agentes"]["libres"], foto["devoluciones_pendientes"]) == (1, 1, 1)
+    # Al que espera se le ofrece la devolución junto con la posición.
+    difusion = [c for c in comandos if c.startswith("uuid_broadcast")]
+    assert difusion and "cola_devolucion_oferta" in difusion[0] and "cola_delante_0" in difusion[0]
+
+    # Ya no hay nadie antes: la central llama al cliente y lo pone de primero.
+    estado["miembros"] = _miembros()
+    r = await v.ciclo(ahora=epoch_pedida + 60)
+    assert r["devoluciones"] == 1
+    await asyncio.sleep(0.05)
+    assert len(originados) == 1
+    cmd = originados[0]
+    assert f"loopback/3005551234/ctx_{mundo.alfa.slug} devolver_8712_3005551234 XML ctx_{mundo.alfa.slug}" in cmd
+    assert "origination_caller_id_number=6015550000" in cmd and f"nspbx_devolucion_id={d.id}" in cmd
+    async with async_session() as s:
+        hecha = await s.get(Devolucion, d.id)
+    assert (hecha.estado, hecha.intentos) == ("hecha", 1)
+
+
+async def test_devolucion_sin_contestar_se_reintenta_y_falla(mundo, monkeypatch, grupo_devolucion):
+    async with async_session() as s:
+        d = Devolucion(tenant_id=mundo.alfa.id, queue_id=grupo_devolucion.id, numero="3005551234", pedida_at=datetime.utcnow())
+        s.add(d)
+        await s.commit()
+
+    async def api(cmd, tenant_id=None, **kw):
+        return _AGENTES if "list agents" in cmd else _miembros()
+
+    async def bgapi_wait(cmd, timeout=40, tenant_id=None):
+        raise RuntimeError("-ERR NO_ANSWER")
+
+    monkeypatch.setattr(esl, "api", api)
+    monkeypatch.setattr(esl, "bgapi_wait", bgapi_wait)
+    v = vigia_colas.Vigia()
+    for intento in range(1, vigia_colas.INTENTOS_MAX + 1):
+        await v.ciclo()
+        await asyncio.sleep(0.05)
+        async with async_session() as s:
+            fila = await s.get(Devolucion, d.id)
+            if fila.estado == "pendiente":
+                # Espera el reintento; para la prueba, ya.
+                fila.proximo_at = None
+                await s.commit()
+    assert (fila.estado, fila.intentos) == ("fallida", vigia_colas.INTENTOS_MAX) and "NO_ANSWER" in fila.detalle
+
+
+async def test_supervision_ve_grupos_y_devoluciones(cliente, mundo, monkeypatch):
+    vigia_colas.vigia._fotos[mundo.alfa.id] = (__import__("time").monotonic(), [{"id": 1, "nombre": "ventas", "esperando": 2}])
+    try:
+        cab = mundo.alfa.cabeceras(permissions.SUPERVISOR)
+        assert (await cliente.get("/api/supervision/grupos", headers=cab)).json()[0]["esperando"] == 2
+        assert (await cliente.get("/api/supervision/grupos", headers=mundo.beta.cabeceras(permissions.SUPERVISOR))).json() == []
+        resumen = (await cliente.get("/api/supervision/resumen", headers=cab)).json()
+        assert resumen["grupos"][0]["nombre"] == "ventas"
+        dev = (await cliente.get("/api/supervision/devoluciones", headers=cab)).json()
+        mia = next(x for x in dev["lista"] if x["id"] == mundo.alfa.ids["devolucion"])
+        assert mia["estado"] == "pendiente" and dev["cifras"]["pendiente"] >= 1
+        assert all(x["numero"].startswith(mundo.alfa.telefono) for x in dev["lista"])
+    finally:
+        vigia_colas.vigia._fotos.pop(mundo.alfa.id, None)

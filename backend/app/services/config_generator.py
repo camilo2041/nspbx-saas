@@ -748,11 +748,61 @@ def _append_queue_routes(context: ET.Element, queues: list, dominio: str) -> Non
         ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
         if getattr(queue, "announce_position", False):
             _decir_posicion(condition, qkey)
+        if getattr(queue, "devolucion", False):
+            _append_devolucion(context, condition, queue, qkey)
+            continue
         ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})
-        if queue.failover_extension and validacion.DESTINO_RE.fullmatch(queue.failover_extension):
-            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML {context.get('name')}"})
-        else:
-            ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+        _salida_de_cola(condition, queue, context.get("name"))
+
+
+def _salida_de_cola(condition: ET.Element, queue, contexto: str) -> None:
+    """Al salir de la fila sin agente: el desborde o colgar."""
+    if queue.failover_extension and validacion.DESTINO_RE.fullmatch(queue.failover_extension):
+        ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML {contexto}"})
+    else:
+        ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+
+def _append_devolucion(context: ET.Element, condition: ET.Element, queue, qkey: str) -> None:
+    """«Marca 1 y te devolvemos la llamada» (services/vigia_colas.py).
+
+    - En la fila, la tecla 1 saca a quien llama (`cc_exit_keys`) con
+      `cc_cancel_reason=EXIT_WITH_KEY`. Las condiciones del dialplan se
+      evalúan al buscar la extensión, no después de `callcenter`, así que la
+      salida va a `cola_salida_<número>_${cc_cancel_reason}`, que se resuelve
+      al ejecutarse: con la tecla, a la devolución; si no, al desborde.
+    - La devolución confirma, deja `nspbx_pide_devolucion` en el CDR (el
+      backend la anota) y cuelga.
+    - `devolver_<número>_<teléfono>`: por donde entra la llamada que hace la
+      central al devolverla. Muestra al agente el número del cliente y lo pone
+      de primero en la fila (`cc_base_score`).
+    """
+    contexto = context.get("name")
+    numero = re.escape(str(queue.extension))
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": "cc_exit_keys=1"})
+    ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})
+    ET.SubElement(
+        condition, "action",
+        attrib={"application": "transfer", "data": f"cola_salida_{queue.extension}_${{cc_cancel_reason}} XML {contexto}"},
+    )
+
+    pedida = ET.SubElement(context, "extension", attrib={"name": f"devolucion_{queue.name}", "continue": "false"})
+    c = ET.SubElement(pedida, "condition", attrib={"field": "destination_number", "expression": f"^cola_salida_{numero}_EXIT_WITH_KEY$"})
+    ET.SubElement(c, "action", attrib={"application": "set", "data": f"nspbx_tenant_id={int(queue.tenant_id)}"})
+    ET.SubElement(c, "action", attrib={"application": "set", "data": f"nspbx_pide_devolucion={int(queue.id)}"})
+    _decir(c, "cola_devolucion_ok", "Listo. Te llamaremos apenas te toque.")
+    ET.SubElement(c, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+    salida = ET.SubElement(context, "extension", attrib={"name": f"cola_salida_{queue.name}", "continue": "false"})
+    c = ET.SubElement(salida, "condition", attrib={"field": "destination_number", "expression": f"^cola_salida_{numero}_.*$"})
+    _salida_de_cola(c, queue, contexto)
+
+    devolver = ET.SubElement(context, "extension", attrib={"name": f"devolver_{queue.name}", "continue": "false"})
+    c = ET.SubElement(devolver, "condition", attrib={"field": "destination_number", "expression": f"^devolver_{numero}_(\\+?[0-9]{{7,15}})$"})
+    ET.SubElement(c, "action", attrib={"application": "set_profile_var", "data": "caller_id_number=$1"})
+    ET.SubElement(c, "action", attrib={"application": "set_profile_var", "data": "caller_id_name=Devolucion"})
+    ET.SubElement(c, "action", attrib={"application": "set", "data": "cc_base_score=100000"})
+    ET.SubElement(c, "action", attrib={"application": "transfer", "data": f"{queue.extension} XML {contexto}"})
 
 
 def _decir_posicion(condition: ET.Element, qkey: str) -> None:

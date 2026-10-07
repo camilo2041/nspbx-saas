@@ -251,7 +251,7 @@ def test_cola_con_aviso_y_posicion(monkeypatch):
     (carpeta / "cola_aviso.wav").write_bytes(b"RIFF")
     xml = ET.fromstring(queues_sync.build_callcenter_xml([_cola()], {1: "a.test"}))
     params = {p.get("name"): p.get("value") for p in xml.iter("param")}
-    # El aviso periódico lo manda services/posicion_colas.py (con la posición),
+    # El aviso periódico lo manda services/vigia_colas.py (con la posición),
     # no el grupo: sonaría dos veces.
     assert "announce-sound" not in params
     assert params["max-wait-time"] == "60"

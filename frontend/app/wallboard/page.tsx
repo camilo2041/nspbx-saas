@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ESTADOS, reloj } from "@/lib/supervision";
+import { GruposEnVivo } from "@/components/grupos-en-vivo";
 import { PERMISOS, ResumenWallboard } from "@/lib/types";
 
 const CADA_MS = 3000;
@@ -123,6 +124,12 @@ export default function WallboardPage() {
               }
             />
           </div>
+
+          {!!datos.grupos?.length && (
+            <div className="mt-6">
+              <GruposEnVivo grupos={datos.grupos} grande />
+            </div>
+          )}
 
           <div className="mt-6 grid gap-6 xl:grid-cols-[2fr_1fr]">
             <div className="min-w-0 rounded-2xl border border-line bg-surface p-4 sm:p-5">

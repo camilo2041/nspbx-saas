@@ -118,7 +118,7 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
         }
         # «Anunciar posición»: la posición se dice al entrar
         # (config_generator._decir_posicion) y, mientras espera, «Gracias por
-        # esperar» + la posición cada pocos segundos (services/posicion_colas.py).
+        # esperar» + la posición cada pocos segundos (services/vigia_colas.py).
         # Ya no va como announce-sound del grupo: sonaría dos veces.
         if queue.record:
             # queue_t<id>_…: de qué empresa es cada grabación de cola (en la

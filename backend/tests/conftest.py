@@ -77,6 +77,7 @@ from app.core.database import async_session, engine  # noqa: E402
 from app.core.security import crear_token, hash_password  # noqa: E402
 from app.main import _TABLAS_CON_RLS, app, migrar  # noqa: E402
 from app.models import (  # noqa: E402
+    Devolucion,
     AiCallUsage,
     ApiKey,
     Appointment,
@@ -252,7 +253,8 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         tenant_id=tid, extension="1000", call_uuid=f"vm-{marca}", caller_number=f"{telefono}06",
         caller_name=f"Llamante {marca}", ruta=f"/var/lib/freeswitch/recordings/t{tid}/buzon/1000/{marca}.wav", duracion=5,
     )
-    session.add_all([entrega, programado, buzon])
+    devolucion = Devolucion(tenant_id=tid, queue_id=queue.id, numero=f"{telefono}07", pedida_at=datetime.utcnow())
+    session.add_all([entrega, programado, buzon, devolucion])
     await session.flush()
 
     for rol in (permissions.ADMIN, permissions.SUPERVISOR, permissions.ASESOR):
@@ -298,6 +300,7 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         "entrega_webhook": entrega.id,
         "reporte_programado": programado.id,
         "mensaje_buzon": buzon.id,
+        "devolucion": devolucion.id,
     }
     return e
 

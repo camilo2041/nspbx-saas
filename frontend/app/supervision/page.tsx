@@ -22,6 +22,7 @@ import {
   Td,
   Tr,
 } from "@/components/ui";
+import { Devoluciones, GrupoEnVivo, GruposEnVivo } from "@/components/grupos-en-vivo";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { esperarMonitoreo, useSoftphone } from "@/lib/softphone-context";
@@ -66,6 +67,7 @@ export default function SupervisionPage() {
   const [agentes, setAgentes] = useState<AgenteEnVivo[] | null>(null);
   const [campanas, setCampanas] = useState<CampanaEnVivo[] | null>(null);
   const [monitor, setMonitor] = useState<MiMonitoreo | null>(null);
+  const [grupos, setGrupos] = useState<GrupoEnVivo[]>([]);
   const [error, setError] = useState("");
   const [filtroCampana, setFiltroCampana] = useState("");
   const [filtroEstado, setFiltroEstado] = useState("");
@@ -87,6 +89,8 @@ export default function SupervisionPage() {
       setAgentes(a);
       setCampanas(c);
       setMonitor(m);
+      // Los grupos son aparte: si fallan, lo demás se muestra igual.
+      api.get<GrupoEnVivo[]>("/api/supervision/grupos").then(setGrupos, () => undefined);
       esperarMonitoreo(m?.token ?? null);
       recibidoRef.current = Date.now();
       setTick(0);
@@ -148,7 +152,7 @@ export default function SupervisionPage() {
     <div>
       <PageHeader
         title="Supervisión"
-        subtitle="Agentes y campañas en vivo. Se actualiza cada 2 segundos."
+        subtitle="Grupos de atención, agentes y campañas en vivo. Se actualiza cada 2 segundos."
         actions={
           <div className="flex gap-2">
             {interviene && (
@@ -205,6 +209,13 @@ export default function SupervisionPage() {
           )}
         </Card>
       )}
+
+      {grupos.length > 0 && (
+        <div className="mb-4">
+          <GruposEnVivo grupos={grupos} />
+        </div>
+      )}
+      <Devoluciones interviene={interviene} />
 
       <div className="mb-4 grid gap-4 lg:grid-cols-2">
         {!campanas ? (

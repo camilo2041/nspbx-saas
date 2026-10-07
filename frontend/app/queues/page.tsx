@@ -67,6 +67,7 @@ const empty: Omit<Queue, "id" | "created_at"> = {
   record: false,
   failover_extension: "",
   announce_position: false,
+  devolucion: false,
   enabled: true,
 };
 
@@ -401,6 +402,16 @@ export default function QueuesPage() {
               </span>
             </span>
             <Toggle checked={form.announce_position} onChange={(v) => setForm({ ...form, announce_position: v })} />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+            <span className="text-sm text-fg-soft">
+              Ofrecer devolverle la llamada
+              <span className="block text-xs text-muted">
+                Mientras espera oye «marca 1 y te devolvemos la llamada sin perder tu turno». Si marca 1, cuelga y la
+                central lo llama apenas haya un agente libre y le toque, y lo pone de primero.
+              </span>
+            </span>
+            <Toggle checked={!!form.devolucion} onChange={(v) => setForm({ ...form, devolucion: v })} />
           </div>
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
             <span className="text-sm text-fg-soft">Grabar las llamadas del grupo</span>
