@@ -1637,6 +1637,24 @@ class CupoUso(Base):
     conteo: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class VerificacionVivo(Base):
+    """Una prueba en vivo de una empresa (services/verificacion.py): cuándo
+    se hizo, quién, cómo terminó y la evidencia. La maneja Plataforma."""
+
+    __tablename__ = "verificaciones_vivo"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    clave: Mapped[str] = mapped_column(String(40))
+    # en_curso | ok | fallo | omitida
+    estado: Mapped[str] = mapped_column(String(12), default="en_curso")
+    iniciada_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    terminada_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    quien: Mapped[str] = mapped_column(String(100))
+    evidencia: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    nota: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
 class DesbloqueoIp(Base):
     """Pedido de quitar una IP de un bloqueo de fail2ban, desde Plataforma.
 

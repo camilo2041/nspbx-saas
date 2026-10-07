@@ -312,3 +312,106 @@ async def pedir_desbloqueo(
         raise HTTPException(status_code=422, detail=str(exc)) from None
     logger.warning("Desbloqueo de %s (%s) pedido por %s", pedido.ip, pedido.jail, usuario.username)
     return {"id": pedido.id, "estado": pedido.estado}
+
+
+# --- Verificación en vivo (services/verificacion.py) --------------------------------------
+
+
+class VerificacionIniciar(BaseModel):
+    tenant_id: int
+    clave: str
+
+
+class VerificacionResultado(BaseModel):
+    estado: str
+    nota: str | None = None
+
+
+def _verif_salida(v) -> dict:
+    return {"id": v.id, "clave": v.clave, "estado": v.estado, "iniciada_en": v.iniciada_en, "terminada_en": v.terminada_en,
+            "quien": v.quien, "evidencia": v.evidencia, "nota": v.nota}
+
+
+@router.get("/verificacion")
+async def ver_verificacion(tenant_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Las pruebas en vivo con el último intento de cada una en esa empresa."""
+    from app.models import VerificacionVivo
+    from app.services import verificacion
+
+    if await session.get(Tenant, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    filas = (
+        await session.execute(
+            select(VerificacionVivo).where(VerificacionVivo.tenant_id == tenant_id).order_by(VerificacionVivo.id.desc())
+        )
+    ).scalars().all()
+    ultima: dict = {}
+    for v in filas:
+        ultima.setdefault(v.clave, v)
+    return [
+        {"clave": p.clave, "titulo": p.titulo, "fase": p.fase, "pasos": p.pasos, "automatica": p.detector is not None,
+         "ultima": _verif_salida(ultima[p.clave]) if p.clave in ultima else None}
+        for p in verificacion.PRUEBAS
+    ]
+
+
+@router.post("/verificacion", status_code=201)
+async def iniciar_verificacion(
+    datos: VerificacionIniciar, session: AsyncSession = Depends(get_admin_session), usuario: User = Depends(usuario_actual),
+):
+    """Anota la hora: lo que pase desde ahora cuenta como evidencia."""
+    from datetime import datetime
+
+    from app.models import VerificacionVivo
+    from app.services import verificacion
+
+    if datos.clave not in verificacion.POR_CLAVE:
+        raise HTTPException(status_code=422, detail="Esa prueba no existe")
+    if await session.get(Tenant, datos.tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    v = VerificacionVivo(tenant_id=datos.tenant_id, clave=datos.clave, estado="en_curso",
+                         iniciada_en=datetime.utcnow(), quien=usuario.username[:100])
+    session.add(v)
+    await session.commit()
+    await session.refresh(v)
+    return _verif_salida(v)
+
+
+async def _verificacion(session, verif_id: int):
+    from app.models import VerificacionVivo
+
+    v = await session.get(VerificacionVivo, verif_id)
+    if v is None:
+        raise HTTPException(status_code=404, detail="Prueba no encontrada")
+    return v
+
+
+@router.post("/verificacion/{verif_id}/comprobar")
+async def comprobar_verificacion(verif_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Busca el rastro desde que se empezó. Si aparece, queda «ok» con la evidencia."""
+    from datetime import datetime
+
+    from app.services import verificacion
+
+    v = await _verificacion(session, verif_id)
+    if v.estado != "en_curso":
+        return {"encontrada": v.estado == "ok", **_verif_salida(v)}
+    evidencia = await verificacion.comprobar(session, v.clave, v.tenant_id, v.iniciada_en)
+    if evidencia:
+        v.estado, v.evidencia, v.terminada_en = "ok", evidencia[:300], datetime.utcnow()
+        await session.commit()
+    return {"encontrada": bool(evidencia), **_verif_salida(v)}
+
+
+@router.post("/verificacion/{verif_id}/resultado")
+async def resultado_verificacion(verif_id: int, datos: VerificacionResultado, session: AsyncSession = Depends(get_admin_session)):
+    """Lo que la persona vio: pasó, falló (con nota) u omitida."""
+    from datetime import datetime
+
+    if datos.estado not in ("ok", "fallo", "omitida"):
+        raise HTTPException(status_code=422, detail="El resultado es ok, fallo u omitida")
+    v = await _verificacion(session, verif_id)
+    v.estado, v.terminada_en = datos.estado, datetime.utcnow()
+    v.nota = (datos.nota or "").strip()[:500] or v.nota
+    await session.commit()
+    return _verif_salida(v)
