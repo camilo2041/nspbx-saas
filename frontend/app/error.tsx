@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 
 import { Button, Card } from "@/components/ui";
+import { reportarError } from "@/lib/errores";
 import { esVersionVieja, recargarPorVersion } from "@/lib/version-vieja";
 
 // Si una pantalla falla, se muestra esto dentro del panel (con el menú) en
@@ -14,6 +15,7 @@ export default function ErrorDePantalla({ error, retry }: { error: Error & { dig
 
   useEffect(() => {
     console.error(error);
+    reportarError(error, "Pantalla");
     if (versionVieja) recargarPorVersion();
   }, [error, versionVieja]);
 

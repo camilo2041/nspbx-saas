@@ -33,7 +33,7 @@ import {
   ReporteProgramado,
 } from "@/lib/types";
 
-type Vista = "agentes" | "campanas" | "entrantes" | "disposiciones" | "cumplimiento" | "programados";
+type Vista = "agentes" | "campanas" | "entrantes" | "disposiciones" | "cumplimiento" | "audio" | "programados";
 
 const VISTAS: { value: Vista; label: string }[] = [
   { value: "agentes", label: "Agentes" },
@@ -41,6 +41,7 @@ const VISTAS: { value: Vista; label: string }[] = [
   { value: "entrantes", label: "Llamadas entrantes" },
   { value: "disposiciones", label: "Disposiciones" },
   { value: "cumplimiento", label: "Cumplimiento" },
+  { value: "audio", label: "Calidad de audio" },
   { value: "programados", label: "Programados" },
 ];
 
@@ -102,7 +103,7 @@ export default function ReportesPage() {
   const consulta = useCallback(
     (extra: Record<string, string> = {}) => {
       const qs = new URLSearchParams({ desde, hasta, ...extra });
-      if (campana && vista !== "cumplimiento" && vista !== "entrantes") qs.set("campaign_id", campana);
+      if (campana && vista !== "cumplimiento" && vista !== "entrantes" && vista !== "audio") qs.set("campaign_id", campana);
       if (vista === "entrantes") qs.set("umbral_s", String(Math.min(600, Math.max(1, Number(umbral) || 20))));
       if (vista === "disposiciones") qs.set("agrupar", agrupar);
       if (vista === "cumplimiento") {
@@ -172,7 +173,7 @@ export default function ReportesPage() {
                   hint="La meta del nivel de servicio. Lo típico: 20 s."
                 />
               )}
-              {vista !== "cumplimiento" && vista !== "entrantes" && (
+              {vista !== "cumplimiento" && vista !== "entrantes" && vista !== "audio" && (
                 <Select
                   label="Campaña"
                   value={campana}
@@ -208,7 +209,7 @@ export default function ReportesPage() {
                 </>
               )}
               <div className="flex items-end gap-2">
-                {vista !== "cumplimiento" && (
+                {vista !== "cumplimiento" && vista !== "audio" && (
                   <Button variant="secondary" disabled={!datos} onClick={() => csv()}>
                     Descargar CSV
                   </Button>
@@ -227,6 +228,8 @@ export default function ReportesPage() {
             <Campanas filas={datos.filas} total={datos.total} />
           ) : vista === "entrantes" ? (
             <Entrantes d={datos} />
+          ) : vista === "audio" ? (
+            <AudioVista d={datos} />
           ) : vista === "disposiciones" ? (
             <Disposiciones filas={datos.filas} total={datos.total} callbacks={datos.callbacks} />
           ) : (
@@ -807,5 +810,72 @@ function Programados({ campanas }: { campanas: CampaignWithStats[] }) {
         )}
       </Modal>
     </Card>
+  );
+}
+
+interface FilaAudio {
+  clave: string;
+  llamadas: number;
+  mos: number | null;
+  malas: number;
+  malas_pct: number;
+  perdida_pct: number | null;
+}
+
+/** MOS (1 a 5): 4 o más, bien; 3.5 a 4, aceptable; menos, se nota. */
+function Mos({ v, malo }: { v: number | null; malo: number }) {
+  if (v === null) return <span className="text-faint">—</span>;
+  return <Badge color={v >= 4 ? "green" : v >= malo ? "amber" : "red"}>{v.toFixed(2)}</Badge>;
+}
+
+function AudioVista({ d }: { d: { total: FilaAudio; por_troncal: FilaAudio[]; por_agente: FilaAudio[]; mos_malo: number } }) {
+  if (!d.total.llamadas) {
+    return (
+      <Card>
+        <EmptyState
+          title="Sin llamadas medidas en el rango"
+          hint="FreeSWITCH mide el audio de cada llamada contestada al colgar; aparecen aquí desde que se actualizó el sistema."
+        />
+      </Card>
+    );
+  }
+  const tabla = (titulo: string, filas: FilaAudio[]) => (
+    <Card>
+      <CardHeader title={titulo} subtitle="De peor a mejor. Una llamada «mala» tiene MOS menor a 3.5: cortes o voz robótica." />
+      <Table head={["", "Llamadas", "MOS promedio", "Malas", "Paquetes perdidos"]}>
+        {filas.map((f) => (
+          <Tr key={f.clave}>
+            <Td>{f.clave}</Td>
+            <Td>{f.llamadas}</Td>
+            <Td>
+              <Mos v={f.mos} malo={d.mos_malo} />
+            </Td>
+            <Td>
+              {f.malas} ({f.malas_pct}%)
+            </Td>
+            <Td muted>{f.perdida_pct === null ? "—" : `${f.perdida_pct}%`}</Td>
+          </Tr>
+        ))}
+      </Table>
+    </Card>
+  );
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex flex-wrap items-center gap-6 p-5 text-sm">
+          <span>
+            <span className="text-muted">Llamadas medidas</span> <b className="ml-1 text-fg">{d.total.llamadas}</b>
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="text-muted">MOS promedio</span> <Mos v={d.total.mos} malo={d.mos_malo} />
+          </span>
+          <span>
+            <span className="text-muted">Malas</span> <b className="ml-1 text-fg">{d.total.malas_pct}%</b>
+          </span>
+        </div>
+      </Card>
+      {tabla("Por proveedor", d.por_troncal)}
+      {d.por_agente.length > 0 && tabla("Por agente", d.por_agente)}
+    </div>
   );
 }

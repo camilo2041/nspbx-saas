@@ -4,8 +4,12 @@ import { View } from "react-native";
 
 import { AuthProvider, useAuth } from "@/src/auth/AuthContext";
 import { Bloqueo } from "@/src/Bloqueo";
+import { escucharErroresGlobales } from "@/src/errores";
 import { SoftphoneProvider } from "@/src/softphone/SoftphoneContext";
 import { TemaProvider, useTema } from "@/src/tema";
+
+// Los errores sin atrapar llegan a Plataforma (con sesión; sin ella el envío falla en silencio).
+escucharErroresGlobales();
 
 function Contenido() {
   const { cargando, bloqueada } = useAuth();

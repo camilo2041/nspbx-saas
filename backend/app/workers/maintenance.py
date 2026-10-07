@@ -144,6 +144,7 @@ class MaintenanceWorker:
         if necesita_backup:
             await self._respaldar_postgres(retencion_backup, tope_backup_gb)
         await self._limpiar_grabaciones(retencion_grabaciones, tope_gb, retencion_por_empresa)
+        await self._purgar_transcripciones(retencion_por_empresa)
         await self._purgar_buzones_sin_audio()
         await self._purgar_tablas_cortas()
 
@@ -344,12 +345,18 @@ class MaintenanceWorker:
         carpeta = Path(settings.recordings_dir)
         if not carpeta.exists():
             return
+        from app.services import retencion
+
+        # Las marcadas «Conservar» (un reclamo, una auditoría) no se tocan ni por edad ni por tope.
+        async with async_session() as session:
+            conservadas = await retencion.rutas_conservadas(session)
 
         # "**/*.wav" (recursivo) y no "*.wav": las grabaciones ahora se
         # organizan en subcarpetas AAAA/MM/DD (ver config_generator.py) —
         # con el glob plano de antes, la limpieza dejaba de ver CUALQUIER
         # grabación nueva y nunca las borraba.
-        archivos = [f for f in carpeta.glob("**/*.wav") if f.is_file()]
+        # El saludo propio del buzón no es una grabación de llamada: no vence.
+        archivos = [f for f in carpeta.glob("**/*.wav") if f.is_file() and f.name != "saludo.wav" and f.resolve() not in conservadas]
         ahora = datetime.utcnow()
         eliminados_por_edad = 0
         vigentes = []
@@ -392,6 +399,18 @@ class MaintenanceWorker:
                 "Limpieza de grabaciones: %d por antigüedad (>%dd), %d por exceder %.1f GB",
                 eliminados_por_edad, retencion_dias, eliminados_por_tope, tope_gb,
             )
+
+    async def _purgar_transcripciones(self, por_empresa: dict[int, int]) -> None:
+        """Lo que se dijo (transcripciones, resúmenes) con la misma retención que el audio."""
+        from app.services import retencion
+
+        try:
+            async with async_session() as session:
+                n = await retencion.purgar_transcripciones(session, por_empresa)
+            if n:
+                logger.info("Retención: %d transcripciones o resúmenes borrados", n)
+        except Exception:
+            logger.exception("Retención de transcripciones")
 
     def _purgar_carpetas_vacias(self, carpeta: Path) -> None:
         """Las carpetas AAAA/MM/DD se crean una por día (ver

@@ -92,6 +92,10 @@ export default function Asistente() {
           body: { messages: conUsuario.filter((m) => !m.error).slice(-12).map(({ role, content }) => ({ role, content })) },
         });
         guardar([...conUsuario, { role: "assistant", content: r.reply }]);
+        // Ni la IA ni la búsqueda local ofrecieron guía: Plataforma lo anota para escribirla.
+        if (!/\[\[guia:/.test(r.reply) && !buscarGuias(t, puede, 1).length) {
+          peticion("/api/assistant/sin-guia", { method: "POST", body: { pregunta: t, origen: "app" } }).catch(() => undefined);
+        }
       } catch (e) {
         fallo();
         guardar([...conUsuario, { role: "assistant", content: e instanceof ApiError ? e.message : "No se pudo conectar con el asistente.", error: true }]);

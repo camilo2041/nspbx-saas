@@ -14,6 +14,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +24,7 @@ from app.core.config import settings
 from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
-from app.services import buzon, deepgram, humo, llm, sin_ruta, tiempos_llamada
+from app.services import buzon, calidad_audio, deepgram, humo, llm, sin_ruta, tiempos_llamada
 from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
@@ -281,6 +282,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         disposicion_id=disposicion_id,
         abandonada=True if variables.get("nspbx_abandonada") == "true" else None,
         **datos_de_cola(variables),
+        **calidad_audio.de_cdr(variables),
     )
     if variables.get("nspbx_buzon_ext"):
         # La llamada terminó en el buzón: no es una «contestada» aunque el
@@ -439,6 +441,11 @@ def _call_out(call: CallLog) -> dict:
         "ring_ms": call.ring_ms,
         "espera_ms": call.espera_ms,
         "colgo": call.colgo,
+        "conservar": call.conservar,
+        "audio_mos": call.audio_mos,
+        "audio_calidad": call.audio_calidad,
+        "audio_perdida": call.audio_perdida,
+        "troncal": call.troncal,
     }
 
 
@@ -580,6 +587,23 @@ async def call_stats(session: AsyncSession = Depends(get_session), usuario: User
         "failed": counts.get("failed", 0) + counts.get("rejected", 0) + counts.get("cancelled", 0),
         "talk_minutes": round(total_min / 60, 1),
     }
+
+
+class ConservarIn(BaseModel):
+    conservar: bool
+
+
+@router.put("/api/calls/{call_id}/conservar", response_model=CallLogOut)
+async def conservar_grabacion(
+    call_id: int, datos: ConservarIn, session: AsyncSession = Depends(get_session),
+    usuario: User = Depends(requiere(permissions.LLAMADAS_VER_TODAS)),
+):
+    """La grabación y lo que se habló no se borran con la retención (services/retencion.py)."""
+    call = await _traer(call_id, session, usuario)
+    call.conservar = datos.conservar
+    await session.commit()
+    await session.refresh(call)
+    return _call_out(call)
 
 
 @router.get("/api/calls/{call_id}", response_model=CallLogOut)

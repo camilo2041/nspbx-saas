@@ -312,3 +312,163 @@ async def pedir_desbloqueo(
         raise HTTPException(status_code=422, detail=str(exc)) from None
     logger.warning("Desbloqueo de %s (%s) pedido por %s", pedido.ip, pedido.jail, usuario.username)
     return {"id": pedido.id, "estado": pedido.estado}
+
+
+# --- Verificación en vivo (services/verificacion.py) --------------------------------------
+
+
+class VerificacionIniciar(BaseModel):
+    tenant_id: int
+    clave: str
+
+
+class VerificacionResultado(BaseModel):
+    estado: str
+    nota: str | None = None
+
+
+def _verif_salida(v) -> dict:
+    return {"id": v.id, "clave": v.clave, "estado": v.estado, "iniciada_en": v.iniciada_en, "terminada_en": v.terminada_en,
+            "quien": v.quien, "evidencia": v.evidencia, "nota": v.nota}
+
+
+@router.get("/verificacion")
+async def ver_verificacion(tenant_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Las pruebas en vivo con el último intento de cada una en esa empresa."""
+    from app.models import VerificacionVivo
+    from app.services import verificacion
+
+    if await session.get(Tenant, tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    filas = (
+        await session.execute(
+            select(VerificacionVivo).where(VerificacionVivo.empresa_id == tenant_id).order_by(VerificacionVivo.id.desc())
+        )
+    ).scalars().all()
+    ultima: dict = {}
+    for v in filas:
+        ultima.setdefault(v.clave, v)
+    return [
+        {"clave": p.clave, "titulo": p.titulo, "fase": p.fase, "pasos": p.pasos, "automatica": p.detector is not None,
+         "ultima": _verif_salida(ultima[p.clave]) if p.clave in ultima else None}
+        for p in verificacion.PRUEBAS
+    ]
+
+
+@router.post("/verificacion", status_code=201)
+async def iniciar_verificacion(
+    datos: VerificacionIniciar, session: AsyncSession = Depends(get_admin_session), usuario: User = Depends(usuario_actual),
+):
+    """Anota la hora: lo que pase desde ahora cuenta como evidencia."""
+    from datetime import datetime
+
+    from app.models import VerificacionVivo
+    from app.services import verificacion
+
+    if datos.clave not in verificacion.POR_CLAVE:
+        raise HTTPException(status_code=422, detail="Esa prueba no existe")
+    if await session.get(Tenant, datos.tenant_id) is None:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    v = VerificacionVivo(empresa_id=datos.tenant_id, clave=datos.clave, estado="en_curso",
+                         iniciada_en=datetime.utcnow(), quien=usuario.username[:100])
+    session.add(v)
+    await session.commit()
+    await session.refresh(v)
+    return _verif_salida(v)
+
+
+async def _verificacion(session, verif_id: int):
+    from app.models import VerificacionVivo
+
+    v = await session.get(VerificacionVivo, verif_id)
+    if v is None:
+        raise HTTPException(status_code=404, detail="Prueba no encontrada")
+    return v
+
+
+@router.post("/verificacion/{verif_id}/comprobar")
+async def comprobar_verificacion(verif_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Busca el rastro desde que se empezó. Si aparece, queda «ok» con la evidencia."""
+    from datetime import datetime
+
+    from app.services import verificacion
+
+    v = await _verificacion(session, verif_id)
+    if v.estado != "en_curso":
+        return {"encontrada": v.estado == "ok", **_verif_salida(v)}
+    evidencia = await verificacion.comprobar(session, v.clave, v.empresa_id, v.iniciada_en)
+    if evidencia:
+        v.estado, v.evidencia, v.terminada_en = "ok", evidencia[:300], datetime.utcnow()
+        await session.commit()
+    return {"encontrada": bool(evidencia), **_verif_salida(v)}
+
+
+@router.post("/verificacion/{verif_id}/resultado")
+async def resultado_verificacion(verif_id: int, datos: VerificacionResultado, session: AsyncSession = Depends(get_admin_session)):
+    """Lo que la persona vio: pasó, falló (con nota) u omitida."""
+    from datetime import datetime
+
+    if datos.estado not in ("ok", "fallo", "omitida"):
+        raise HTTPException(status_code=422, detail="El resultado es ok, fallo u omitida")
+    v = await _verificacion(session, verif_id)
+    v.estado, v.terminada_en = datos.estado, datetime.utcnow()
+    v.nota = (datos.nota or "").strip()[:500] or v.nota
+    await session.commit()
+    return _verif_salida(v)
+
+
+# --- Errores del panel y de la app (services/errores_cliente.py) ------------------------------
+
+
+@router.get("/errores")
+async def ver_errores(resueltos: bool = False, session: AsyncSession = Depends(get_admin_session)):
+    """Los grupos de error, del más reciente al más viejo."""
+    from app.models import ErrorCliente
+
+    q = select(ErrorCliente).order_by(ErrorCliente.ultima_vez.desc()).limit(200)
+    if not resueltos:
+        q = q.where(ErrorCliente.resuelto.is_(False))
+    empresas = {t.id: t.name for t in (await session.execute(select(Tenant))).scalars().all()}
+    return [{
+        "id": e.id, "origen": e.origen, "mensaje": e.mensaje, "pila": e.pila, "ruta": e.ruta, "version": e.version,
+        "empresa": empresas.get(e.empresa_id) if e.empresa_id else None, "veces": e.veces, "usuarios": e.usuarios,
+        "primera_vez": e.primera_vez, "ultima_vez": e.ultima_vez, "resuelto": e.resuelto,
+    } for e in (await session.execute(q)).scalars().all()]
+
+
+@router.put("/errores/{error_id}/resuelto", status_code=204)
+async def resolver_error(error_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Arreglado: sale de la lista. Si vuelve a pasar, reaparece solo."""
+    from app.models import ErrorCliente
+
+    e = await session.get(ErrorCliente, error_id)
+    if e is None:
+        raise HTTPException(status_code=404, detail="Error no encontrado")
+    e.resuelto = True
+    await session.commit()
+
+
+# --- Preguntas al asistente sin guía (services/preguntas_sin_guia.py) ---------------------
+
+
+@router.get("/preguntas-sin-guia")
+async def preguntas_sin_guia(session: AsyncSession = Depends(get_admin_session)):
+    """Las más repetidas primero: qué guía escribir después."""
+    from app.models import PreguntaSinGuia
+
+    filas = (await session.execute(
+        select(PreguntaSinGuia).order_by(PreguntaSinGuia.veces.desc(), PreguntaSinGuia.ultima_vez.desc()).limit(50)
+    )).scalars().all()
+    return [{"id": p.id, "pregunta": p.ejemplo, "veces": p.veces, "origen": p.origen,
+             "primera_vez": p.primera_vez, "ultima_vez": p.ultima_vez} for p in filas]
+
+
+@router.delete("/preguntas-sin-guia/{pregunta_id}", status_code=204)
+async def olvidar_pregunta(pregunta_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Ya tiene guía (o no la necesita): sale de la lista hasta que se vuelva a preguntar."""
+    from sqlalchemy import delete
+
+    from app.models import PreguntaSinGuia
+
+    await session.execute(delete(PreguntaSinGuia).where(PreguntaSinGuia.id == pregunta_id))
+    await session.commit()

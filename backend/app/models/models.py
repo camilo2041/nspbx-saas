@@ -549,6 +549,15 @@ class CallLog(Base):
     # Base del reporte de entrantes (services/reportes.entrantes).
     cola: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cola_espera_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Calidad del audio recibido (services/calidad_audio.py): MOS 1-5, % de
+    # calidad y % de paquetes perdidos, y el proveedor por el que salió/entró.
+    # Conservar la grabación (y su transcripción) aunque pase la retención:
+    # un reclamo, una auditoría. Lo marca quien ve todas las llamadas.
+    conservar: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    audio_mos: Mapped[float | None] = mapped_column(Float, nullable=True)
+    audio_calidad: Mapped[float | None] = mapped_column(Float, nullable=True)
+    audio_perdida: Mapped[float | None] = mapped_column(Float, nullable=True)
+    troncal: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cola_resultado: Mapped[str | None] = mapped_column(String(12), nullable=True)  # atendida|abandonada|desbordada
     cola_agente: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Transcripción de la grabación ([{rol, texto}]), guardada la primera vez
@@ -1635,6 +1644,65 @@ class CupoUso(Base):
     clave: Mapped[str] = mapped_column(String(120), primary_key=True)
     ventana: Mapped[int] = mapped_column(BigInteger)  # epoch // duración de la ventana
     conteo: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PreguntaSinGuia(Base):
+    """«¿Cómo hago…?» al asistente que ninguna guía respondió, agrupadas por
+    texto normalizado (services/preguntas_sin_guia.py): dice qué guía
+    escribir después. Lo ve Plataforma; sin RLS."""
+
+    __tablename__ = "preguntas_sin_guia"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    clave: Mapped[str] = mapped_column(String(200), unique=True)
+    ejemplo: Mapped[str] = mapped_column(String(300))
+    veces: Mapped[int] = mapped_column(Integer, default=1)
+    origen: Mapped[str] = mapped_column(String(10), default="panel")  # panel | app (la última)
+    primera_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ultima_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class ErrorCliente(Base):
+    """Un error del panel (navegador) o de la app, agrupado por firma: el
+    mismo fallo en cien navegadores es una fila con veces=100
+    (services/errores_cliente.py). Lo ve Plataforma; sin RLS."""
+
+    __tablename__ = "errores_cliente"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    firma: Mapped[str] = mapped_column(String(64), unique=True)
+    origen: Mapped[str] = mapped_column(String(10))  # panel | app
+    mensaje: Mapped[str] = mapped_column(String(300))
+    pila: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ruta: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    version: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # De qué empresa vino (referencia, no dueño: la tabla es de Plataforma).
+    empresa_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    usuario: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    veces: Mapped[int] = mapped_column(Integer, default=1)
+    usuarios: Mapped[int] = mapped_column(Integer, default=1)
+    primera_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ultima_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    resuelto: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+
+class VerificacionVivo(Base):
+    """Una prueba en vivo de una empresa (services/verificacion.py): cuándo
+    se hizo, quién, cómo terminó y la evidencia. La maneja Plataforma."""
+
+    __tablename__ = "verificaciones_vivo"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # La empresa probada (referencia, no dueño: la tabla es de Plataforma).
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    clave: Mapped[str] = mapped_column(String(40))
+    # en_curso | ok | fallo | omitida
+    estado: Mapped[str] = mapped_column(String(12), default="en_curso")
+    iniciada_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    terminada_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    quien: Mapped[str] = mapped_column(String(100))
+    evidencia: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    nota: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class DesbloqueoIp(Base):

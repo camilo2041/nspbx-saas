@@ -92,6 +92,15 @@ async def entrantes(
     return _responder("entrantes", await reportes.entrantes(session, r, umbral_s, cola), formato, r)
 
 
+@router.get("/audio")
+async def audio(desde: date, hasta: date, session: AsyncSession = Depends(get_session)):
+    """Calidad del audio por proveedor y por agente (services/calidad_audio.py)."""
+    from app.services import calidad_audio
+
+    r = _rango(desde, hasta)
+    return {**await calidad_audio.resumen(session, r.ini, r.fin), "desde": r.desde.isoformat(), "hasta": r.hasta.isoformat()}
+
+
 @router.get("/cumplimiento")
 async def cumplimiento(
     desde: date,

@@ -709,6 +709,29 @@ export default function CallsPage() {
                             </svg>
                             Resumen
                           </button>
+                          {c.audio_mos != null && (
+                            <span
+                              title={`Calidad del audio: MOS ${c.audio_mos.toFixed(2)} de 5${c.audio_perdida != null ? `, ${c.audio_perdida}% de paquetes perdidos` : ""}${c.troncal ? ` · ${c.troncal}` : ""}`}
+                              aria-label={`Calidad del audio ${c.audio_mos.toFixed(1)} de 5`}
+                              className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${c.audio_mos >= 4 ? "bg-ok" : c.audio_mos >= 3.5 ? "bg-warn" : "bg-danger"}`}
+                            />
+                          )}
+                          {c.has_recording && puede(PERMISOS.llamadasTodas) && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const r = await api.put<CallLog>(`/api/calls/${c.id}/conservar`, { conservar: !c.conservar }).catch(() => null);
+                                if (r) setItems((xs) => xs.map((x) => (x.id === c.id ? { ...x, conservar: r.conservar } : x)));
+                              }}
+                              title={c.conservar ? "Se conserva aunque pase la retención. Clic para quitar." : "Conservar: no se borra con la retención (un reclamo, una auditoría)"}
+                              aria-pressed={!!c.conservar}
+                              className={`press shrink-0 rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
+                                c.conservar ? "border-brand bg-brand-soft text-brand-text" : "border-line text-fg-soft hover:border-line-strong"
+                              }`}
+                            >
+                              {c.conservar ? "Conservada" : "Conservar"}
+                            </button>
+                          )}
                           {c.has_recording ? (
                             <Grabacion call={c} />
                           ) : (

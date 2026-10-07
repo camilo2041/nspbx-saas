@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 
+import { reportarError } from "@/lib/errores";
 import { esVersionVieja, recargarPorVersion } from "@/lib/version-vieja";
 
 // Lo que falla FUERA de una pantalla (el menú, el softphone flotante, el aviso
@@ -13,6 +14,7 @@ export default function ErrorGlobal({ error }: { error: Error & { digest?: strin
 
   useEffect(() => {
     console.error(error);
+    reportarError(error, "Pantalla");
     if (versionVieja) recargarPorVersion();
   }, [error, versionVieja]);
 

@@ -14,6 +14,7 @@ import { IncomingCallBanner } from "@/components/incoming-call-banner";
 import { ThemeToggle } from "@/components/theme";
 import { api } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { escucharErroresGlobales } from "@/lib/errores";
 import { SoftphoneProvider } from "@/lib/softphone-context";
 import { PERMISOS } from "@/lib/types";
 
@@ -490,6 +491,9 @@ function Marco({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [avanzado, setAvanzado] = useState(false);
   const sinEscuchar = useMensajesSinEscuchar(!!usuario && puede(PERMISOS.llamadasPropias) && tieneModulo("pbx"));
+
+  // Con sesión, los errores que no atrapa ninguna pantalla llegan a Plataforma (lib/errores.ts).
+  useEffect(() => (usuario ? escucharErroresGlobales() : undefined), [usuario]);
 
   useEffect(() => {
     try {
