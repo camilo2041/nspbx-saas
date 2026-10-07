@@ -17,11 +17,11 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         "CREATE TABLE IF NOT EXISTS verificaciones_vivo (id SERIAL PRIMARY KEY, "
-        "tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, clave VARCHAR(40) NOT NULL, "
+        "empresa_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, clave VARCHAR(40) NOT NULL, "
         "estado VARCHAR(12) NOT NULL DEFAULT 'en_curso', iniciada_en TIMESTAMP WITHOUT TIME ZONE NOT NULL, "
         "terminada_en TIMESTAMP WITHOUT TIME ZONE, quien VARCHAR(100) NOT NULL, evidencia VARCHAR(300), nota VARCHAR(500))"
     )
-    op.execute("CREATE INDEX IF NOT EXISTS ix_verificaciones_vivo_tenant_id ON verificaciones_vivo (tenant_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_verificaciones_vivo_empresa_id ON verificaciones_vivo (empresa_id)")
 
 
 def downgrade() -> None:

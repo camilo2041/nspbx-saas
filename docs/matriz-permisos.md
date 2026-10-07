@@ -36,6 +36,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/appointments/{appointment_id}` | `citas:gestionar` | ✓ | ✓ | ✓ | ✓ |
 | PUT | `/api/appointments/{appointment_id}` | `citas:gestionar` | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/assistant/chat` | sesión (asistente) | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/assistant/sin-guia` | sesión (asistente) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/auth/dispositivo` | sesión (la propia cuenta) | ✓ | ✓ | ✓ | ✓ |
 | DELETE | `/api/auth/dispositivo/{platform}` | sesión (la propia cuenta) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/auth/dnd` | sesión (la propia cuenta) | ✓ | ✓ | ✓ | ✓ |
@@ -86,6 +87,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/calls/serie` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls/stats` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls/{call_id}` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| PUT | `/api/calls/{call_id}/conservar` | `llamadas:ver_todas` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/calls/{call_id}/recording` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls/{call_id}/summary` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/campaigns` | `campanas:gestionar` | ✓ | ✓ | ✓ | ✗ |
@@ -145,6 +147,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | POST | `/api/crm/no-llamar` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
 | DELETE | `/api/crm/no-llamar/{no_llamar_id}` | `crm:gestionar`, `crm:ver` | ✓ | ✓ | ✓ | ✗ |
 | POST | `/api/csp-report` | sesión (avisos de CSP del navegador, sin sesión) | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/errores` | sesión (con sesión, cualquier rol) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/extensions` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/extensions` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/extensions/reload` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
@@ -191,6 +194,8 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | POST | `/api/plataforma/desbloqueos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/destinos-bloqueados` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/destinos-bloqueados` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/errores` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| PUT | `/api/plataforma/errores/{error_id}/resuelto` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/humo` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/nodos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/nodos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
@@ -199,11 +204,17 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | PUT | `/api/plataforma/nodos/{nodo_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/nodos/{nodo_id}/probar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/operacion` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/preguntas-sin-guia` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| DELETE | `/api/plataforma/preguntas-sin-guia/{pregunta_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/salientes/colgar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/sin-ruta` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | DELETE | `/api/plataforma/sin-ruta/{numero_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/verificacion` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/verificacion` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/verificacion/{verif_id}/comprobar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/verificacion/{verif_id}/resultado` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/privacidad/titular/consultar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/privacidad/titular/suprimir` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/queues` | `colas:gestionar` | ✓ | ✓ | ✗ | ✗ |
@@ -213,6 +224,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | PUT | `/api/queues/{queue_id}` | `colas:gestionar` | ✓ | ✓ | ✗ | ✗ |
 | GET | `/api/queues/{queue_id}/status` | `colas:gestionar` | ✓ | ✓ | ✗ | ✗ |
 | GET | `/api/reportes/agentes` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/reportes/audio` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/reportes/campanas` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/reportes/cumplimiento` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/reportes/disposiciones` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
@@ -252,6 +264,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | POST | `/api/system/maintenance/backup-now` | `ajustes:gestionar` · global | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/system/puesta-en-marcha` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/system/recursos` | `ajustes:gestionar` · global | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/system/retencion` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/system/salientes` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/system/salientes/colgar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/system/settings` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |

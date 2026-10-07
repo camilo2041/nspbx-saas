@@ -55,7 +55,7 @@ async def registrar(origen: str, mensaje: str, pila: str | None, ruta: str | Non
         fila = (await session.execute(select(ErrorCliente).where(ErrorCliente.firma == clave).with_for_update())).scalar_one_or_none()
         if fila is None:
             fila = ErrorCliente(firma=clave, origen=origen, mensaje=mensaje, pila=pila, ruta=ruta, version=(version or "")[:60] or None,
-                                tenant_id=tenant_id, usuario=usuario, veces=1, usuarios=1, primera_vez=ahora, ultima_vez=ahora)
+                                empresa_id=tenant_id, usuario=usuario, veces=1, usuarios=1, primera_vez=ahora, ultima_vez=ahora)
             session.add(fila)
         else:
             fila.veces += 1

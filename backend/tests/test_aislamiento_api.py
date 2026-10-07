@@ -60,6 +60,10 @@ _FUERA_DE_ESTA_PRUEBA = {
     "/api/plataforma/nodos/{nodo_id}/probar": "solo plataforma — test_nodos.py",
     "/api/plataforma/nodos/empresas/{tenant_id}": "solo plataforma — test_nodos.py",
     "/api/plataforma/sin-ruta/{numero_id}": "solo plataforma — test_fase_f.py",
+    "/api/plataforma/verificacion/{verif_id}/comprobar": "solo plataforma — test_fase_j.py",
+    "/api/plataforma/verificacion/{verif_id}/resultado": "solo plataforma — test_fase_j.py",
+    "/api/plataforma/errores/{error_id}/resuelto": "solo plataforma — test_fase_j.py",
+    "/api/plataforma/preguntas-sin-guia/{pregunta_id}": "solo plataforma — test_fase_j.py",
     "/api/tenants/{tenant_id}": "solo plataforma — test_alcance.py",
     "/api/tenants/{tenant_id}/licencia": "solo plataforma — test_alcance.py",
     "/api/tenants/{tenant_id}/salientes/colgar": "solo plataforma — test_emergencia.py",
@@ -77,6 +81,7 @@ _FUERA_DE_ESTA_PRUEBA = {
 # visible en la foto de la base pero inofensivo para el resto de pruebas
 # (no desactivan troncales ni rutas que usa el dialplan).
 _CUERPOS = {
+    ("PUT", "/api/calls/{call_id}/conservar"): {"conservar": True},
     ("PUT", "/api/extensions/{extension_id}"): {"voicemail": False},
     ("PUT", "/api/trunks/{trunk_id}"): {"caller_id_number": "3001112233"},
     ("PUT", "/api/voicebots/{bot_id}"): {"welcome_message": "Pisado"},

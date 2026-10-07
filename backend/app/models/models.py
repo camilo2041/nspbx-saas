@@ -1676,7 +1676,8 @@ class ErrorCliente(Base):
     pila: Mapped[str | None] = mapped_column(Text, nullable=True)
     ruta: Mapped[str | None] = mapped_column(String(200), nullable=True)
     version: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # De qué empresa vino (referencia, no dueño: la tabla es de Plataforma).
+    empresa_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     usuario: Mapped[str | None] = mapped_column(String(100), nullable=True)
     veces: Mapped[int] = mapped_column(Integer, default=1)
     usuarios: Mapped[int] = mapped_column(Integer, default=1)
@@ -1692,7 +1693,8 @@ class VerificacionVivo(Base):
     __tablename__ = "verificaciones_vivo"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    # La empresa probada (referencia, no dueño: la tabla es de Plataforma).
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     clave: Mapped[str] = mapped_column(String(40))
     # en_curso | ok | fallo | omitida
     estado: Mapped[str] = mapped_column(String(12), default="en_curso")

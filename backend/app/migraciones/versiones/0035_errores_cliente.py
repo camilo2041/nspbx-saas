@@ -18,12 +18,12 @@ def upgrade() -> None:
     op.execute(
         "CREATE TABLE IF NOT EXISTS errores_cliente (id SERIAL PRIMARY KEY, firma VARCHAR(64) NOT NULL UNIQUE, "
         "origen VARCHAR(10) NOT NULL, mensaje VARCHAR(300) NOT NULL, pila TEXT, ruta VARCHAR(200), version VARCHAR(60), "
-        "tenant_id INTEGER, usuario VARCHAR(100), veces INTEGER NOT NULL DEFAULT 1, usuarios INTEGER NOT NULL DEFAULT 1, "
+        "empresa_id INTEGER, usuario VARCHAR(100), veces INTEGER NOT NULL DEFAULT 1, usuarios INTEGER NOT NULL DEFAULT 1, "
         "primera_vez TIMESTAMP WITHOUT TIME ZONE NOT NULL, ultima_vez TIMESTAMP WITHOUT TIME ZONE NOT NULL, "
         "resuelto BOOLEAN NOT NULL DEFAULT false)"
     )
     op.execute("CREATE INDEX IF NOT EXISTS ix_errores_cliente_ultima_vez ON errores_cliente (ultima_vez)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_errores_cliente_tenant_id ON errores_cliente (tenant_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_errores_cliente_empresa_id ON errores_cliente (empresa_id)")
 
 
 def downgrade() -> None:

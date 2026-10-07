@@ -16,7 +16,7 @@ from app.services import verificacion
 
 async def _limpiar_verificaciones(tenant_id: int):
     async with async_session() as s:
-        await s.execute(delete(VerificacionVivo).where(VerificacionVivo.tenant_id == tenant_id))
+        await s.execute(delete(VerificacionVivo).where(VerificacionVivo.empresa_id == tenant_id))
         await s.commit()
 
 

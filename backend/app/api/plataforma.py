@@ -342,7 +342,7 @@ async def ver_verificacion(tenant_id: int, session: AsyncSession = Depends(get_a
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
     filas = (
         await session.execute(
-            select(VerificacionVivo).where(VerificacionVivo.tenant_id == tenant_id).order_by(VerificacionVivo.id.desc())
+            select(VerificacionVivo).where(VerificacionVivo.empresa_id == tenant_id).order_by(VerificacionVivo.id.desc())
         )
     ).scalars().all()
     ultima: dict = {}
@@ -369,7 +369,7 @@ async def iniciar_verificacion(
         raise HTTPException(status_code=422, detail="Esa prueba no existe")
     if await session.get(Tenant, datos.tenant_id) is None:
         raise HTTPException(status_code=404, detail="Empresa no encontrada")
-    v = VerificacionVivo(tenant_id=datos.tenant_id, clave=datos.clave, estado="en_curso",
+    v = VerificacionVivo(empresa_id=datos.tenant_id, clave=datos.clave, estado="en_curso",
                          iniciada_en=datetime.utcnow(), quien=usuario.username[:100])
     session.add(v)
     await session.commit()
@@ -396,7 +396,7 @@ async def comprobar_verificacion(verif_id: int, session: AsyncSession = Depends(
     v = await _verificacion(session, verif_id)
     if v.estado != "en_curso":
         return {"encontrada": v.estado == "ok", **_verif_salida(v)}
-    evidencia = await verificacion.comprobar(session, v.clave, v.tenant_id, v.iniciada_en)
+    evidencia = await verificacion.comprobar(session, v.clave, v.empresa_id, v.iniciada_en)
     if evidencia:
         v.estado, v.evidencia, v.terminada_en = "ok", evidencia[:300], datetime.utcnow()
         await session.commit()
@@ -431,7 +431,7 @@ async def ver_errores(resueltos: bool = False, session: AsyncSession = Depends(g
     empresas = {t.id: t.name for t in (await session.execute(select(Tenant))).scalars().all()}
     return [{
         "id": e.id, "origen": e.origen, "mensaje": e.mensaje, "pila": e.pila, "ruta": e.ruta, "version": e.version,
-        "empresa": empresas.get(e.tenant_id) if e.tenant_id else None, "veces": e.veces, "usuarios": e.usuarios,
+        "empresa": empresas.get(e.empresa_id) if e.empresa_id else None, "veces": e.veces, "usuarios": e.usuarios,
         "primera_vez": e.primera_vez, "ultima_vez": e.ultima_vez, "resuelto": e.resuelto,
     } for e in (await session.execute(q)).scalars().all()]
 
