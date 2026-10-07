@@ -1076,6 +1076,7 @@ export interface MensajeBuzon {
   caller_name: string | null;
   duracion: number;
   escuchado: boolean;
+  transcripcion?: string | null;
   created_at: string | null;
 }
 

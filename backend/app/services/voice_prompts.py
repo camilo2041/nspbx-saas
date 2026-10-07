@@ -48,6 +48,14 @@ _TEXTOS = {
     "dnd_no_disponible": "La extensión no está disponible en este momento.",
     "ivr_opcion_invalida": "Esa opción no es válida. Hasta luego.",
     "buzon_saludo": "La persona que llamas no está disponible. Deja tu mensaje después del tono y cuelga al terminar.",
+    # Buzón desde el teléfono: *98 graba el saludo propio, *97 escucha los nuevos.
+    "buzon_grabar_saludo": "Graba tu saludo después del tono. Marca numeral o cuelga al terminar.",
+    "buzon_saludo_listo": "Tu saludo quedó guardado. Así suena.",
+    "buzon_sin_nuevos": "No tienes mensajes nuevos.",
+    "buzon_nuevos_1": "Tienes un mensaje nuevo.",
+    **{f"buzon_nuevos_{n}": f"Tienes {numero_a_palabras(n)} mensajes nuevos." for n in range(2, 10)},
+    "buzon_nuevos_mas": "Tienes más de nueve mensajes nuevos.",
+    "buzon_fin": "No hay más mensajes nuevos. Hasta luego.",
     # Grupos de atención (services/queues_sync.py y config_generator._append_queue_routes).
     "cola_aviso": "Gracias por esperar. En un momento te atendemos.",
     "cola_delante_0": "Eres el siguiente en ser atendido.",

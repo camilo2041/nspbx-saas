@@ -292,6 +292,9 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         from app.services import vigia_colas
 
         await vigia_colas.anotar(session, variables, tenant_id, caller)
+    if variables.get("nspbx_buzon_oido"):
+        # *97: se oyeron completos los mensajes hasta ese (config_generator._append_buzon_escuchar).
+        await buzon.marcar_oidos(session, variables, tenant_id)
     mensaje = None
     if variables.get("nspbx_buzon_ext"):
         mensaje = await buzon.registrar(session, variables, tenant_id, uuid, caller, call.caller_name)

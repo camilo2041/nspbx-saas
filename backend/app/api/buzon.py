@@ -5,9 +5,12 @@ Cada persona ve los de SU extensión; quien puede ver todas las llamadas de
 la empresa ve también los de todas las extensiones.
 """
 
+import io
+import wave
 from datetime import datetime
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
@@ -15,7 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.calls import _VER, _solo_suyas
 from app.core.database import get_session, traer_propio
-from app.models import MensajeBuzon, User
+from app.core import validacion
+from app.core.config import settings
+from app.models import Extension, MensajeBuzon, User
 from app.services import buzon
 
 router = APIRouter(prefix="/api/buzon", tags=["buzon"])
@@ -28,6 +33,7 @@ class MensajeBuzonOut(BaseModel):
     caller_name: str | None = None
     duracion: int
     escuchado: bool
+    transcripcion: str | None = None
     created_at: datetime | None = None
 
 
@@ -70,6 +76,81 @@ async def resumen(session: AsyncSession = Depends(get_session), usuario: User = 
     """Cuántos hay sin escuchar (el número junto a «Buzón de voz» en el menú)."""
     query = _acotar(select(func.count()).select_from(MensajeBuzon), usuario).where(MensajeBuzon.escuchado.is_(False))
     return {"sin_escuchar": (await session.execute(query)).scalar_one()}
+
+
+# --- Saludo propio de cada extensión -------------------------------------------------------
+# Lo mismo que graba *98 desde el teléfono (config_generator._append_buzon_grabar_saludo).
+
+SALUDO_MAX_BYTES = 5 * 1024 * 1024
+SALUDO_MAX_SEG = 60
+
+
+async def _extension_del_saludo(extension: str | None, session: AsyncSession, usuario: User) -> str:
+    """La propia; quien ve todas las llamadas puede elegir otra de la empresa."""
+    propia = _solo_suyas(usuario)
+    ext = propia if propia is not None else (extension or (usuario.extension.number if usuario.extension else None))
+    if not ext or not validacion.EXTENSION_RE.fullmatch(ext):
+        raise HTTPException(status_code=400, detail="Tu usuario no tiene una extensión")
+    if extension and extension != ext:
+        raise HTTPException(status_code=404, detail="Extensión no encontrada")
+    existe = (await session.execute(select(Extension.id).where(Extension.number == ext))).first()
+    if not existe:
+        raise HTTPException(status_code=404, detail="Extensión no encontrada")
+    return ext
+
+
+def _ruta_saludo(tenant_id: int, ext: str) -> Path:
+    return Path(settings.recordings_dir) / f"t{int(tenant_id)}" / "buzon" / ext / "saludo.wav"
+
+
+@router.get("/saludo")
+async def ver_saludo(extension: str | None = None, session: AsyncSession = Depends(get_session), usuario: User = _VER):
+    ext = await _extension_del_saludo(extension, session, usuario)
+    ruta = _ruta_saludo(usuario.tenant_id, ext)
+    return {"extension": ext, "propio": ruta.exists(),
+            "segundos": round(buzon.duracion_wav(ruta) or 0) if ruta.exists() else None}
+
+
+@router.get("/saludo/audio")
+async def oir_saludo(extension: str | None = None, session: AsyncSession = Depends(get_session), usuario: User = _VER):
+    ext = await _extension_del_saludo(extension, session, usuario)
+    ruta = _ruta_saludo(usuario.tenant_id, ext)
+    if not ruta.exists():
+        raise HTTPException(status_code=404, detail="Esa extensión usa el saludo general")
+    return FileResponse(ruta, media_type="audio/wav", filename=f"saludo-{ext}.wav")
+
+
+@router.post("/saludo")
+async def subir_saludo(
+    archivo: UploadFile = File(...), extension: str | None = Form(default=None),
+    session: AsyncSession = Depends(get_session), usuario: User = _VER,
+):
+    """Un WAV de hasta 60 s. También se graba marcando *98 desde el teléfono."""
+    ext = await _extension_del_saludo(extension, session, usuario)
+    datos = await archivo.read(SALUDO_MAX_BYTES + 1)
+    if len(datos) > SALUDO_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="El saludo pesa demasiado (máximo 5 MB)")
+    try:
+        with wave.open(io.BytesIO(datos), "rb") as w:
+            segundos = w.getnframes() / float(w.getframerate() or 8000)
+    except (wave.Error, EOFError):
+        raise HTTPException(status_code=422, detail="Sube un archivo WAV (PCM)") from None
+    if not 1 <= segundos <= SALUDO_MAX_SEG:
+        raise HTTPException(status_code=422, detail=f"El saludo debe durar entre 1 y {SALUDO_MAX_SEG} segundos")
+    ruta = _ruta_saludo(usuario.tenant_id, ext)
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    ruta.write_bytes(datos)
+    return {"extension": ext, "propio": True, "segundos": round(segundos)}
+
+
+@router.delete("/saludo", status_code=status.HTTP_204_NO_CONTENT)
+async def quitar_saludo(extension: str | None = None, session: AsyncSession = Depends(get_session), usuario: User = _VER):
+    """Vuelve al saludo general."""
+    ext = await _extension_del_saludo(extension, session, usuario)
+    try:
+        _ruta_saludo(usuario.tenant_id, ext).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 @router.get("/{mensaje_id}/audio")

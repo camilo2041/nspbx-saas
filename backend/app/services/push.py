@@ -238,3 +238,61 @@ async def avisar_llamada(
 
     await asyncio.gather(*(_enviar(d) for d in dispositivos))
     return len(dispositivos)
+
+
+async def enviar_aviso_android(push_token: str, titulo: str, cuerpo: str, datos: dict | None = None) -> str | None:
+    """Notificación visible (no de llamada) a un Android por FCM, con el mismo
+    token de la app. Con la app en segundo plano la muestra el sistema; en
+    iOS no hay equivalente (el token es de PushKit, solo para llamadas)."""
+    proyecto = settings.fcm_project_id or (_cuenta_servicio() or {}).get("project_id", "")
+    if not proyecto or not _cuenta_servicio():
+        return "FCM sin configurar en el servidor"
+    try:
+        access_token = await _fcm_access_token()
+        if not access_token:
+            return "No se pudo obtener el acceso a Firebase"
+        body = {
+            "message": {
+                "token": push_token,
+                "notification": {"title": titulo[:100], "body": cuerpo[:300]},
+                "data": {k: str(v) for k, v in (datos or {}).items()},
+                "android": {"priority": "high"},
+            }
+        }
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.post(
+                f"https://fcm.googleapis.com/v1/projects/{proyecto}/messages:send",
+                headers={"Authorization": f"Bearer {access_token}"}, json=body,
+            )
+        if resp.status_code != 200:
+            logger.warning("FCM rechazó el aviso (%s): %s", resp.status_code, resp.text[:200])
+            return f"Firebase rechazó el aviso ({resp.status_code})"
+    except Exception:
+        logger.exception("Error enviando un aviso a Android")
+        return "Error de red enviando el aviso a Firebase"
+    return None
+
+
+async def avisar_mensaje_buzon(session, tenant_id: int, mensaje) -> int:
+    """«Nuevo mensaje de voz» a los Android con la app de esa extensión."""
+    from sqlalchemy import select
+
+    from app.models import DeviceToken, Extension
+
+    dispositivos = (
+        await session.execute(
+            select(DeviceToken)
+            .join(Extension, Extension.id == DeviceToken.extension_id)
+            .where(DeviceToken.tenant_id == tenant_id, Extension.number == mensaje.extension, DeviceToken.token_type == "FCM")
+        )
+    ).scalars().all()
+    if not dispositivos:
+        return 0
+    quien = mensaje.caller_name or mensaje.caller_number or "Número oculto"
+    cuerpo = (mensaje.transcripcion or f"Mensaje de {mensaje.duracion} segundos")[:200]
+    datos = {"tipo": "buzon", "mensaje_id": mensaje.id}
+    enviados = 0
+    for d in dispositivos:
+        if await enviar_aviso_android(d.token, f"Mensaje de voz de {quien}", cuerpo, datos) is None:
+            enviados += 1
+    return enviados

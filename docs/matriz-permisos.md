@@ -56,6 +56,10 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/auth/sesiones/{sesion_id}` | sesión (la propia cuenta) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/buzon` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/buzon/resumen` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| DELETE | `/api/buzon/saludo` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/buzon/saludo` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/buzon/saludo` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/buzon/saludo/audio` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | DELETE | `/api/buzon/{mensaje_id}` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | PUT | `/api/buzon/{mensaje_id}` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/buzon/{mensaje_id}/audio` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |

@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import validacion
 # Guardia compartido con /fs/cdr (app/api/calls.py) — ver el porqué en su
 # docstring; antes vivía acá y ese otro endpoint quedó sin protección.
 from app.core.auth import verificar_secreto_fs as _verificar_secreto
@@ -30,6 +31,7 @@ def _tenantes(
     push_por_tenant: dict[int, set] | None = None,
     salientes_por_tenant: dict[int, list] | None = None,
     politicas: dict[int, salientes.Politica] | None = None,
+    buzon_nuevos: dict[int, dict[str, list]] | None = None,
 ) -> list[dict]:
     """Los bloques por empresa que consumen los generadores XML.
 
@@ -72,9 +74,32 @@ def _tenantes(
                 # siempre (ver config_generator._append_outbound_route).
                 "outbound_routes": salientes_por_tenant.get(t.id, []),
                 "webcall_queue": webcall_queue,
+                # Mensajes sin escuchar por extensión, para *97 (config_generator._append_buzon_escuchar).
+                "buzon_nuevos": (buzon_nuevos or {}).get(t.id, {}),
             }
         )
     return out
+
+
+async def _buzon_nuevos(session: AsyncSession, por_extension: int = 20) -> dict[int, dict[str, list]]:
+    """{empresa: {extensión: [(id, ruta), …]}} de los mensajes sin escuchar,
+    del más viejo al más nuevo (los primeros `por_extension`)."""
+    from app.models import MensajeBuzon
+
+    filas = (
+        await session.execute(
+            select(MensajeBuzon.tenant_id, MensajeBuzon.extension, MensajeBuzon.id, MensajeBuzon.ruta)
+            .where(MensajeBuzon.escuchado.is_(False))
+            .order_by(MensajeBuzon.created_at, MensajeBuzon.id)
+            .limit(5000)
+        )
+    ).all()
+    salida: dict[int, dict[str, list]] = {}
+    for tid, ext, mid, ruta in filas:
+        lista = salida.setdefault(tid, {}).setdefault(ext, [])
+        if len(lista) < por_extension and validacion.RUTA_SEGURA_RE.fullmatch(ruta or ""):
+            lista.append((mid, ruta))
+    return salida
 
 
 @router.get("/fs/directory", dependencies=[Depends(_verificar_secreto)])
@@ -176,6 +201,7 @@ async def fs_dialplan(session: AsyncSession = Depends(get_admin_session)):
         push_por_tenant,
         _agrupar(outbound_routes),
         await salientes.politicas(session, [t.id for t in tenantes_rows]),
+        await _buzon_nuevos(session),
     )
     xml = build_dialplan_xml(tenantes, inbound_routes, contextos, dominios, slugs)
     return Response(content=xml, media_type="text/xml")

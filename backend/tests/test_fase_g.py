@@ -320,3 +320,162 @@ async def test_supervision_ve_grupos_y_devoluciones(cliente, mundo, monkeypatch)
         assert all(x["numero"].startswith(mundo.alfa.telefono) for x in dev["lista"])
     finally:
         vigia_colas.vigia._fotos.pop(mundo.alfa.id, None)
+
+
+# --- G4: buzón completo ------------------------------------------------------------------------
+
+import io  # noqa: E402
+import uuid as uuidlib  # noqa: E402
+import wave  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from app.models import DeviceToken  # noqa: E402
+from app.services import buzon, deepgram, push, reportes_programados  # noqa: E402
+
+
+def _ext(numero, voicemail=True):
+    return SimpleNamespace(number=numero, voicemail=voicemail, enabled=True)
+
+
+def test_dialplan_saludo_propio_y_escuchar_por_telefono():
+    ctx = ET.Element("context", name="ctx_a")
+    config_generator._append_buzon_directo(ctx, [_ext("101"), _ext("102", False)], 7)
+    config_generator._append_buzon_grabar_saludo(ctx, [_ext("101"), _ext("102", False)], 7)
+    nuevos = {"101": [(5, "/var/lib/freeswitch/recordings/t7/buzon/101/a.wav"),
+                      (6, "/var/lib/freeswitch/recordings/t7/buzon/101/b.wav")]}
+    config_generator._append_buzon_escuchar(ctx, [_ext("101"), _ext("102", False)], nuevos)
+    por_nombre = {e.get("name"): e for e in ctx}
+
+    # El saludo se decide al ejecutarse: el propio si existe, si no el general.
+    directo = [f"{a.get('application')} {a.get('data')}" for a in por_nombre["nspbx_buzon_directo"].iter("action")]
+    assert "set nspbx_buzon_dir=$${recordings_dir}/t7/buzon/$1" in directo
+    lua = next(a for a in directo if a.startswith("lua "))
+    assert "/saludo.wav" in lua and "io.open" in lua
+
+    # *98: solo para extensiones con buzón, graba en su carpeta.
+    grabar = por_nombre["nspbx_buzon_saludo"]
+    conds = grabar.findall("condition")
+    assert conds[0].get("expression") == r"^\*98$" and conds[1].get("field") == "${user_name}"
+    assert conds[1].get("expression") == "^(101)$"
+    assert any(a.get("data", "").startswith("$${recordings_dir}/t7/buzon/$1/saludo.wav 30") for a in grabar.iter("action")
+               if a.get("application") == "record")
+
+    # *97: los nuevos de la 101 en orden, marcando cada uno al terminarlo; los demás, «no tienes».
+    oir = [f"{a.get('application')} {a.get('data')}" for a in por_nombre["nspbx_buzon_escuchar_101"].iter("action")]
+    assert oir.index("playback /var/lib/freeswitch/recordings/t7/buzon/101/a.wav") < oir.index("set nspbx_buzon_oido=5")
+    assert oir.index("set nspbx_buzon_oido=5") < oir.index("playback /var/lib/freeswitch/recordings/t7/buzon/101/b.wav")
+    nombres = [e.get("name") for e in ctx]
+    assert nombres.index("nspbx_buzon_escuchar_101") < nombres.index("nspbx_buzon_escuchar")
+
+
+async def test_escuchar_por_telefono_marca_los_oidos(cliente, mundo):
+    from .conftest import FS_SECRET
+
+    base = f"{settings.fs_recordings_dir}/t{mundo.alfa.id}/buzon/1000"
+    async with async_session() as s:
+        ms = [MensajeBuzon(tenant_id=mundo.alfa.id, extension="1000", ruta=f"{base}/{i}.wav", duracion=3,
+                           created_at=datetime(2026, 1, 1, 10, i)) for i in range(3)]
+        s.add_all(ms)
+        await s.execute(update(Extension).where(Extension.tenant_id == mundo.alfa.id, Extension.number == "1000")
+                        .values(voicemail=True))
+        await s.commit()
+    try:
+        # El dialplan los lista para *97.
+        r = await cliente.get(f"/fs/dialplan?secret={FS_SECRET}")
+        assert f"nspbx_buzon_oido={ms[0].id}" in r.text
+        # Colgó tras el segundo: el tercero sigue nuevo.
+        r = await cliente.post(f"/fs/cdr/{FS_SECRET}", json={"variables": {
+            "uuid": f"oir-{uuidlib.uuid4()}", "nspbx_tenant_id": str(mundo.alfa.id), "direction": "outbound",
+            "billsec": "20", "caller_id_number": "1000", "nspbx_buzon_oido": str(ms[1].id),
+        }})
+        assert r.status_code == 200
+        async with async_session() as s:
+            estado = [(await s.get(MensajeBuzon, m.id)).escuchado for m in ms]
+        assert estado == [True, True, False]
+    finally:
+        async with async_session() as s:
+            await s.execute(delete(MensajeBuzon).where(MensajeBuzon.id.in_([m.id for m in ms])))
+            await s.execute(update(Extension).where(Extension.tenant_id == mundo.alfa.id, Extension.number == "1000")
+                            .values(voicemail=False))
+            await s.commit()
+
+
+def _wav_bytes(segundos: float) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"\x00\x00" * int(8000 * segundos))
+    return buf.getvalue()
+
+
+async def test_saludo_propio_desde_el_panel(cliente, mundo, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "recordings_dir", str(tmp_path))
+    asesor = mundo.alfa.cabeceras(permissions.ASESOR)  # extensión 1000
+    assert (await cliente.get("/api/buzon/saludo", headers=asesor)).json() == {"extension": "1000", "propio": False, "segundos": None}
+    malo = await cliente.post("/api/buzon/saludo", headers=asesor, files={"archivo": ("x.wav", b"no es wav", "audio/wav")})
+    assert malo.status_code == 422
+    r = await cliente.post("/api/buzon/saludo", headers=asesor, files={"archivo": ("saludo.wav", _wav_bytes(3), "audio/wav")})
+    assert r.status_code == 200 and r.json()["segundos"] == 3
+    assert (tmp_path / f"t{mundo.alfa.id}" / "buzon" / "1000" / "saludo.wav").exists()
+    assert (await cliente.get("/api/buzon/saludo/audio", headers=asesor)).status_code == 200
+    # El asesor solo toca el suyo.
+    assert (await cliente.get("/api/buzon/saludo?extension=1001", headers=asesor)).status_code == 404
+    assert (await cliente.delete("/api/buzon/saludo", headers=asesor)).status_code == 204
+    assert (await cliente.get("/api/buzon/saludo", headers=asesor)).json()["propio"] is False
+
+
+async def test_mensaje_nuevo_se_transcribe_y_avisa_al_celular(mundo, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "recordings_dir", str(tmp_path))
+    carpeta = tmp_path / f"t{mundo.alfa.id}" / "buzon" / "1000"
+    carpeta.mkdir(parents=True)
+    (carpeta / "m.wav").write_bytes(_wav_bytes(2))
+    ruta = f"{settings.fs_recordings_dir.rstrip('/')}/t{mundo.alfa.id}/buzon/1000/m.wav"
+    from app.core.database import fijar_tenant
+    from app.services.ajustes import ajustes_de
+
+    async with async_session() as s:
+        fijar_tenant(s, mundo.alfa.id)
+        a = await ajustes_de(s, mundo.alfa.id)
+        a.deepgram_api_key = "clave-deepgram-prueba"
+        ext_id = (await s.execute(select(Extension.id).where(Extension.tenant_id == mundo.alfa.id, Extension.number == "1000"))).scalar_one()
+        usuario = mundo.alfa.usuarios[permissions.ASESOR]
+        token = DeviceToken(tenant_id=mundo.alfa.id, user_id=usuario, extension_id=ext_id, platform="android",
+                            token_type="FCM", token="token-android-prueba")
+        m = MensajeBuzon(tenant_id=mundo.alfa.id, extension="1000", caller_number="3001112222", caller_name="Ana",
+                         ruta=ruta, duracion=2)
+        s.add_all([token, m])
+        await s.commit()
+
+    async def transcribir(audio, clave):
+        return [{"rol": "Hablante 1", "texto": "Hola, llámame"}, {"rol": "Hablante 1", "texto": "por favor."}]
+
+    avisos, correos = [], []
+
+    async def aviso(tok, titulo, cuerpo, datos=None):
+        avisos.append((tok, titulo, cuerpo, datos))
+        return None
+
+    monkeypatch.setattr(deepgram, "transcribir_grabacion", transcribir)
+    monkeypatch.setattr(push, "enviar_aviso_android", aviso)
+    monkeypatch.setattr(reportes_programados, "correo_configurado", lambda: True)
+    monkeypatch.setattr(reportes_programados, "_enviar_smtp", correos.append)
+    try:
+        await buzon.avisar(mundo.alfa.id, m.id)
+        async with async_session() as s:
+            assert (await s.get(MensajeBuzon, m.id)).transcripcion == "Hola, llámame por favor."
+        assert avisos == [("token-android-prueba", "Mensaje de voz de Ana", "Hola, llámame por favor.",
+                           {"tipo": "buzon", "mensaje_id": m.id})]
+        assert "Hola, llámame por favor." in correos[0].get_body().get_content()
+    finally:
+        async with async_session() as s:
+            await s.execute(delete(DeviceToken).where(DeviceToken.token == "token-android-prueba"))
+            await s.execute(delete(MensajeBuzon).where(MensajeBuzon.id == m.id))
+            a = await ajustes_de(s, mundo.alfa.id)
+            await s.commit()
+        async with async_session() as s:
+            fijar_tenant(s, mundo.alfa.id)
+            a = await ajustes_de(s, mundo.alfa.id)
+            a.deepgram_api_key = None
+            await s.commit()

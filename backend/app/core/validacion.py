@@ -180,6 +180,8 @@ def patron_marcado_a_regex(patron: str, quitar: int = 0) -> str:
 NODE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
 # Audios de bots: solo archivos sueltos dentro de la carpeta de sonidos de bots.
+# Ruta de un archivo del buzón tal como la ve FreeSWITCH (va dentro de un playback).
+RUTA_SEGURA_RE = re.compile(r"^/(?!.*\.\.)[A-Za-z0-9_./-]{1,300}$")
 RUTA_AUDIO_RE = re.compile(r"^/usr/share/freeswitch/sounds/bots/[A-Za-z0-9_.-]{1,120}$")
 
 # Lo único que puede llevar un texto hablado (unicode: acentos y ñ incluidos).
