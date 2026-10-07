@@ -443,6 +443,12 @@ class SystemSettings(Base):
     # Los festivos de Colombia cuentan como «cerrado» en las rutas entrantes,
     # el bloque Horario del IVR y el widget web que tienen horario (services/festivos.py).
     festivos_cerrado: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Calidad automática (services/calidad_auto.py): cada noche la IA propone la
+    # evaluación de hasta N llamadas grabadas por agente del día anterior
+    # (0 = apagado), con un tope total por noche (cuesta por llamada).
+    calidad_auto_por_agente: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    calidad_auto_tope: Mapped[int] = mapped_column(Integer, default=20, server_default="20")
+    calidad_auto_ultima: Mapped[date | None] = mapped_column(Date, nullable=True)
     outbound_hours_weekdays: Mapped[str] = mapped_column(String(11), default="07:00-19:00", server_default="07:00-19:00")
     outbound_hours_saturday: Mapped[str] = mapped_column(String(11), default="08:00-13:00", server_default="08:00-13:00")
     outbound_hours_sundays_holidays: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
@@ -1587,6 +1593,9 @@ class EvaluacionLlamada(Base):
     comentario: Mapped[str | None] = mapped_column(Text, nullable=True)
     # manual | ia (la sugerencia de la IA, revisada y guardada por alguien)
     origen: Mapped[str] = mapped_column(String(10), default="manual", server_default="manual")
+    # False = la propuso el muestreo nocturno y nadie la confirmó todavía
+    # (services/calidad_auto.py): no cuenta en los promedios ni la ve el agente.
+    revisada: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 

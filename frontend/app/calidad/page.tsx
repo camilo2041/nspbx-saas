@@ -71,7 +71,7 @@ interface Detalle {
   evaluaciones: Evaluacion[];
 }
 
-type Vista = "evaluar" | "resultados" | "criterios";
+type Vista = "evaluar" | "revisar" | "resultados" | "tendencia" | "criterios";
 
 const NOTAS = [
   { valor: 2, texto: "Cumple", tono: "bg-ok text-white" },
@@ -114,12 +114,27 @@ export default function CalidadPage() {
           onChange={setVista}
           options={[
             { value: "evaluar", label: "Evaluar llamadas" },
+            { value: "revisar", label: "Por revisar (IA)" },
             { value: "resultados", label: "Resultados" },
+            { value: "tendencia", label: "Tendencia" },
             { value: "criterios", label: "Criterios" },
           ]}
         />
       </div>
-      {vista === "evaluar" ? <Evaluar /> : vista === "resultados" ? <Resultados /> : <Criterios />}
+      {vista === "evaluar" ? (
+        <Evaluar />
+      ) : vista === "revisar" ? (
+        <PorRevisar />
+      ) : vista === "resultados" ? (
+        <Resultados />
+      ) : vista === "tendencia" ? (
+        <Tendencia />
+      ) : (
+        <>
+          <Criterios />
+          <Automatico />
+        </>
+      )}
     </div>
   );
 }
@@ -587,6 +602,223 @@ function Criterios() {
         </Button>
         {ok && <span className="text-sm text-ok-text">Guardado.</span>}
       </div>
+    </Card>
+  );
+}
+
+// --- Calidad automática (services/calidad_auto.py) ---------------------------------------------
+
+interface Propuesta extends Evaluacion {
+  revisada: boolean;
+  llamada: { started_at: string | null; de: string | null; a: string | null; billsec: number; cola: string | null };
+}
+
+function PorRevisar() {
+  const [lista, setLista] = useState<Propuesta[] | null>(null);
+  const [criterios, setCriterios] = useState<Criterio[]>([]);
+  const [corrigiendo, setCorrigiendo] = useState<number | null>(null);
+  const [error, setError] = useState("");
+
+  const cargar = useCallback(() => {
+    api.get<Propuesta[]>("/api/calidad/por-revisar").then(setLista, (e) => setError(e instanceof Error ? e.message : "Error"));
+  }, []);
+  useEffect(() => {
+    cargar();
+    api.get<Criterio[]>("/api/calidad/criterios").then(setCriterios, () => undefined);
+  }, [cargar]);
+
+  const accion = async (fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+      cargar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo");
+    }
+  };
+  const nombre = (id: string) => criterios.find((c) => String(c.id) === id)?.nombre ?? "Criterio";
+
+  return (
+    <>
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} onClose={() => setError("")} />
+        </div>
+      )}
+      <Card>
+        <CardHeader
+          title="Propuestas de la IA por revisar"
+          subtitle="Las propone cada noche la calidad automática (actívala en «Criterios»). No cuentan en los promedios ni las ve el agente hasta que las confirmas o corriges."
+        />
+        {!lista ? (
+          <TableSkeleton cols={5} />
+        ) : lista.length === 0 ? (
+          <EmptyState title="Nada por revisar" hint="Cuando la calidad automática proponga evaluaciones, aparecen aquí." />
+        ) : (
+          <Table head={["Llamada", "Atendió", "IA propone", "Comentario", ""]}>
+            {lista.map((p) => (
+              <Tr key={p.id}>
+                <Td>
+                  <span className="block">{fecha(p.llamada.started_at)}</span>
+                  <span className="text-xs text-muted">
+                    {p.llamada.de ?? "—"} · {tiempoCorto(p.llamada.billsec)}
+                  </span>
+                </Td>
+                <Td strong>{p.agente ?? "—"}</Td>
+                <Td>
+                  <Badge color={tonoPct(p.total_pct)}>{p.total_pct} %</Badge>
+                  <ul className="mt-1 space-y-0.5 text-xs text-muted">
+                    {Object.entries(p.puntajes).map(([cid, v]) => (
+                      <li key={cid}>
+                        {nombre(cid)}: {NOTAS.find((n) => n.valor === v)?.texto ?? v}
+                      </li>
+                    ))}
+                  </ul>
+                </Td>
+                <Td muted>{p.comentario ?? "—"}</Td>
+                <Td align="right">
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    <Button size="sm" onClick={() => accion(() => api.post(`/api/calidad/evaluaciones/${p.id}/revisar`, {}))}>
+                      Confirmar
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setCorrigiendo(p.call_id)}>
+                      Corregir
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => accion(() => api.del(`/api/calidad/evaluaciones/${p.id}`))}>
+                      Descartar
+                    </Button>
+                  </div>
+                </Td>
+              </Tr>
+            ))}
+          </Table>
+        )}
+      </Card>
+      {corrigiendo !== null && (
+        <EvaluarLlamada
+          callId={corrigiendo}
+          onCerrar={() => {
+            setCorrigiendo(null);
+            cargar();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function Automatico() {
+  const [estado, setEstado] = useState<{ por_agente: number; tope: number; ultima: string | null; por_revisar: number; tiene_ia: boolean } | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    api.get<typeof estado>("/api/calidad/automatico").then(setEstado, () => undefined);
+  }, []);
+  if (!estado) return null;
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      await api.put("/api/calidad/automatico", { por_agente: estado.por_agente, tope: estado.tope });
+      setOk(true);
+    } finally {
+      setGuardando(false);
+    }
+  };
+  return (
+    <Card className="mt-4 p-5">
+      <h2 className="text-base font-semibold text-fg">Calidad automática</h2>
+      <p className="mt-1 text-sm text-fg-soft">
+        Cada noche la IA escucha una muestra de las llamadas grabadas del día anterior (de más de 30 s) y propone su
+        evaluación; tú la confirmas o corriges en «Por revisar». Cada llamada es una transcripción y una consulta al modelo:
+        el tope por noche limita el gasto.
+      </p>
+      {!estado.tiene_ia && (
+        <div className="mt-3">
+          <Note tone="warn">Faltan las API keys de Deepgram y del modelo de lenguaje en Ajustes: sin ellas no se puede evaluar.</Note>
+        </div>
+      )}
+      <div className="mt-4 grid gap-3 sm:grid-cols-[12rem_12rem_auto] sm:items-end">
+        <Input
+          label="Llamadas por agente cada noche"
+          type="number"
+          value={String(estado.por_agente)}
+          onChange={(v) => {
+            setOk(false);
+            setEstado({ ...estado, por_agente: Math.min(20, Math.max(0, Number(v) || 0)) });
+          }}
+          hint="0 = apagado"
+        />
+        <Input
+          label="Tope total por noche"
+          type="number"
+          value={String(estado.tope)}
+          onChange={(v) => {
+            setOk(false);
+            setEstado({ ...estado, tope: Math.min(500, Math.max(1, Number(v) || 1)) });
+          }}
+        />
+        <div className="flex items-center gap-2">
+          <Button onClick={guardar} loading={guardando}>
+            Guardar
+          </Button>
+          {ok && <span className="text-sm text-ok-text">Guardado.</span>}
+        </div>
+      </div>
+      <p className="mt-3 text-xs text-muted">
+        {estado.ultima ? `Última vez: ${estado.ultima}. ` : ""}
+        {estado.por_revisar ? `${estado.por_revisar} propuesta(s) por revisar.` : ""}
+      </p>
+    </Card>
+  );
+}
+
+interface TendenciaAgente {
+  agente_id: number | null;
+  agente: string;
+  semanas: { semana: string; promedio_pct: number; evaluaciones: number }[];
+  cambio: number | null;
+}
+
+function Tendencia() {
+  const [datos, setDatos] = useState<TendenciaAgente[] | null>(null);
+  useEffect(() => {
+    api.get<TendenciaAgente[]>("/api/calidad/tendencia?semanas=8").then(setDatos, () => setDatos([]));
+  }, []);
+  const semanas = Array.from(new Set((datos ?? []).flatMap((a) => a.semanas.map((s) => s.semana)))).sort();
+  return (
+    <Card>
+      <CardHeader title="Tendencia por persona" subtitle="Promedio semanal de las evaluaciones confirmadas, últimas 8 semanas." />
+      {!datos ? (
+        <TableSkeleton cols={4} />
+      ) : datos.length === 0 ? (
+        <EmptyState title="Todavía no hay evaluaciones confirmadas" hint="Evalúa llamadas o confirma las propuestas de la IA." />
+      ) : (
+        <Table
+          head={[
+            "Persona",
+            ...semanas.map((s) => new Date(`${s}T12:00:00`).toLocaleDateString("es-CO", { day: "numeric", month: "short" })),
+            "Cambio",
+          ]}
+        >
+          {datos.map((a) => (
+            <Tr key={a.agente_id ?? "x"}>
+              <Td strong>{a.agente}</Td>
+              {semanas.map((s) => {
+                const p = a.semanas.find((x) => x.semana === s);
+                return <Td key={s}>{p ? <Badge color={tonoPct(p.promedio_pct)}>{p.promedio_pct} %</Badge> : "—"}</Td>;
+              })}
+              <Td>
+                {a.cambio == null ? (
+                  "—"
+                ) : (
+                  <span className={a.cambio >= 0 ? "text-ok-text" : "text-danger-text"}>
+                    {a.cambio >= 0 ? "▲" : "▼"} {Math.abs(a.cambio)} pts
+                  </span>
+                )}
+              </Td>
+            </Tr>
+          ))}
+        </Table>
+      )}
     </Card>
   );
 }

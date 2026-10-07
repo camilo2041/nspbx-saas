@@ -4,11 +4,11 @@ Evaluar y ver los resultados de todos: quien supervisa (`supervision:ver`).
 Cada persona ve las evaluaciones de sus propias llamadas en `/mias`.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import permissions
@@ -60,7 +60,7 @@ def _evaluacion_out(e: EvaluacionLlamada, nombres: dict[int, str]) -> dict:
     return {
         "id": e.id, "call_id": e.call_id, "agente_id": e.agente_id, "agente": nombres.get(e.agente_id or 0),
         "evaluador": nombres.get(e.evaluador_id or 0), "puntajes": e.puntajes, "total_pct": e.total_pct,
-        "comentario": e.comentario, "origen": e.origen, "created_at": e.created_at,
+        "comentario": e.comentario, "origen": e.origen, "revisada": e.revisada, "created_at": e.created_at,
     }
 
 
@@ -150,7 +150,7 @@ async def llamadas(
         {
             "id": c.id, "started_at": c.started_at, "direccion": c.direction, "de": c.caller_number, "a": c.callee_number,
             "billsec": c.billsec, "cola": c.cola, "agente": nombres.get(c.agente_id or 0) or c.cola_agente,
-            "evaluacion": None if e is None else {"id": e.id, "total_pct": e.total_pct, "origen": e.origen},
+            "evaluacion": None if e is None else {"id": e.id, "total_pct": e.total_pct, "origen": e.origen, "revisada": e.revisada},
         }
         for c, e in filas
     ]
@@ -195,6 +195,10 @@ async def evaluar(
     call = await _llamada(session, call_id)
     lista = await calidad.criterios(session, _empresa(session))
     puntajes = await _hacer(_validar(datos.puntajes, lista))
+    # Una evaluación hecha por una persona reemplaza la propuesta automática sin revisar.
+    await session.execute(
+        delete(EvaluacionLlamada).where(EvaluacionLlamada.call_id == call.id, EvaluacionLlamada.revisada.is_(False))
+    )
     e = EvaluacionLlamada(
         tenant_id=call.tenant_id, call_id=call.id, agente_id=await calidad.agente_de(session, call),
         evaluador_id=usuario.id, puntajes=puntajes, total_pct=calidad.total(puntajes, lista),
@@ -221,7 +225,8 @@ async def resumen(desde: date, hasta: date, session: AsyncSession = Depends(get_
         raise HTTPException(status_code=400, detail=str(exc)) from None
     evals = list(
         (await session.execute(
-            select(EvaluacionLlamada).where(EvaluacionLlamada.created_at >= r.ini, EvaluacionLlamada.created_at < r.fin)
+            select(EvaluacionLlamada).where(EvaluacionLlamada.created_at >= r.ini, EvaluacionLlamada.created_at < r.fin,
+                                            EvaluacionLlamada.revisada.is_(True))
         )).scalars()
     )
     lista = await calidad.criterios(session, _empresa(session), solo_activos=False)
@@ -257,7 +262,7 @@ async def mias(session: AsyncSession = Depends(get_session), usuario: User = _PR
     retroalimentación)."""
     evals = list(
         (await session.execute(
-            select(EvaluacionLlamada).where(EvaluacionLlamada.agente_id == usuario.id)
+            select(EvaluacionLlamada).where(EvaluacionLlamada.agente_id == usuario.id, EvaluacionLlamada.revisada.is_(True))
             .order_by(desc(EvaluacionLlamada.created_at)).limit(50)
         )).scalars()
     )
@@ -265,3 +270,121 @@ async def mias(session: AsyncSession = Depends(get_session), usuario: User = _PR
     await session.commit()
     nombres = await _nombres(session, [e.evaluador_id for e in evals] + [usuario.id])
     return {"criterios": [_criterio_out(c) for c in lista], "evaluaciones": [_evaluacion_out(e, nombres) for e in evals]}
+
+
+# --- Calidad automática (services/calidad_auto.py) -----------------------------------------------
+
+
+class AutomaticoIn(BaseModel):
+    por_agente: int = Field(ge=0, le=20)
+    tope: int = Field(ge=1, le=500)
+
+
+class RevisarIn(BaseModel):
+    puntajes: dict[str, int] | None = None
+    comentario: str | None = Field(default=None, max_length=2000)
+
+
+@router.get("/automatico")
+async def ver_automatico(session: AsyncSession = Depends(get_session), usuario: User = _SUPERVISA):
+    from app.services.ajustes import ajustes_de
+
+    a = await ajustes_de(session, _empresa(session))
+    por_revisar = (
+        await session.execute(select(func.count()).select_from(EvaluacionLlamada).where(EvaluacionLlamada.revisada.is_(False)))
+    ).scalar_one()
+    return {
+        "por_agente": getattr(a, "calidad_auto_por_agente", 0) or 0,
+        "tope": getattr(a, "calidad_auto_tope", 20) or 20,
+        "ultima": getattr(a, "calidad_auto_ultima", None),
+        "por_revisar": por_revisar,
+        "tiene_ia": bool(a and a.ai_llm_api_key and a.deepgram_api_key),
+    }
+
+
+@router.put("/automatico")
+async def guardar_automatico(datos: AutomaticoIn, session: AsyncSession = Depends(get_session), usuario: User = _SUPERVISA):
+    from app.services.ajustes import ajustes_de
+
+    a = await ajustes_de(session, _empresa(session))
+    if a is None:
+        raise HTTPException(status_code=404, detail="La empresa no tiene ajustes")
+    a.calidad_auto_por_agente, a.calidad_auto_tope = datos.por_agente, datos.tope
+    await session.commit()
+    return {"por_agente": datos.por_agente, "tope": datos.tope}
+
+
+@router.get("/por-revisar")
+async def por_revisar(session: AsyncSession = Depends(get_session), usuario: User = _SUPERVISA):
+    """Lo que propuso la IA y nadie confirmó todavía."""
+    filas = (
+        await session.execute(
+            select(EvaluacionLlamada, CallLog)
+            .join(CallLog, CallLog.id == EvaluacionLlamada.call_id)
+            .where(EvaluacionLlamada.revisada.is_(False))
+            .order_by(EvaluacionLlamada.created_at.desc())
+            .limit(200)
+        )
+    ).all()
+    nombres = await _nombres(session, [e.agente_id for e, _ in filas])
+    return [
+        {**_evaluacion_out(e, nombres), "llamada": {"started_at": c.started_at, "de": c.caller_number,
+                                                     "a": c.callee_number, "billsec": c.billsec, "cola": c.cola}}
+        for e, c in filas
+    ]
+
+
+async def _propuesta(session, evaluacion_id: int) -> EvaluacionLlamada:
+    e = await traer_propio(session, EvaluacionLlamada, evaluacion_id)
+    if e is None or e.revisada:
+        raise HTTPException(status_code=404, detail="Evaluación por revisar no encontrada")
+    return e
+
+
+@router.post("/evaluaciones/{evaluacion_id}/revisar")
+async def revisar(evaluacion_id: int, datos: RevisarIn, session: AsyncSession = Depends(get_session),
+                  usuario: User = _SUPERVISA):
+    """Confirmar la propuesta de la IA, o corregirla (puntajes y comentario)."""
+    e = await _propuesta(session, evaluacion_id)
+    if datos.puntajes is not None:
+        lista = await calidad.criterios(session, _empresa(session))
+        e.puntajes = await _hacer(_validar(datos.puntajes, lista))
+        e.total_pct = calidad.total(e.puntajes, lista)
+    if datos.comentario is not None:
+        e.comentario = datos.comentario.strip() or None
+    e.revisada, e.evaluador_id = True, usuario.id
+    await session.commit()
+    return _evaluacion_out(e, await _nombres(session, [e.agente_id, e.evaluador_id]))
+
+
+@router.delete("/evaluaciones/{evaluacion_id}", status_code=204)
+async def descartar(evaluacion_id: int, session: AsyncSession = Depends(get_session), usuario: User = _SUPERVISA):
+    """Descartar una propuesta de la IA (no se confirma ni cuenta)."""
+    e = await _propuesta(session, evaluacion_id)
+    await session.delete(e)
+    await session.commit()
+
+
+@router.get("/tendencia")
+async def tendencia(semanas: int = Query(default=8, ge=2, le=26), session: AsyncSession = Depends(get_session),
+                    usuario: User = _SUPERVISA):
+    """Promedio semanal por persona (evaluaciones confirmadas), de la más vieja a la última."""
+    desde = datetime.utcnow() - timedelta(weeks=semanas)
+    semana = func.date_trunc("week", EvaluacionLlamada.created_at)
+    filas = (
+        await session.execute(
+            select(EvaluacionLlamada.agente_id, semana, func.avg(EvaluacionLlamada.total_pct), func.count())
+            .where(EvaluacionLlamada.created_at >= desde, EvaluacionLlamada.revisada.is_(True))
+            .group_by(EvaluacionLlamada.agente_id, semana)
+            .order_by(semana)
+        )
+    ).all()
+    nombres = await _nombres(session, [a for a, *_ in filas])
+    por: dict = {}
+    for aid, inicio, prom, n in filas:
+        por.setdefault(aid, []).append({"semana": inicio.date().isoformat(), "promedio_pct": round(float(prom), 1), "evaluaciones": n})
+    return [
+        {"agente_id": aid, "agente": nombres.get(aid or 0) or "Sin identificar", "semanas": puntos,
+         "cambio": round(puntos[-1]["promedio_pct"] - puntos[-2]["promedio_pct"], 1) if len(puntos) >= 2 else None}
+        for aid, puntos in por.items()
+    ]

@@ -564,3 +564,93 @@ async def test_ruta_entrante_cerrada_por_fecha_especial(cliente, mundo, calendar
     cg._append_inbound_routes(publico, [ruta], {mundo.alfa.id: "ctx_alfa"}, {mundo.alfa.id: "alfa.test"})
     transfer = publico.find(".//extension[@name='did_1_principal']//action[@application='transfer']").get("data")
     assert transfer == "*991000 XML ctx_alfa"
+
+
+# --- G6: calidad automática ------------------------------------------------------------------------
+
+from app.models import CallLog, EvaluacionLlamada  # noqa: E402
+from app.services import calidad, calidad_auto  # noqa: E402
+
+
+@pytest.fixture
+async def llamadas_de_ayer(mundo):
+    """Ayer, en alfa: 3 grabadas de la 1000 (el asesor) y 1 corta (no cuenta)."""
+    from app.core.clock import business_tz
+
+    ayer = (datetime.now(business_tz()) - timedelta(days=1)).replace(hour=11, minute=0, tzinfo=None)
+    async with async_session() as s:
+        filas = [
+            CallLog(tenant_id=mundo.alfa.id, uuid=f"qa-auto-{uuidlib.uuid4()}", direction="inbound", status="answered",
+                    caller_number="3005550000", callee_number="1000", cola_agente="1000", billsec=billsec,
+                    recording_path="/var/lib/freeswitch/recordings/qa.wav", started_at=ayer + timedelta(hours=5),
+                    transcripcion=[{"rol": "Hablante 1", "texto": "Hola"}])
+            for billsec in (120, 90, 60, 5)
+        ]
+        s.add_all(filas)
+        await s.commit()
+    yield filas
+    async with async_session() as s:
+        await s.execute(delete(EvaluacionLlamada).where(EvaluacionLlamada.call_id.in_([f.id for f in filas])))
+        await s.execute(delete(CallLog).where(CallLog.id.in_([f.id for f in filas])))
+        await s.execute(update(SystemSettings).values(calidad_auto_por_agente=0, calidad_auto_ultima=None))
+        await s.commit()
+
+
+from datetime import timedelta  # noqa: E402
+
+
+async def test_la_ia_propone_y_el_supervisor_confirma(cliente, mundo, monkeypatch, llamadas_de_ayer):
+    llamadas = []
+
+    async def sugerir(session, call, lista):
+        llamadas.append(call.id)
+        notas = {str(c.id): 2 for c in lista}
+        return {"puntajes": notas, "comentario": "Bien atendida.", "total_pct": 100.0}
+
+    monkeypatch.setattr(calidad, "sugerir", sugerir)
+    cab = mundo.alfa.cabeceras(permissions.SUPERVISOR)
+    r = await cliente.put("/api/calidad/automatico", headers=cab, json={"por_agente": 2, "tope": 10})
+    assert r.status_code == 200
+    from app.core.clock import now_local
+
+    hechas = await calidad_auto.muestreo.ciclo(ahora=now_local().replace(hour=3))
+    assert hechas == {mundo.alfa.id: 2}
+    # Solo las grabadas de más de 30 s, y 2 por agente.
+    assert len(llamadas) == 2 and llamadas_de_ayer[3].id not in llamadas
+    # La misma noche no se repite.
+    assert await calidad_auto.muestreo.ciclo(ahora=now_local().replace(hour=4)) == {}
+
+    pend = (await cliente.get("/api/calidad/por-revisar", headers=cab)).json()
+    mias = [p for p in pend if p["call_id"] in llamadas]
+    assert len(mias) == 2 and all(not p["revisada"] for p in mias)
+    # Sin revisar no cuentan en los promedios ni las ve el agente.
+    asesor = mundo.alfa.cabeceras(permissions.ASESOR)
+    assert not [e for e in (await cliente.get("/api/calidad/mias", headers=asesor)).json()["evaluaciones"] if e["call_id"] in llamadas]
+
+    criterios = [c for c in (await cliente.get("/api/calidad/criterios", headers=cab)).json() if c["activo"]]
+    corregida = {str(c["id"]): 0 for c in criterios}
+    r = await cliente.post(f"/api/calidad/evaluaciones/{mias[0]['id']}/revisar", headers=cab,
+                           json={"puntajes": corregida, "comentario": "No saludó."})
+    assert r.status_code == 200 and r.json()["total_pct"] == 0.0 and r.json()["revisada"] is True
+    assert (await cliente.post(f"/api/calidad/evaluaciones/{mias[0]['id']}/revisar", headers=cab, json={})).status_code == 404
+    assert (await cliente.delete(f"/api/calidad/evaluaciones/{mias[1]['id']}", headers=cab)).status_code == 204
+    vistas = (await cliente.get("/api/calidad/mias", headers=asesor)).json()["evaluaciones"]
+    assert [e["comentario"] for e in vistas if e["call_id"] in llamadas] == ["No saludó."]
+    tend = (await cliente.get("/api/calidad/tendencia", headers=cab)).json()
+    assert any(t["agente_id"] == mundo.alfa.usuarios[permissions.ASESOR] for t in tend)
+    estado = (await cliente.get("/api/calidad/automatico", headers=cab)).json()
+    assert (estado["por_agente"], estado["tope"]) == (2, 10)
+
+
+async def test_calidad_automatica_apagada_o_antes_de_la_hora(mundo, monkeypatch, llamadas_de_ayer):
+    async def sugerir(session, call, lista):
+        raise AssertionError("no debería evaluar")
+
+    monkeypatch.setattr(calidad, "sugerir", sugerir)
+    from app.core.clock import now_local
+
+    assert await calidad_auto.muestreo.ciclo(ahora=now_local().replace(hour=3)) == {}
+    async with async_session() as s:
+        await s.execute(update(SystemSettings).where(SystemSettings.tenant_id == mundo.alfa.id).values(calidad_auto_por_agente=3))
+        await s.commit()
+    assert await calidad_auto.muestreo.ciclo(ahora=now_local().replace(hour=1)) == {}

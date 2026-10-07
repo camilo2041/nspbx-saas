@@ -30,7 +30,7 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, NodoFreeswitch, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import agentes, esl, integraciones, musica_espera, predictivo, reportes_programados, supervision, tiempo_real, vigia_colas, voice_prompts, xml_endpoints
+from app.services import agentes, calidad_auto, esl, integraciones, musica_espera, predictivo, reportes_programados, supervision, tiempo_real, vigia_colas, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
 from app.services.bus import bus
 from app.services.lider import lider
@@ -711,9 +711,11 @@ async def lifespan(app: FastAPI):
         integraciones.repartidor.start()
         reportes_programados.programador.start()
         vigia_colas.vigia.start()
+        calidad_auto.muestreo.start()
 
     async def descender() -> None:
         await vigia_colas.vigia.stop()
+        await calidad_auto.muestreo.stop()
         await reportes_programados.programador.stop()
         await integraciones.repartidor.stop()
         await predictivo.motor.stop()
