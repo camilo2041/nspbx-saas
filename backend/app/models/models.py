@@ -551,6 +551,9 @@ class CallLog(Base):
     cola_espera_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Calidad del audio recibido (services/calidad_audio.py): MOS 1-5, % de
     # calidad y % de paquetes perdidos, y el proveedor por el que salió/entró.
+    # Conservar la grabación (y su transcripción) aunque pase la retención:
+    # un reclamo, una auditoría. Lo marca quien ve todas las llamadas.
+    conservar: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     audio_mos: Mapped[float | None] = mapped_column(Float, nullable=True)
     audio_calidad: Mapped[float | None] = mapped_column(Float, nullable=True)
     audio_perdida: Mapped[float | None] = mapped_column(Float, nullable=True)

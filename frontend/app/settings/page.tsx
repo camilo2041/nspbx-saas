@@ -945,8 +945,9 @@ export default function SettingsPage() {
               label="Conservar grabaciones — días"
               value={String(form.recordings_retention_days ?? "")}
               onChange={(v) => set("recordings_retention_days", Math.max(1, Number(v) || 1))}
-              hint="Pasado este tiempo, el audio de la llamada se borra. El registro (quién, cuándo, cuánto duró) queda igual en Llamadas."
+              hint="Pasado este tiempo se borran el audio y lo que se habló (transcripción y resumen). El registro (quién, cuándo, cuánto duró) queda en Llamadas. Las marcadas «Conservar» no se borran."
             />
+            <AvisoRetencion />
             <Input
               label="Tope de disco para grabaciones — GB"
               value={String(form.recordings_max_gb ?? "")}
@@ -984,5 +985,22 @@ export default function SettingsPage() {
       </div>
       <ConsumoMensual />
     </div>
+  );
+}
+
+/** Lo que la retención borrará en los próximos días (api/system.py: /retencion). */
+function AvisoRetencion() {
+  const [r, setR] = useState<{ dias: number; aviso_dias: number; archivos: number; mb: number; conservadas: number } | null>(null);
+  useEffect(() => {
+    api.get<typeof r>("/api/system/retencion").then(setR, () => setR(null));
+  }, []);
+  if (!r) return null;
+  return (
+    <Note tone={r.archivos ? "warn" : "muted"}>
+      {r.archivos
+        ? `En los próximos ${r.aviso_dias} días se borrarán ${r.archivos} grabaciones (${r.mb} MB) por tener más de ${r.dias} días. Si necesitas alguna, márcala «Conservar» en Llamadas o descárgala antes.`
+        : `Nada se borrará en los próximos ${r.aviso_dias} días.`}
+      {r.conservadas ? ` ${r.conservadas} llamadas marcadas «Conservar».` : ""}
+    </Note>
   );
 }

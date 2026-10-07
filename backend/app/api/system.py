@@ -245,3 +245,22 @@ async def recursos():
     Administrador de tareas de Windows) para saber si hay margen antes de
     prender otra campaña o si el disco se está por llenar."""
     return await asyncio.to_thread(_leer_recursos)
+
+
+@router.get("/retencion")
+async def retencion_proxima(session: AsyncSession = Depends(get_session)):
+    """Lo que la retención de grabaciones borrará en los próximos días, para
+    avisar antes (services/retencion.py)."""
+    from app.core.database import tenant_de_sesion
+    from app.models import CallLog
+    from app.services import retencion
+    from sqlalchemy import func
+
+    tenant_id = tenant_de_sesion(session)
+    if tenant_id is None:
+        raise HTTPException(status_code=400, detail="Esto es por empresa")
+    fila = await ajustes_de(session, tenant_id)
+    dias = getattr(fila, "recordings_retention_days", None) or 90
+    conservadas = await retencion.rutas_conservadas(session)
+    n_conservadas = (await session.execute(select(func.count()).select_from(CallLog).where(CallLog.conservar.is_(True)))).scalar_one()
+    return {**retencion.proximas(tenant_id, dias, conservadas), "conservadas": n_conservadas}

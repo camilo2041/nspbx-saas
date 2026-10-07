@@ -181,3 +181,92 @@ async def test_el_cdr_guarda_el_audio_y_el_reporte_lo_agrupa(cliente, mundo):
         async with async_session() as s:
             await s.execute(delete(CallLog).where(CallLog.uuid.in_(uuids)))
             await s.commit()
+
+
+# --- J4: retención de lo que se habló, conservar y aviso -------------------------------------
+
+import os  # noqa: E402
+
+from app.core.config import settings  # noqa: E402
+from app.models import MensajeBuzon  # noqa: E402
+from app.services import retencion  # noqa: E402
+from app.workers.maintenance import MaintenanceWorker  # noqa: E402
+
+
+def _viejo(ruta, dias):
+    t = (datetime.utcnow() - timedelta(days=dias)).timestamp()
+    os.utime(ruta, (t, t))
+
+
+async def test_la_retencion_borra_lo_hablado_salvo_lo_conservado(mundo, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "recordings_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "fs_recordings_dir", "/var/lib/freeswitch/recordings")
+    monkeypatch.setattr("app.api.calls.RECORDINGS_DIR", str(tmp_path))
+    carpeta = tmp_path / f"t{mundo.alfa.id}" / "2026" / "01" / "01"
+    carpeta.mkdir(parents=True)
+    for nombre in ("vieja.wav", "conservada.wav", "nueva.wav"):
+        (carpeta / nombre).write_bytes(b"RIFF")
+    saludo = tmp_path / f"t{mundo.alfa.id}" / "buzon" / "1000" / "saludo.wav"
+    saludo.parent.mkdir(parents=True)
+    saludo.write_bytes(b"RIFF")
+    for f in (carpeta / "vieja.wav", carpeta / "conservada.wav", saludo):
+        _viejo(f, 200)
+    _viejo(carpeta / "nueva.wav", 87)  # se borra en 3 días con 90 de retención
+
+    ruta_fs = f"/var/lib/freeswitch/recordings/t{mundo.alfa.id}/2026/01/01"
+    hace = datetime.utcnow() - timedelta(days=200)
+    async with async_session() as s:
+        vieja = CallLog(tenant_id=mundo.alfa.id, uuid=f"j4-{uuidlib.uuid4()}", direction="inbound", status="answered",
+                        started_at=hace, recording_path=f"{ruta_fs}/vieja.wav", summary="Pidió un crédito",
+                        transcripcion=[{"rol": "Hablante 1", "texto": "hola"}])
+        guardada = CallLog(tenant_id=mundo.alfa.id, uuid=f"j4-{uuidlib.uuid4()}", direction="inbound", status="answered",
+                           started_at=hace, recording_path=f"{ruta_fs}/conservada.wav", summary="Reclamo", conservar=True)
+        beta = CallLog(tenant_id=mundo.beta.id, uuid=f"j4-{uuidlib.uuid4()}", direction="inbound", status="answered",
+                       started_at=hace, summary="Beta guarda un año")
+        msj = MensajeBuzon(tenant_id=mundo.alfa.id, extension="1000", ruta="/r/x.wav", duracion=3, transcripcion="Llámame",
+                           created_at=hace)
+        s.add_all([vieja, guardada, beta, msj])
+        await s.commit()
+    try:
+        async with async_session() as s:
+            aviso = retencion.proximas(mundo.alfa.id, 90, await retencion.rutas_conservadas(s))
+        assert aviso["archivos"] == 1  # solo la nueva; ni el saludo ni la conservada
+        await MaintenanceWorker()._limpiar_grabaciones(90, 100.0, {mundo.alfa.id: 90})
+        assert not (carpeta / "vieja.wav").exists()
+        assert (carpeta / "conservada.wav").exists() and (carpeta / "nueva.wav").exists() and saludo.exists()
+
+        async with async_session() as s:
+            await retencion.purgar_transcripciones(s, {mundo.alfa.id: 90, mundo.beta.id: 365})
+            v, g, b, m = (await s.get(CallLog, vieja.id), await s.get(CallLog, guardada.id),
+                          await s.get(CallLog, beta.id), await s.get(MensajeBuzon, msj.id))
+            assert v.summary is None and v.transcripcion is None
+            assert g.summary == "Reclamo" and b.summary == "Beta guarda un año" and m.transcripcion is None
+    finally:
+        async with async_session() as s:
+            await s.execute(delete(CallLog).where(CallLog.id.in_([vieja.id, guardada.id, beta.id])))
+            await s.execute(delete(MensajeBuzon).where(MensajeBuzon.id == msj.id))
+            await s.commit()
+
+
+async def test_conservar_solo_quien_ve_todas(cliente, mundo):
+    async with async_session() as s:
+        c = CallLog(tenant_id=mundo.alfa.id, uuid=f"j4-{uuidlib.uuid4()}", direction="inbound", status="answered",
+                    caller_number="3001112222", callee_number="1000", started_at=datetime.utcnow())
+        s.add(c)
+        await s.commit()
+    try:
+        asesor = mundo.alfa.cabeceras(permissions.ASESOR)
+        assert (await cliente.put(f"/api/calls/{c.id}/conservar", headers=asesor, json={"conservar": True})).status_code == 403
+        sup = mundo.alfa.cabeceras(permissions.SUPERVISOR)
+        r = await cliente.put(f"/api/calls/{c.id}/conservar", headers=sup, json={"conservar": True})
+        assert r.status_code == 200 and r.json()["conservar"] is True
+        # Otra empresa no la encuentra.
+        otra = await cliente.put(f"/api/calls/{c.id}/conservar", headers=mundo.beta.cabeceras(permissions.SUPERVISOR),
+                                 json={"conservar": False})
+        assert otra.status_code == 404
+        aviso = (await cliente.get("/api/system/retencion", headers=mundo.alfa.cabeceras(permissions.ADMIN))).json()
+        assert aviso["conservadas"] >= 1 and aviso["aviso_dias"] == 7
+    finally:
+        async with async_session() as s:
+            await s.execute(delete(CallLog).where(CallLog.id == c.id))
+            await s.commit()

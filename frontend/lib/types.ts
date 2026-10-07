@@ -435,6 +435,8 @@ export interface CallLog {
   ring_ms: number | null;
   espera_ms: number | null;
   colgo: "llamante" | "llamado" | null;
+  /** No se borra con la retención (un reclamo, una auditoría). */
+  conservar?: boolean;
   /** Calidad del audio recibido (MOS 1 a 5), si FreeSWITCH la midió. */
   audio_mos?: number | null;
   audio_perdida?: number | null;

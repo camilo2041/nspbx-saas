@@ -551,6 +551,7 @@ class CallLogOut(BaseModel):
     ring_ms: Optional[int] = None
     espera_ms: Optional[int] = None
     colgo: Optional[str] = None
+    conservar: bool = False
     audio_mos: Optional[float] = None
     audio_calidad: Optional[float] = None
     audio_perdida: Optional[float] = None

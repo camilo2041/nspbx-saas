@@ -14,6 +14,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -440,6 +441,7 @@ def _call_out(call: CallLog) -> dict:
         "ring_ms": call.ring_ms,
         "espera_ms": call.espera_ms,
         "colgo": call.colgo,
+        "conservar": call.conservar,
         "audio_mos": call.audio_mos,
         "audio_calidad": call.audio_calidad,
         "audio_perdida": call.audio_perdida,
@@ -585,6 +587,23 @@ async def call_stats(session: AsyncSession = Depends(get_session), usuario: User
         "failed": counts.get("failed", 0) + counts.get("rejected", 0) + counts.get("cancelled", 0),
         "talk_minutes": round(total_min / 60, 1),
     }
+
+
+class ConservarIn(BaseModel):
+    conservar: bool
+
+
+@router.put("/api/calls/{call_id}/conservar", response_model=CallLogOut)
+async def conservar_grabacion(
+    call_id: int, datos: ConservarIn, session: AsyncSession = Depends(get_session),
+    usuario: User = Depends(requiere(permissions.LLAMADAS_VER_TODAS)),
+):
+    """La grabación y lo que se habló no se borran con la retención (services/retencion.py)."""
+    call = await _traer(call_id, session, usuario)
+    call.conservar = datos.conservar
+    await session.commit()
+    await session.refresh(call)
+    return _call_out(call)
 
 
 @router.get("/api/calls/{call_id}", response_model=CallLogOut)
