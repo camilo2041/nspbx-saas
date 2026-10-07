@@ -60,7 +60,7 @@ def bytes_de_grabaciones(tenant_id: int) -> int:
 
 
 async def resumen(session, tenant_id: int, mes: str | None) -> dict:
-    from app.api.ai_usage import Tarifas, agregado
+    from app.api.ai_usage import Tarifas, agregado, es_del_voizbot
 
     etiqueta, inicio, fin = rango_del_mes(mes)
     llamadas = (

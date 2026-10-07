@@ -55,7 +55,9 @@ async def test_resumen_de_ia_igual_que_fila_por_fila(mundo, cliente, consumo_ia)
     # se compara contra lo que hay en la base para alfa en la ventana.
     async with engine.connect() as conn:
         n = (await conn.execute(text(
-            "SELECT count(*) FROM ai_call_usage WHERE tenant_id = :t AND started_at >= now() - interval '30 days'"
+            # Solo conversaciones del voizbot: la calidad con IA suma al costo, no a las llamadas.
+            "SELECT count(*) FROM ai_call_usage WHERE tenant_id = :t AND origen = 'voizbot' "
+            "AND started_at >= now() - interval '30 days'"
         ), {"t": mundo.alfa.id})).scalar()
     assert r["calls"] == n and n >= len(propias)
     t = await _tarifas(mundo.alfa.id)
