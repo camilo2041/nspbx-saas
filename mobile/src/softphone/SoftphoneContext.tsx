@@ -41,6 +41,7 @@ import {
 } from "sip.js";
 
 import { peticion, resolverServidorSip, servidorConfigurado } from "@/src/api/client";
+import { registrarAvisosIos } from "@/src/avisos";
 import { detenerTimbre, iniciarTimbre } from "@/src/timbre";
 import type { MiEntorno } from "@/src/api/types";
 import { useAuth } from "@/src/auth/AuthContext";
@@ -291,6 +292,12 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       body: { platform, token_type: voip.type, token: voip.token },
     }).catch(() => {});
   }, [voip, usuario]);
+
+  // iPhone: el token de avisos (mensaje de voz nuevo), aparte del de llamadas.
+  useEffect(() => {
+    if (!usuario) return;
+    registrarAvisosIos().catch(() => {});
+  }, [usuario]);
 
   useEffect(() => {
     if (!usuario || !puede("softphone:usar")) return;

@@ -11,7 +11,7 @@ from app.core import validacion
 from app.core.auth import verificar_secreto_fs as _verificar_secreto
 from app.core.database import get_admin_session
 from app.models import DeviceToken, Extension, InboundRoute, OutboundRoute, Queue, SystemSettings, Tenant, Trunk, VoiceBot
-from app.services import salientes, webcall
+from app.services import push, salientes, webcall
 from app.services.ajustes import dominios_tenants
 from app.services.config_generator import build_dialplan_xml, build_directory_xml, build_guest_directory_xml
 
@@ -172,6 +172,7 @@ async def fs_dialplan(session: AsyncSession = Depends(get_admin_session)):
         await session.execute(
             select(Extension.tenant_id, Extension.number)
             .join(DeviceToken, DeviceToken.extension_id == Extension.id)
+            .where(DeviceToken.token_type.in_(push.TOKENS_DE_LLAMADA))
             .distinct()
         )
     ).all()

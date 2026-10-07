@@ -567,7 +567,9 @@ async def probar_push(
     la pantalla apagada: se pulsa, se bloquea el teléfono y a los N segundos debe sonar. El
     resultado real de Firebase/Apple se devuelve para poder leer el motivo si falla."""
     dispositivos = (
-        await session.execute(select(DeviceToken).where(DeviceToken.user_id == usuario.id))
+        await session.execute(select(DeviceToken).where(
+            DeviceToken.user_id == usuario.id, DeviceToken.token_type.in_(push.TOKENS_DE_LLAMADA)
+        ))
     ).scalars().all()
     if not dispositivos:
         raise HTTPException(
@@ -650,8 +652,11 @@ async def desregistrar_dispositivo(
     """Borra el push token al cerrar sesión en la app: sin esto, alguien
     que cierra sesión seguiría recibiendo pushes de llamadas que ya no
     puede ver en ninguna pantalla."""
+    # El token de avisos del iPhone se va con el de llamadas: la app solo
+    # desregistra «ios» al cerrar sesión.
+    plataformas = [platform, "ios-avisos"] if platform == "ios" else [platform]
     await session.execute(
-        delete(DeviceToken).where(DeviceToken.user_id == usuario.id, DeviceToken.platform == platform)
+        delete(DeviceToken).where(DeviceToken.user_id == usuario.id, DeviceToken.platform.in_(plataformas))
     )
     await session.commit()
 

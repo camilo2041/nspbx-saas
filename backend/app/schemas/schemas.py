@@ -1223,10 +1223,19 @@ class LogoutRequest(BaseModel):
 
 
 class DeviceTokenIn(BaseModel):
-    platform: str = Field(pattern="^(ios|android)$")
-    # Tal cual los reporta expo-callkit-telecom del lado de la app.
-    token_type: str = Field(pattern="^(APNS_VOIP|FCM)$")
-    token: str
+    # ios-avisos: el token APNs normal del iPhone (expo-notifications), para
+    # avisos que no son llamadas (mensaje de voz nuevo). El de PushKit solo
+    # sirve para llamadas: Apple corta la app que lo usa para otra cosa.
+    platform: str = Field(pattern="^(ios|android|ios-avisos)$")
+    # APNS_VOIP y FCM: tal cual los reporta expo-callkit-telecom.
+    token_type: str = Field(pattern="^(APNS_VOIP|FCM|APNS)$")
+    token: str = Field(min_length=1, max_length=255)
+
+    @model_validator(mode="after")
+    def _par_coherente(self):
+        if (self.platform == "ios-avisos") != (self.token_type == "APNS"):
+            raise ValueError("El token APNS de avisos va con la plataforma ios-avisos")
+        return self
 
 
 class CambiarPasswordRequest(ClienteSesion):

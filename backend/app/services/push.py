@@ -81,6 +81,42 @@ async def enviar_voip_ios(voip_token: str, incoming_call_event: dict) -> None:
         logger.exception("Error enviando push VoIP a iOS")
 
 
+# Los tokens con los que se puede despertar una llamada. «APNS» (avisos de
+# iOS) queda fuera: no muestra CallKit y no cuenta como «tiene la app».
+TOKENS_DE_LLAMADA = ("APNS_VOIP", "FCM")
+
+
+async def enviar_aviso_ios(token: str, titulo: str, cuerpo: str, datos: dict | None = None, insignia: int | None = None) -> str | None:
+    """Notificación visible a un iPhone (token APNs normal, no el de PushKit),
+    con el número del ícono de la app si viene `insignia`."""
+    provider_token = _apns_provider_token()
+    if not provider_token:
+        return "APNs sin configurar en el servidor"
+    host = _APNS_HOST_SANDBOX if settings.apns_use_sandbox else _APNS_HOST_PROD
+    aps: dict = {"alert": {"title": titulo[:100], "body": cuerpo[:300]}, "sound": "default"}
+    if insignia is not None:
+        aps["badge"] = max(0, int(insignia))
+    try:
+        async with httpx.AsyncClient(http2=True, timeout=3) as client:
+            resp = await client.post(
+                f"https://{host}/3/device/{token}",
+                headers={
+                    "authorization": f"bearer {provider_token}",
+                    "apns-topic": settings.apns_bundle_id,
+                    "apns-push-type": "alert",
+                    "apns-priority": "10",
+                },
+                json={"aps": aps, **{k: str(v) for k, v in (datos or {}).items()}},
+            )
+        if resp.status_code != 200:
+            logger.warning("APNs rechazó el aviso (%s): %s", resp.status_code, resp.text[:200])
+            return f"Apple rechazó el aviso ({resp.status_code})"
+    except Exception:
+        logger.exception("Error enviando un aviso a iOS")
+        return "Error de red enviando el aviso a Apple"
+    return None
+
+
 # Igual que el de APNs: se reusa el access token de Google mientras no esté
 # por vencer, en vez de pedir uno nuevo en cada llamada.
 _fcm_token_cache: tuple[str, float] | None = None
@@ -202,7 +238,8 @@ async def avisar_llamada(
         await session.execute(
             select(DeviceToken)
             .join(Extension, Extension.id == DeviceToken.extension_id)
-            .where(DeviceToken.tenant_id == tenant_id, Extension.number == extension)
+            .where(DeviceToken.tenant_id == tenant_id, Extension.number == extension,
+                   DeviceToken.token_type.in_(TOKENS_DE_LLAMADA))
         )
     ).scalars().all()
     if not dispositivos:
@@ -274,16 +311,18 @@ async def enviar_aviso_android(push_token: str, titulo: str, cuerpo: str, datos:
 
 
 async def avisar_mensaje_buzon(session, tenant_id: int, mensaje) -> int:
-    """«Nuevo mensaje de voz» a los Android con la app de esa extensión."""
-    from sqlalchemy import select
+    """«Nuevo mensaje de voz» a los teléfonos con la app de esa extensión:
+    Android por FCM y iPhone por APNs (con los sin escuchar en el ícono)."""
+    from sqlalchemy import func, select
 
-    from app.models import DeviceToken, Extension
+    from app.models import DeviceToken, Extension, MensajeBuzon
 
     dispositivos = (
         await session.execute(
             select(DeviceToken)
             .join(Extension, Extension.id == DeviceToken.extension_id)
-            .where(DeviceToken.tenant_id == tenant_id, Extension.number == mensaje.extension, DeviceToken.token_type == "FCM")
+            .where(DeviceToken.tenant_id == tenant_id, Extension.number == mensaje.extension,
+                   DeviceToken.token_type.in_(("FCM", "APNS")))
         )
     ).scalars().all()
     if not dispositivos:
@@ -291,8 +330,23 @@ async def avisar_mensaje_buzon(session, tenant_id: int, mensaje) -> int:
     quien = mensaje.caller_name or mensaje.caller_number or "Número oculto"
     cuerpo = (mensaje.transcripcion or f"Mensaje de {mensaje.duracion} segundos")[:200]
     datos = {"tipo": "buzon", "mensaje_id": mensaje.id}
+    titulo = f"Mensaje de voz de {quien}"
+    sin_escuchar = None
+    if any(d.token_type == "APNS" for d in dispositivos):
+        sin_escuchar = (
+            await session.execute(
+                select(func.count()).select_from(MensajeBuzon).where(
+                    MensajeBuzon.tenant_id == tenant_id, MensajeBuzon.extension == mensaje.extension,
+                    MensajeBuzon.escuchado.is_(False),
+                )
+            )
+        ).scalar_one()
     enviados = 0
     for d in dispositivos:
-        if await enviar_aviso_android(d.token, f"Mensaje de voz de {quien}", cuerpo, datos) is None:
+        if d.token_type == "APNS":
+            error = await enviar_aviso_ios(d.token, titulo, cuerpo, datos, insignia=sin_escuchar)
+        else:
+            error = await enviar_aviso_android(d.token, titulo, cuerpo, datos)
+        if error is None:
             enviados += 1
     return enviados
