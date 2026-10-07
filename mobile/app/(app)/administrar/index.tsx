@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import { Text, View } from "react-native";
 
 import { useAuth } from "@/src/auth/AuthContext";
+import { useDatos } from "@/src/datos";
 import { Avatar, Pantalla } from "@/src/gestion";
 import { toque } from "@/src/haptico";
 import { NombreIcono } from "@/src/Icono";
@@ -29,6 +30,7 @@ const GRUPOS: { titulo: string; entradas: Entrada[] }[] = [
   {
     titulo: "Operación",
     entradas: [
+      { titulo: "Trabajar", detalle: "Consola de agente: campañas, pausas y disposiciones", icono: "enLlamada", tono: "ok", permiso: "agente:operar", ruta: "/administrar/agente" },
       { titulo: "Buzón de voz", detalle: "Mensajes que te dejaron cuando no contestaste", icono: "buzon", tono: "marca", permiso: ["llamadas:ver_propias", "llamadas:ver_todas"], modulo: "pbx", ruta: "/administrar/buzon" },
       { titulo: "Mis evaluaciones", detalle: "Lo que el supervisor calificó de tus llamadas", icono: "ok", tono: "ok", permiso: "llamadas:ver_propias", ruta: "/administrar/mis-evaluaciones" },
       { titulo: "Citas", detalle: "Agenda y confirmaciones del voizbot", icono: "calendario", tono: "info", permiso: "citas:gestionar", modulo: "voicebot", ruta: "/administrar/citas" },
@@ -81,6 +83,9 @@ export default function Menu() {
   const router = useRouter();
   const e = useEstilos();
   const { usuario, puede, tieneModulo } = useAuth();
+  // Mensajes de voz sin escuchar, junto a «Buzón de voz».
+  const veBuzon = puede("llamadas:ver_propias") || puede("llamadas:ver_todas");
+  const { datos: buzon } = useDatos<{ sin_escuchar: number }>(veBuzon ? "/api/buzon/resumen" : null, { ttl: 15_000 });
 
   const permitido = (x: Entrada) =>
     (x.permiso === null || (Array.isArray(x.permiso) ? x.permiso.some(puede) : puede(x.permiso))) &&
@@ -116,6 +121,11 @@ export default function Menu() {
               detalle={x.detalle}
               icono={x.icono}
               tono={x.tono}
+              derecha={
+                x.ruta === "/administrar/buzon" && buzon?.sin_escuchar ? (
+                  <Pildora texto={`${buzon.sin_escuchar} nuevo${buzon.sin_escuchar === 1 ? "" : "s"}`} tono="marca" />
+                ) : undefined
+              }
               onPress={() => abrir(x)}
               ultima={i === g.entradas.length - 1}
             />

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, ScrollView, Switch, Text, View } from "react-native";
 
 import { ControlesLlamada } from "@/src/ControlesLlamada";
+import { FichaLlamada } from "@/src/FichaLlamada";
 import { Avatar } from "@/src/gestion";
 import { toque } from "@/src/haptico";
 import { Icono } from "@/src/Icono";
@@ -137,6 +138,7 @@ export default function TelefonoScreen() {
           <Text style={e.quien} numberOfLines={1}>
             {remoteParty}
           </Text>
+          <FichaLlamada remoto={remoteParty} />
         </View>
         <View style={e.entranteBotones}>
           <View style={e.controlCol}>
@@ -163,6 +165,7 @@ export default function TelefonoScreen() {
             {remoteParty}
           </Text>
           <Text style={e.tiempo}>{phase === "in-call" ? formatoTiempo(callSeconds) : "Timbrando…"}</Text>
+          {tecladoAbierto ? null : <FichaLlamada remoto={remoteParty} />}
         </View>
 
         {tecladoAbierto ? <Teclado onTecla={sendDtmf} compacto /> : null}

@@ -93,6 +93,26 @@ interface SoftphoneCtx {
 
 const Ctx = createContext<SoftphoneCtx | null>(null);
 
+// Consola de agente (app/(app)/administrar/agente.tsx): al entrar, la central
+// llama a la extensión para abrir el audio de la sala con la cabecera
+// X-NSPBX-Agente = token de la sesión. Esa llamada se contesta sola, como en
+// el panel (frontend/lib/softphone-context.tsx). El INVITE puede llegar antes
+// que la respuesta que trae el token: se espera unos segundos.
+const CABECERA_AGENTE = "X-NSPBX-Agente";
+const ESPERA_TOKEN_MS = 8000;
+let tokenSesionAgente: string | null = null;
+let pendientesAgente: { token: string; aceptar: () => void; timer: ReturnType<typeof setTimeout> }[] = [];
+
+export function esperarSesionAgente(token: string | null): void {
+  tokenSesionAgente = token;
+  pendientesAgente = pendientesAgente.filter((p) => {
+    if (!token || p.token !== token) return true;
+    clearTimeout(p.timer);
+    p.aceptar();
+    return false;
+  });
+}
+
 export function useSoftphone(): SoftphoneCtx {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useSoftphone debe usarse dentro de <SoftphoneProvider>");
@@ -381,6 +401,28 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       }
       const numero = invitation.remoteIdentity.uri.user ?? "desconocido";
       const nombre = invitation.remoteIdentity.displayName || numero;
+
+      // Audio de la consola de agente: se contesta solo si trae el token de
+      // esta sesión (si no, se rechaza: no es para nosotros).
+      const tokenAgente = invitation.request.getHeader(CABECERA_AGENTE);
+      if (tokenAgente) {
+        bindSession(invitation, "Sala de agente", true);
+        const aceptar = () => aceptarInvitacion(invitation);
+        if (tokenAgente === tokenSesionAgente) {
+          aceptar();
+        } else {
+          const p = {
+            token: tokenAgente,
+            aceptar,
+            timer: setTimeout(() => {
+              pendientesAgente = pendientesAgente.filter((x) => x !== p);
+              invitation.reject({ statusCode: 603 }).catch(() => {});
+            }, ESPERA_TOKEN_MS),
+          };
+          pendientesAgente.push(p);
+        }
+        return;
+      }
       bindSession(invitation, nombre === numero ? numero : `${nombre} (${numero})`, true);
 
       // El usuario ya había contestado desde la pantalla nativa que despertó
