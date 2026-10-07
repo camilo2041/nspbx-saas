@@ -270,3 +270,41 @@ async def test_conservar_solo_quien_ve_todas(cliente, mundo):
         async with async_session() as s:
             await s.execute(delete(CallLog).where(CallLog.id == c.id))
             await s.commit()
+
+
+# --- J5: preguntas sin guía ----------------------------------------------------------------
+
+from app.models import PreguntaSinGuia  # noqa: E402
+from app.services import preguntas_sin_guia  # noqa: E402
+
+
+def test_solo_las_de_como_hacer_y_sin_datos():
+    assert preguntas_sin_guia.es_como("¿Cómo exporto los contactos a Excel?")
+    assert preguntas_sin_guia.es_como("donde cambio el logo de la empresa")
+    assert not preguntas_sin_guia.es_como("hola")
+    assert not preguntas_sin_guia.es_como("¿Cuántas llamadas hubo hoy?")
+    assert preguntas_sin_guia.clave("¿Cómo   EXPORTO los contactos?") == preguntas_sin_guia.clave("como exporto los contactos")
+    limpio = preguntas_sin_guia.limpiar("como llamo al 3001234567 o escribo a ana@correo.com")
+    assert "3001234567" not in limpio and "ana@correo.com" not in limpio
+
+
+async def test_se_agrupan_y_las_ve_la_plataforma(cliente, mundo):
+    async with async_session() as s:
+        await s.execute(delete(PreguntaSinGuia))
+        await s.commit()
+    asesor = mundo.alfa.cabeceras(permissions.ASESOR)
+    try:
+        for texto in ("¿Cómo exporto los contactos?", "como exporto los contactos", "hola, ¿qué tal?"):
+            r = await cliente.post("/api/assistant/sin-guia", headers=asesor, json={"pregunta": texto})
+            assert r.status_code == 204
+        await cliente.post("/api/assistant/sin-guia", headers=asesor, json={"pregunta": "¿Dónde cambio el logo?", "origen": "app"})
+        assert (await cliente.get("/api/plataforma/preguntas-sin-guia", headers=mundo.alfa.cabeceras(permissions.ADMIN))).status_code == 403
+        plataforma = mundo.cabeceras_plataforma()
+        lista = (await cliente.get("/api/plataforma/preguntas-sin-guia", headers=plataforma)).json()
+        assert [(p["veces"], p["origen"]) for p in lista] == [(2, "panel"), (1, "app")]
+        assert (await cliente.delete(f"/api/plataforma/preguntas-sin-guia/{lista[0]['id']}", headers=plataforma)).status_code == 204
+        assert len((await cliente.get("/api/plataforma/preguntas-sin-guia", headers=plataforma)).json()) == 1
+    finally:
+        async with async_session() as s:
+            await s.execute(delete(PreguntaSinGuia))
+            await s.commit()

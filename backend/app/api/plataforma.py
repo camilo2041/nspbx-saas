@@ -446,3 +446,29 @@ async def resolver_error(error_id: int, session: AsyncSession = Depends(get_admi
         raise HTTPException(status_code=404, detail="Error no encontrado")
     e.resuelto = True
     await session.commit()
+
+
+# --- Preguntas al asistente sin guía (services/preguntas_sin_guia.py) ---------------------
+
+
+@router.get("/preguntas-sin-guia")
+async def preguntas_sin_guia(session: AsyncSession = Depends(get_admin_session)):
+    """Las más repetidas primero: qué guía escribir después."""
+    from app.models import PreguntaSinGuia
+
+    filas = (await session.execute(
+        select(PreguntaSinGuia).order_by(PreguntaSinGuia.veces.desc(), PreguntaSinGuia.ultima_vez.desc()).limit(50)
+    )).scalars().all()
+    return [{"id": p.id, "pregunta": p.ejemplo, "veces": p.veces, "origen": p.origen,
+             "primera_vez": p.primera_vez, "ultima_vez": p.ultima_vez} for p in filas]
+
+
+@router.delete("/preguntas-sin-guia/{pregunta_id}", status_code=204)
+async def olvidar_pregunta(pregunta_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Ya tiene guía (o no la necesita): sale de la lista hasta que se vuelva a preguntar."""
+    from sqlalchemy import delete
+
+    from app.models import PreguntaSinGuia
+
+    await session.execute(delete(PreguntaSinGuia).where(PreguntaSinGuia.id == pregunta_id))
+    await session.commit()

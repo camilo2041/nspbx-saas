@@ -1646,6 +1646,22 @@ class CupoUso(Base):
     conteo: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class PreguntaSinGuia(Base):
+    """«¿Cómo hago…?» al asistente que ninguna guía respondió, agrupadas por
+    texto normalizado (services/preguntas_sin_guia.py): dice qué guía
+    escribir después. Lo ve Plataforma; sin RLS."""
+
+    __tablename__ = "preguntas_sin_guia"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    clave: Mapped[str] = mapped_column(String(200), unique=True)
+    ejemplo: Mapped[str] = mapped_column(String(300))
+    veces: Mapped[int] = mapped_column(Integer, default=1)
+    origen: Mapped[str] = mapped_column(String(10), default="panel")  # panel | app (la última)
+    primera_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ultima_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 class ErrorCliente(Base):
     """Un error del panel (navegador) o de la app, agrupado por firma: el
     mismo fallo en cien navegadores es una fila con veces=100

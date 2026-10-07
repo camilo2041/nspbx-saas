@@ -172,6 +172,10 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
         });
         setMsgs((m) => [...m, { role: "assistant", content: r.reply }]);
         setSinLeer(!abierto);
+        // Ni la IA ni la búsqueda local ofrecieron guía: Plataforma lo anota para escribirla.
+        if (!/\[\[guia:/.test(r.reply) && !buscarGuias(limpio, puede, 1).length) {
+          api.post("/api/assistant/sin-guia", { pregunta: limpio, origen: "panel" }).catch(() => undefined);
+        }
       } catch (e) {
         const msg = e instanceof ApiError ? e.message : "No se pudo conectar con el asistente";
         setMsgs((m) => [...m, { role: "assistant", content: msg, error: true }]);
@@ -179,7 +183,7 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
         setPensando(false);
       }
     },
-    [msgs, pensando, abierto]
+    [msgs, pensando, abierto, puede]
   );
 
   // Otras pantallas abren el asistente con una pregunta ya hecha (la ayuda

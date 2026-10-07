@@ -168,3 +168,19 @@ async def chat(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "No se pudo consultar el modelo de IA")
     texto = (respuesta.get("content") or "").strip()[:4000] or "No tengo una respuesta para eso."
     return ChatOut(reply=texto)
+
+
+
+class SinGuiaIn(BaseModel):
+    pregunta: str = Field(min_length=1, max_length=MAX_CHARS)
+    origen: Literal["panel", "app"] = "panel"
+
+
+@router.post("/sin-guia", status_code=status.HTTP_204_NO_CONTENT)
+async def sin_guia(payload: SinGuiaIn, usuario: User = Depends(usuario_actual)):
+    """El panel o la app no encontraron guía para esta pregunta
+    (services/preguntas_sin_guia.py). Solo se anotan las de «cómo hago…»."""
+    await cupos.exigir(f"sin-guia:{usuario.id}", 20, 60, "Muchas preguntas seguidas")
+    from app.services import preguntas_sin_guia
+
+    await preguntas_sin_guia.registrar(payload.pregunta, payload.origen)

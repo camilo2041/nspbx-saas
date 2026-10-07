@@ -24,6 +24,7 @@ import { AuditTable } from "@/components/audit-table";
 import { DesbloqueosPlataforma } from "@/components/desbloqueos-plataforma";
 import { ErroresPlataforma } from "@/components/errores-plataforma";
 import { OperacionPlataforma } from "@/components/operacion-plataforma";
+import { PreguntasSinGuia } from "@/components/preguntas-sin-guia";
 import { VerificacionVivo } from "@/components/verificacion-vivo";
 import { PruebaHumo } from "@/components/prueba-humo";
 import { AvisosCsp } from "@/components/avisos-csp";
@@ -485,6 +486,7 @@ export default function EmpresasPage() {
 
       <VerificacionVivo empresas={items} />
       <ErroresPlataforma />
+      <PreguntasSinGuia />
       <OperacionPlataforma />
       <DesbloqueosPlataforma />
 
