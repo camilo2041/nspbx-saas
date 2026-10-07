@@ -97,6 +97,7 @@ class Vigia:
         self._historial_at = 0.0
         self._devolviendo: dict[int, tuple[int, str]] = {}  # devolución -> (grupo, uuid del canal que la llama)
         self._recien_ascendida = True
+        self._en_vuelo: set[asyncio.Task] = set()  # las que esperan el resultado del originate
 
     # --- Ciclo de vida -------------------------------------------------------------------
 
@@ -296,7 +297,9 @@ class Vigia:
         )
         self._devolviendo[d.id] = (q.id, canal)
         await _marcar(d.id, "llamando", None, intento=True)
-        asyncio.create_task(self._esperar_resultado(d.id, d.tenant_id, d.intentos + 1, comando))
+        tarea = asyncio.create_task(self._esperar_resultado(d.id, d.tenant_id, d.intentos + 1, comando))
+        self._en_vuelo.add(tarea)
+        tarea.add_done_callback(self._en_vuelo.discard)
         return True
 
     async def _esperar_resultado(self, devolucion_id: int, tenant_id: int, intento: int, comando: str) -> None:

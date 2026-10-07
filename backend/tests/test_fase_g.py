@@ -269,7 +269,7 @@ async def test_el_vigia_devuelve_la_llamada_cuando_le_toca(mundo, monkeypatch, g
     estado["miembros"] = _miembros()
     r = await v.ciclo(ahora=epoch_pedida + 60)
     assert r["devoluciones"] == 1
-    await asyncio.sleep(0.05)
+    await asyncio.gather(*v._en_vuelo)
     assert len(originados) == 1
     cmd = originados[0]
     assert f"loopback/3005551234/ctx_{mundo.alfa.slug} devolver_8712_3005551234 XML ctx_{mundo.alfa.slug}" in cmd
@@ -296,7 +296,7 @@ async def test_devolucion_sin_contestar_se_reintenta_y_falla(mundo, monkeypatch,
     v = vigia_colas.Vigia()
     for intento in range(1, vigia_colas.INTENTOS_MAX + 1):
         await v.ciclo()
-        await asyncio.sleep(0.05)
+        await asyncio.gather(*v._en_vuelo)
         async with async_session() as s:
             fila = await s.get(Devolucion, d.id)
             if fila.estado == "pendiente":

@@ -65,9 +65,12 @@ asistente y de pasos del simulador de bots también está en la base
 fallidos de inicio de sesión siguen en memoria de cada réplica (con dos, quien
 prueba claves tiene a lo sumo el doble de intentos antes del bloqueo).
 
-El aviso periódico de la posición en la fila de un grupo
-(services/posicion_colas.py) corre solo en la líder, como el resto de lo que
-habla con FreeSWITCH por iniciativa propia.
+El vigía de los grupos (services/vigia_colas.py: foto en vivo de las filas,
+aviso periódico de la posición, devoluciones de llamada) y la calidad
+automática nocturna (services/calidad_auto.py) corren solo en la líder, como
+el resto de lo que habla con FreeSWITCH o gasta IA por iniciativa propia. La
+foto de los grupos viaja por el bus (mensaje `colas`) para que cualquier
+réplica la muestre.
 
 Las escuchas del supervisor (escuchar, susurrar, intervenir) están en la
 tabla `monitoreos`: la petición la atiende cualquier réplica y los eventos los

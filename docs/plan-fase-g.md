@@ -1,6 +1,7 @@
 # Fase G: comprobar en vivo, fila sin espera y operación más tranquila
 
-Borrador para decidir el alcance. Sale de lo que quedó abierto al cerrar las
+**Estado: hecha** (ver «Lo que se hizo» al final). Abajo, el plan tal como se
+escribió para decidir el alcance. Sale de lo que quedó abierto al cerrar las
 fases A a F (auditoría de funcionamiento) y de lo que todavía no se puede
 saber sin llamadas reales.
 
@@ -146,3 +147,16 @@ G1 primero: valida todo lo hecho y deja la red de seguridad para lo que sigue.
 Después G2 y G3, que atacan juntos el abandono en la fila. Luego G4, G5 y G6
 según lo que pidan los clientes, y G7 antes de pasar a dos réplicas o de sumar
 empresas grandes.
+
+
+## Lo que se hizo
+
+| Bloque | Dónde | Notas |
+|---|---|---|
+| G1 | `services/humo.py`, `python -m app.humo`, Plataforma › Empresas › «Probar la central» | Central, proveedores, teléfonos, voces, número sin ruta, buzón y fila de un grupo. Las transferencias necesitan dos teléfonos: a mano. |
+| G2 y G3 | `services/vigia_colas.py`, revisión 0026, Supervisión y wallboard | Devolución con la tecla 1 (`cc_exit_keys`); hasta 3 intentos. Tarjetas de grupos con alerta a los 2 min. |
+| G4 | `config_generator` (*97, *98), `api/buzon.py` (saludo), revisión 0027 | Transcripción con Deepgram; aviso solo en Android (en iOS el token es de llamadas). Sin PIN: *97 escucha el buzón de la extensión que marca. |
+| G5 | `services/festivos.py`, revisión 0028, Ajustes | «Cerrar en festivos» es opcional (apagado por defecto) para no cambiar de golpe lo que ya atiende. |
+| G6 | `services/calidad_auto.py`, revisión 0029, Calidad | Las propuestas sin revisar no cuentan ni las ve el agente. El costo no se registra aparte en Consumo IA. |
+| G7 | `services/operacion.py`, `core/metricas.py` | No se reimplementó la copia externa ni el simulacro: ya existen como scripts (cifrados y sin tocar producción); el panel muestra su estado y `/metrics` lo exporta. fail2ban sigue de solo lectura. El tope de inicio de sesión sigue por réplica. |
+| G8 | App: Menú › Trabajar, ficha en la llamada, contador del buzón | El audio de la sala se contesta solo con el token de la sesión. |
