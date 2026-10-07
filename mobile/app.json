@@ -66,7 +66,8 @@
         {
           "contactsPermission": "NSPBX lee tus contactos para que puedas llamarlos sin escribir el número."
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "extra": {
       "router": {},

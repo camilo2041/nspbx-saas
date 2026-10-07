@@ -34,6 +34,11 @@ Developer y Firebase en los pasos siguientes.
    APNS_USE_SANDBOX=true              # true en desarrollo/TestFlight interno, false en producción
    ```
 
+   La misma clave sirve para los dos avisos del iPhone: el de llamada (PushKit) y el de
+   «mensaje de voz nuevo», que usa el token normal de APNs (lo pide la app al entrar, con
+   el permiso de notificaciones). No hay que configurar nada más; si la persona no da el
+   permiso, solo se pierde el aviso del buzón, las llamadas siguen sonando.
+
 ## 3. Android — Firebase (push de voz)
 
 Es lo que hace que una llamada entre **con la app cerrada o el teléfono bloqueado**. Sin esto solo entran con la app abierta.

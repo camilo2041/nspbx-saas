@@ -270,3 +270,45 @@ async def avisos_csp():
     from app.api import csp
 
     return csp.resumen()
+
+# --- Desbloqueo de IP de fail2ban (services/desbloqueos.py) -------------------------------
+
+
+class DesbloqueoIn(BaseModel):
+    jail: str
+    ip: str
+    motivo: str | None = None
+
+
+@router.get("/desbloqueos")
+async def ver_desbloqueos(session: AsyncSession = Depends(get_admin_session)):
+    """Lo que fail2ban tiene bloqueado ahora y los últimos pedidos de desbloqueo."""
+    from app.models import DesbloqueoIp
+    from app.services import desbloqueos, fail2ban
+
+    pedidos = (await session.execute(select(DesbloqueoIp).order_by(DesbloqueoIp.id.desc()).limit(30))).scalars().all()
+    return {
+        "disponible": fail2ban.disponible(),
+        "bloqueos": [{"jail": b.jail, "ip": b.ip, "desde": b.desde, "hasta": b.hasta, "veces": b.veces}
+                     for b in fail2ban.bloqueos()],
+        "pedidos": [{
+            "id": p.id, "jail": p.jail, "ip": p.ip, "motivo": p.motivo, "pedido_por": p.pedido_por,
+            "pedido_en": p.pedido_en, "estado": p.estado, "resuelto_en": p.resuelto_en, "detalle": p.detalle,
+            "sin_atender": desbloqueos.sin_atender(p),
+        } for p in pedidos],
+    }
+
+
+@router.post("/desbloqueos", status_code=201)
+async def pedir_desbloqueo(
+    datos: DesbloqueoIn, session: AsyncSession = Depends(get_admin_session), usuario: User = Depends(usuario_actual),
+):
+    """Deja el pedido; lo ejecuta el script del host en menos de un minuto."""
+    from app.services import desbloqueos
+
+    try:
+        pedido = await desbloqueos.pedir(session, datos.jail, datos.ip, datos.motivo, usuario.username)
+    except desbloqueos.PedidoInvalido as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    logger.warning("Desbloqueo de %s (%s) pedido por %s", pedido.ip, pedido.jail, usuario.username)
+    return {"id": pedido.id, "estado": pedido.estado}

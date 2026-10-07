@@ -9,7 +9,7 @@ import { exito, fallo, toque } from "@/src/haptico";
 import { AudioDeApi, mmss } from "@/src/Reproductor";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
 import { useColores } from "@/src/tema";
-import { Boton, Pildora, Tarjeta } from "@/src/ui";
+import { Boton, Campo, Pildora, Tarjeta } from "@/src/ui";
 
 interface Mensaje {
   id: number;
@@ -136,6 +136,68 @@ export default function Buzon() {
           </Tarjeta>
         );
       })}
+      <PinRemoto />
     </Pantalla>
+  );
+}
+
+/** PIN para escuchar el buzón marcando *96 desde otro teléfono (el mismo del panel). */
+function PinRemoto() {
+  const c = useColores();
+  const { datos, mutar } = useDatos<{ extension: string; tiene_pin: boolean; marcar: string }>("/api/buzon/pin");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [trabajando, setTrabajando] = useState(false);
+  if (!datos) return null;
+
+  const guardar = async () => {
+    setTrabajando(true);
+    setError("");
+    try {
+      const nuevo = await peticion<typeof datos>("/api/buzon/pin", { method: "PUT", body: { pin } });
+      mutar(() => nuevo);
+      setPin("");
+      exito();
+    } catch (e) {
+      fallo();
+      setError(e instanceof ApiError ? e.message : "No se pudo guardar el PIN");
+    } finally {
+      setTrabajando(false);
+    }
+  };
+
+  return (
+    <Tarjeta style={{ gap: 10 }}>
+      <Text style={{ fontSize: 15, fontWeight: "700", color: c.texto }}>Escuchar desde otro teléfono</Text>
+      <Text style={{ fontSize: 13, color: c.textoSecundario, lineHeight: 19 }}>
+        {datos.tiene_pin
+          ? `Marca ${datos.marcar} desde cualquier extensión, luego tu extensión (${datos.extension}) y tu PIN, cada uno con #.`
+          : `Ponle un PIN para escucharlo marcando ${datos.marcar} desde otro teléfono.`}
+      </Text>
+      <Campo
+        etiqueta={datos.tiene_pin ? "Nuevo PIN" : "PIN (4 a 8 números)"}
+        value={pin}
+        onChangeText={(v) => setPin(v.replace(/[^0-9]/g, "").slice(0, 8))}
+        keyboardType="number-pad"
+        secureTextEntry
+        error={error || undefined}
+        ayuda="Evita PIN fáciles (1111, 1234 o tu extensión): no se aceptan."
+      />
+      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+        <Boton chico titulo={datos.tiene_pin ? "Cambiar PIN" : "Guardar PIN"} cargando={trabajando} deshabilitado={pin.length < 4} onPress={guardar} />
+        {datos.tiene_pin ? (
+          <Boton
+            chico
+            titulo="Quitar el PIN"
+            variante="texto"
+            onPress={async () => {
+              toque();
+              await peticion("/api/buzon/pin", { method: "DELETE" }).catch(() => undefined);
+              mutar(() => ({ ...datos, tiene_pin: false }));
+            }}
+          />
+        ) : null}
+      </View>
+    </Tarjeta>
   );
 }

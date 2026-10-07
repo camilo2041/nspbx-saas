@@ -208,9 +208,15 @@ export default function SeguridadPage() {
                 hint="Nadie está bloqueado ahora mismo. Los intentos fallidos se siguen contando: 6 en 10 minutos activan un bloqueo de 24 horas."
               />
             ) : (
-              <Table head={["IP", "Origen", "Bloqueada el", "Le queda", "Reincidencia"]}>
+<>
+                              <Table head={["IP", "Origen", "Bloqueada el", "Le queda", "Reincidencia"]}>
                 {filas(datos.vigentes, true)}
               </Table>
+                <p className="px-5 pb-4 pt-2 text-xs text-muted">
+                  ¿Es una IP de tu oficina? El bloqueo protege a todo el servidor: pídele al operador de la plataforma que la
+                  desbloquee (lo hace desde Plataforma › Empresas).
+                </p>
+              </>
             )}
           </Card>
 

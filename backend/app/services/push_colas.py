@@ -64,7 +64,7 @@ async def recibir(ev: dict[str, str]) -> int:
                 await session.execute(
                     select(Extension.number)
                     .join(DeviceToken, DeviceToken.extension_id == Extension.id)
-                    .where(Extension.number.in_(agentes))
+                    .where(Extension.number.in_(agentes), DeviceToken.token_type.in_(push.TOKENS_DE_LLAMADA))
                 )
             ).scalars()
         )

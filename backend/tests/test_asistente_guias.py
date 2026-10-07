@@ -26,3 +26,15 @@ def test_el_prompt_ofrece_las_guias():
     assert "[[guia:id]]" in sistema
     for gid in GUIAS:
         assert f"- {gid}:" in sistema
+
+
+GUIAS_APP = Path(__file__).resolve().parents[2] / "mobile" / "src" / "guias.ts"
+
+
+def test_las_guias_de_la_app_existen_en_el_asistente():
+    """La app tiene solo las que se hacen desde el teléfono, pero con los mismos ids."""
+    if not GUIAS_APP.exists():
+        return
+    ids = re.findall(r'^\s{4}id: "([a-z0-9-]+)",$', GUIAS_APP.read_text(encoding="utf-8"), flags=re.M)
+    assert ids and len(ids) == len(set(ids))
+    assert set(ids) <= set(GUIAS), set(ids) - set(GUIAS)

@@ -1637,6 +1637,28 @@ class CupoUso(Base):
     conteo: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class DesbloqueoIp(Base):
+    """Pedido de quitar una IP de un bloqueo de fail2ban, desde Plataforma.
+
+    La aplicación no toca el cortafuegos (services/fail2ban.py): deja el
+    pedido aquí y un script del host (scripts/fail2ban-desbloquear.sh) corre
+    solo `fail2ban-client set <jail> unbanip <ip>` y anota cómo le fue.
+    De la plataforma, no de una empresa: sin tenant_id ni RLS."""
+
+    __tablename__ = "desbloqueos_ip"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    jail: Mapped[str] = mapped_column(String(64))
+    ip: Mapped[str] = mapped_column(String(64))
+    motivo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    pedido_por: Mapped[str] = mapped_column(String(100))
+    pedido_en: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # pendiente | hecho | no_estaba | error
+    estado: Mapped[str] = mapped_column(String(20), default="pendiente", index=True)
+    resuelto_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    detalle: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
 class IntentoAcceso(Base):
     """Intentos fallidos de inicio de sesión (o de un código de verificación)
     por IP, por cuenta y por ambas. En la base para que el bloqueo sea uno

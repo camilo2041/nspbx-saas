@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import { useRouter } from "expo-router";
 import { Text, View } from "react-native";
 
 import { useAuth } from "@/src/auth/AuthContext";
+import { ponerInsignia } from "@/src/avisos";
 import { useDatos } from "@/src/datos";
 import { Avatar, Pantalla } from "@/src/gestion";
 import { toque } from "@/src/haptico";
@@ -86,6 +88,10 @@ export default function Menu() {
   // Mensajes de voz sin escuchar, junto a «Buzón de voz».
   const veBuzon = puede("llamadas:ver_propias") || puede("llamadas:ver_todas");
   const { datos: buzon } = useDatos<{ sin_escuchar: number }>(veBuzon ? "/api/buzon/resumen" : null, { ttl: 15_000 });
+  // El ícono de la app (iPhone) muestra lo mismo; al escuchar, baja.
+  useEffect(() => {
+    if (buzon) ponerInsignia(buzon.sin_escuchar);
+  }, [buzon]);
 
   const permitido = (x: Entrada) =>
     (x.permiso === null || (Array.isArray(x.permiso) ? x.permiso.some(puede) : puede(x.permiso))) &&

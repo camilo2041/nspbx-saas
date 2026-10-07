@@ -15,6 +15,7 @@ Contener va antes que entender: primero se corta la pérdida.
 | 7 | [Troncal caída](troncal-caida.md) | S2–S3 |
 | 8 | [Recuperación total desde respaldo](recuperacion-total.md) | S1 |
 | 9 | [Rotación de cada secreto](rotacion-de-secretos.md) | — |
+| 10 | [Desbloquear una IP de fail2ban](desbloquear-ip.md) | S3 |
 
 Severidades: **S1** viola una invariante o hay pérdida económica en curso;
 **S2** degradación para varias empresas; **S3** una empresa o una función.
