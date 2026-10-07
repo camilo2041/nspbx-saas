@@ -1637,6 +1637,29 @@ class CupoUso(Base):
     conteo: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ErrorCliente(Base):
+    """Un error del panel (navegador) o de la app, agrupado por firma: el
+    mismo fallo en cien navegadores es una fila con veces=100
+    (services/errores_cliente.py). Lo ve Plataforma; sin RLS."""
+
+    __tablename__ = "errores_cliente"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    firma: Mapped[str] = mapped_column(String(64), unique=True)
+    origen: Mapped[str] = mapped_column(String(10))  # panel | app
+    mensaje: Mapped[str] = mapped_column(String(300))
+    pila: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ruta: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    version: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    usuario: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    veces: Mapped[int] = mapped_column(Integer, default=1)
+    usuarios: Mapped[int] = mapped_column(Integer, default=1)
+    primera_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ultima_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    resuelto: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+
 class VerificacionVivo(Base):
     """Una prueba en vivo de una empresa (services/verificacion.py): cuándo
     se hizo, quién, cómo terminó y la evidencia. La maneja Plataforma."""

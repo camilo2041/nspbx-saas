@@ -415,3 +415,34 @@ async def resultado_verificacion(verif_id: int, datos: VerificacionResultado, se
     v.nota = (datos.nota or "").strip()[:500] or v.nota
     await session.commit()
     return _verif_salida(v)
+
+
+# --- Errores del panel y de la app (services/errores_cliente.py) ------------------------------
+
+
+@router.get("/errores")
+async def ver_errores(resueltos: bool = False, session: AsyncSession = Depends(get_admin_session)):
+    """Los grupos de error, del más reciente al más viejo."""
+    from app.models import ErrorCliente
+
+    q = select(ErrorCliente).order_by(ErrorCliente.ultima_vez.desc()).limit(200)
+    if not resueltos:
+        q = q.where(ErrorCliente.resuelto.is_(False))
+    empresas = {t.id: t.name for t in (await session.execute(select(Tenant))).scalars().all()}
+    return [{
+        "id": e.id, "origen": e.origen, "mensaje": e.mensaje, "pila": e.pila, "ruta": e.ruta, "version": e.version,
+        "empresa": empresas.get(e.tenant_id) if e.tenant_id else None, "veces": e.veces, "usuarios": e.usuarios,
+        "primera_vez": e.primera_vez, "ultima_vez": e.ultima_vez, "resuelto": e.resuelto,
+    } for e in (await session.execute(q)).scalars().all()]
+
+
+@router.put("/errores/{error_id}/resuelto", status_code=204)
+async def resolver_error(error_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Arreglado: sale de la lista. Si vuelve a pasar, reaparece solo."""
+    from app.models import ErrorCliente
+
+    e = await session.get(ErrorCliente, error_id)
+    if e is None:
+        raise HTTPException(status_code=404, detail="Error no encontrado")
+    e.resuelto = True
+    await session.commit()

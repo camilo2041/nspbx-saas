@@ -22,6 +22,7 @@ import {
 } from "@/components/ui";
 import { AuditTable } from "@/components/audit-table";
 import { DesbloqueosPlataforma } from "@/components/desbloqueos-plataforma";
+import { ErroresPlataforma } from "@/components/errores-plataforma";
 import { OperacionPlataforma } from "@/components/operacion-plataforma";
 import { VerificacionVivo } from "@/components/verificacion-vivo";
 import { PruebaHumo } from "@/components/prueba-humo";
@@ -483,6 +484,7 @@ export default function EmpresasPage() {
       )}
 
       <VerificacionVivo empresas={items} />
+      <ErroresPlataforma />
       <OperacionPlataforma />
       <DesbloqueosPlataforma />
 

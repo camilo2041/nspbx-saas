@@ -86,3 +86,52 @@ async def test_las_manuales_se_cierran_a_mano(cliente, mundo):
                                    json={"tenant_id": mundo.alfa.id, "clave": "no-existe"})).status_code == 422
     finally:
         await _limpiar_verificaciones(mundo.alfa.id)
+
+
+# --- J3: errores del panel y la app ----------------------------------------------------------
+
+from app.models import ErrorCliente  # noqa: E402
+from app.services import errores_cliente  # noqa: E402
+
+
+def test_se_limpian_tokens_y_numeros():
+    t = errores_cliente.limpiar(
+        "fallo con Bearer abc.def y token=xyz123 para 3001234567 eyJhbGciOi.eyJzdWIiOjF9.firma en /api/x?clave=sec", 300
+    )
+    assert "abc.def" not in t and "xyz123" not in t and "3001234567" not in t and "eyJhbGciOi" not in t and "sec" not in t
+    # La firma no cambia por números ni líneas.
+    f1 = errores_cliente.firma("panel", "No existe la campaña 12", "at f (a.js:10:5)")
+    f2 = errores_cliente.firma("panel", "No existe la campaña 99", "at f (a.js:88:1)")
+    assert f1 == f2 != errores_cliente.firma("app", "No existe la campaña 12", "at f (a.js:10:5)")
+
+
+async def test_los_errores_se_agrupan_y_los_ve_la_plataforma(cliente, mundo):
+    async with async_session() as s:
+        await s.execute(delete(ErrorCliente))
+        await s.commit()
+    asesor = mundo.alfa.cabeceras(permissions.ASESOR)
+    admin = mundo.alfa.cabeceras(permissions.ADMIN)
+    cuerpo = {"origen": "panel", "mensaje": "TypeError: x is undefined", "pila": "TypeError\n at Ficha (ficha.js:12:3)",
+              "ruta": "/calls?token=secreto"}
+    try:
+        assert (await cliente.post("/api/errores", json=cuerpo)).status_code == 401  # sin sesión, no
+        assert (await cliente.post("/api/errores", headers=asesor, json=cuerpo)).status_code == 204
+        assert (await cliente.post("/api/errores", headers=asesor, json=cuerpo)).status_code == 204
+        assert (await cliente.post("/api/errores", headers=admin, json=cuerpo)).status_code == 204
+        assert (await cliente.post("/api/errores", headers=asesor, json={**cuerpo, "origen": "otro"})).status_code == 422
+        # Solo la plataforma los lee.
+        assert (await cliente.get("/api/plataforma/errores", headers=admin)).status_code == 403
+        plataforma = mundo.cabeceras_plataforma()
+        lista = (await cliente.get("/api/plataforma/errores", headers=plataforma)).json()
+        assert len(lista) == 1
+        e = lista[0]
+        assert (e["veces"], e["usuarios"], e["ruta"], e["empresa"]) == (3, 2, "/calls", "Empresa alfa")
+        assert (await cliente.put(f"/api/plataforma/errores/{e['id']}/resuelto", headers=plataforma)).status_code == 204
+        assert (await cliente.get("/api/plataforma/errores", headers=plataforma)).json() == []
+        # Vuelve a pasar: reaparece.
+        await cliente.post("/api/errores", headers=asesor, json=cuerpo)
+        assert len((await cliente.get("/api/plataforma/errores", headers=plataforma)).json()) == 1
+    finally:
+        async with async_session() as s:
+            await s.execute(delete(ErrorCliente))
+            await s.commit()
