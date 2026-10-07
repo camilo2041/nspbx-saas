@@ -142,3 +142,64 @@ async def test_pin_del_buzon_desde_el_panel(cliente, mundo):
             await s.execute(update(Extension).where(Extension.tenant_id == mundo.alfa.id, Extension.number == "1000")
                             .values(voicemail=False, voicemail_pin=None))
             await s.commit()
+
+
+# --- H3: tope de inicio de sesión compartido ----------------------------------------------
+
+from fastapi import HTTPException  # noqa: E402
+
+from app.core import limitador  # noqa: E402
+
+
+async def _limpiar_intentos():
+    async with async_session() as s:
+        await s.execute(text("DELETE FROM intentos_acceso"))
+        await s.commit()
+
+
+async def test_los_fallos_se_cuentan_en_la_base_para_todas_las_replicas(mundo):
+    await _limpiar_intentos()
+    try:
+        for _ in range(4):
+            await limitador.registrar_fallo("10.0.0.9", "ana")
+        await limitador.exigir_libre("10.0.0.9", "ana")  # aún libre
+        # Otra réplica no tiene nada en memoria: el bloqueo sale de la base.
+        limitador.POR_IP_Y_USUARIO.memoria = limitador.LimiteIntentos(5, 900, 900)
+        await limitador.registrar_fallo("10.0.0.9", "ana")
+        with pytest.raises(HTTPException) as exc:
+            await limitador.exigir_libre("10.0.0.9", "ana")
+        assert exc.value.status_code == 429 and int(exc.value.headers["Retry-After"]) > 800
+        # El bloqueo es del par: la misma cuenta desde otra IP sigue (hasta su propio tope).
+        await limitador.exigir_libre("10.0.0.10", "ana")
+        # Acertar desde otra IP no perdona el bloqueo del par.
+        await limitador.registrar_exito("10.0.0.10", "ana")
+        with pytest.raises(HTTPException):
+            await limitador.exigir_libre("10.0.0.9", "ana")
+    finally:
+        await _limpiar_intentos()
+
+
+async def test_sin_base_el_limite_sigue_en_memoria(mundo, monkeypatch):
+    def sin_base():
+        raise OSError("base caída")
+
+    monkeypatch.setattr(limitador, "_sesion", sin_base)
+    monkeypatch.setattr(limitador.POR_IP_Y_USUARIO, "memoria", limitador.LimiteIntentos(5, 900, 900))
+    for _ in range(5):
+        await limitador.registrar_fallo("10.0.0.11", "beto")
+    with pytest.raises(HTTPException) as exc:
+        await limitador.exigir_libre("10.0.0.11", "beto")
+    assert exc.value.status_code == 429
+
+
+async def test_login_bloquea_tras_cinco_fallos(cliente, mundo):
+    await _limpiar_intentos()
+    try:
+        cuerpo = {"username": "nadie-h3", "password": "mal"}
+        codigos = [(await cliente.post("/api/auth/login", json=cuerpo)).status_code for _ in range(6)]
+        assert codigos == [401] * 5 + [429]
+        async with async_session() as s:
+            n = (await s.execute(text("SELECT count(*) FROM intentos_acceso WHERE hasta > 0"))).scalar_one()
+        assert n == 1
+    finally:
+        await _limpiar_intentos()

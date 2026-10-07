@@ -1,14 +1,24 @@
 """Límite de intentos fallidos (fuerza bruta) y dirección real del cliente.
 
-En memoria: el backend corre en un solo proceso, y un reinicio solo "perdona"
-los contadores. Si algún día se escala a varios procesos, esto pasa a Redis.
+Los intentos de inicio de sesión se cuentan en la base (tabla
+`intentos_acceso`): con varias réplicas, quien prueba claves no consigue el
+doble de intentos repartiéndolos entre ellas. Si la base no responde, se
+sigue contando en memoria de la réplica: mejor un freno por réplica que
+dejar entrar sin freno o dejar a todos fuera.
+
+Los topes de uso baratos (LimiteIntentos + limitar_uso, p. ej. los reportes
+CSP) siguen en memoria.
 """
+import logging
 import time
 from collections import defaultdict, deque
 
 from fastapi import HTTPException, Request, status
+from sqlalchemy import text
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def ip_cliente(request: Request) -> str:
@@ -69,21 +79,67 @@ class LimiteIntentos:
         self._hasta.pop(clave, None)
 
 
+class LimiteCompartido:
+    """Como LimiteIntentos, pero en la base y con ventana fija desde el
+    primer fallo: todas las réplicas ven el mismo conteo y el mismo bloqueo.
+    `memoria` es el respaldo si la base falla."""
+
+    _FALLO = text(
+        "INSERT INTO intentos_acceso (clave, fallos, inicio, hasta) VALUES (:clave, 1, :ahora, 0) "
+        "ON CONFLICT (clave) DO UPDATE SET "
+        "fallos = CASE WHEN intentos_acceso.inicio < :desde THEN 1 ELSE intentos_acceso.fallos + 1 END, "
+        "inicio = CASE WHEN intentos_acceso.inicio < :desde THEN :ahora ELSE intentos_acceso.inicio END "
+        "RETURNING fallos"
+    )
+    _BLOQUEAR = text("UPDATE intentos_acceso SET fallos = 0, inicio = :ahora, hasta = :hasta WHERE clave = :clave")
+
+    def __init__(self, nombre: str, maximo: int, ventana: int, bloqueo: int):
+        self.nombre, self.maximo, self.ventana, self.bloqueo = nombre, maximo, ventana, bloqueo
+        self.memoria = LimiteIntentos(maximo, ventana, bloqueo)
+
+    def clave(self, clave: str) -> str:
+        return f"{self.nombre}:{clave}"[:200]
+
+    async def fallo(self, session, clave: str, ahora: float) -> None:
+        k = self.clave(clave)
+        fallos = (await session.execute(self._FALLO, {"clave": k, "ahora": ahora, "desde": ahora - self.ventana})).scalar_one()
+        if fallos >= self.maximo:
+            await session.execute(self._BLOQUEAR, {"clave": k, "ahora": ahora, "hasta": ahora + self.bloqueo})
+
+
 # Tres frenos a la vez: contra quien prueba claves de una cuenta desde un punto,
 # contra quien barre muchas cuentas desde un punto, y contra un ataque repartido
 # entre muchas IP a una misma cuenta. El de la cuenta es más alto para que un
 # tercero no pueda dejar fuera a un usuario legítimo con solo equivocarse a propósito.
-POR_IP_Y_USUARIO = LimiteIntentos(maximo=5, ventana=900, bloqueo=900)
-POR_IP = LimiteIntentos(maximo=30, ventana=900, bloqueo=900)
-POR_USUARIO = LimiteIntentos(maximo=25, ventana=900, bloqueo=900)
+POR_IP_Y_USUARIO = LimiteCompartido("ipu", maximo=5, ventana=900, bloqueo=900)
+POR_IP = LimiteCompartido("ip", maximo=30, ventana=900, bloqueo=900)
+POR_USUARIO = LimiteCompartido("u", maximo=25, ventana=900, bloqueo=900)
 
 
-def exigir_libre(ip: str, usuario: str) -> None:
-    espera = max(
-        POR_IP_Y_USUARIO.restante(f"{ip}|{usuario}"),
-        POR_IP.restante(ip),
-        POR_USUARIO.restante(usuario),
-    )
+def _frenos(ip: str, usuario: str) -> list[tuple[LimiteCompartido, str]]:
+    return [(POR_IP_Y_USUARIO, f"{ip}|{usuario}"), (POR_IP, ip), (POR_USUARIO, usuario)]
+
+
+def _sesion():
+    from app.core.database import async_session  # tarde: database importa la config completa
+
+    return async_session()
+
+
+async def exigir_libre(ip: str, usuario: str) -> None:
+    ahora = time.time()
+    frenos = _frenos(ip, usuario)
+    try:
+        async with _sesion() as session:
+            filas = await session.execute(
+                text("SELECT max(hasta) FROM intentos_acceso WHERE clave = ANY(:claves)"),
+                {"claves": [f.clave(c) for f, c in frenos]},
+            )
+            hasta = filas.scalar() or 0
+        espera = max(0, int(hasta - ahora) + 1) if hasta > ahora else 0
+    except Exception:
+        logger.warning("Límite de inicio de sesión: la base no respondió; se usa el de esta réplica", exc_info=True)
+        espera = max(f.memoria.restante(c) for f, c in frenos)
     if espera:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
@@ -92,14 +148,41 @@ def exigir_libre(ip: str, usuario: str) -> None:
         )
 
 
-def registrar_fallo(ip: str, usuario: str) -> None:
-    POR_IP_Y_USUARIO.fallo(f"{ip}|{usuario}")
-    POR_IP.fallo(ip)
-    POR_USUARIO.fallo(usuario)
+async def registrar_fallo(ip: str, usuario: str) -> None:
+    ahora = time.time()
+    frenos = _frenos(ip, usuario)
+    try:
+        async with _sesion() as session:
+            for freno, clave in frenos:
+                await freno.fallo(session, clave, ahora)
+            await session.commit()
+    except Exception:
+        logger.warning("Límite de inicio de sesión: la base no respondió; se cuenta en esta réplica", exc_info=True)
+        for freno, clave in frenos:
+            freno.memoria.fallo(clave)
 
 
-def registrar_exito(ip: str, usuario: str) -> None:
-    POR_IP_Y_USUARIO.exito(f"{ip}|{usuario}")
+async def registrar_exito(ip: str, usuario: str) -> None:
+    """Solo perdona el par IP+usuario: los frenos por IP y por cuenta siguen."""
+    clave = POR_IP_Y_USUARIO.clave(f"{ip}|{usuario}")
+    POR_IP_Y_USUARIO.memoria.exito(f"{ip}|{usuario}")
+    try:
+        async with _sesion() as session:
+            await session.execute(text("DELETE FROM intentos_acceso WHERE clave = :clave"), {"clave": clave})
+            await session.commit()
+    except Exception:
+        logger.warning("Límite de inicio de sesión: no se pudo limpiar el contador", exc_info=True)
+
+
+async def purgar() -> None:
+    """Los contadores viejos y los bloqueos vencidos (mantenimiento)."""
+    ahora = time.time()
+    async with _sesion() as session:
+        await session.execute(
+            text("DELETE FROM intentos_acceso WHERE hasta < :ahora AND inicio < :viejo"),
+            {"ahora": ahora, "viejo": ahora - 3600},
+        )
+        await session.commit()
 
 
 def limitar_uso(limite: LimiteIntentos, clave: str, mensaje: str = "Demasiadas solicitudes seguidas; espera un momento") -> None:

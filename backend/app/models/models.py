@@ -1633,6 +1633,19 @@ class CupoUso(Base):
     conteo: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class IntentoAcceso(Base):
+    """Intentos fallidos de inicio de sesión (o de un código de verificación)
+    por IP, por cuenta y por ambas. En la base para que el bloqueo sea uno
+    solo entre réplicas (core/limitador.py). Tiempos en epoch."""
+
+    __tablename__ = "intentos_acceso"
+
+    clave: Mapped[str] = mapped_column(String(200), primary_key=True)
+    fallos: Mapped[int] = mapped_column(Integer, default=0)
+    inicio: Mapped[float] = mapped_column(Float, default=0)
+    hasta: Mapped[float] = mapped_column(Float, default=0)
+
+
 class Devolucion(Base):
     """Alguien que esperaba en un grupo marcó 1 para que le devolvieran la
     llamada (services/vigia_colas.py). Cuando le toca y hay un agente libre,

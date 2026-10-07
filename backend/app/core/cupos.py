@@ -5,9 +5,9 @@ con el tope en memoria de cada proceso, dos réplicas dejaban pasar el doble.
 Ventana fija: se cuenta por clave en la ventana actual (epoch // duración)
 con un solo UPSERT atómico, sin carreras entre réplicas.
 
-Los intentos fallidos de inicio de sesión siguen en memoria
-(core/limitador.py): ahí el tope por réplica sigue frenando a quien prueba
-claves, y no se le agrega una escritura en la base a cada intento.
+Los intentos fallidos de inicio de sesión van en su propia tabla
+(`intentos_acceso`, core/limitador.py): necesitan bloqueo temporal y no una
+ventana de un minuto.
 """
 
 import time

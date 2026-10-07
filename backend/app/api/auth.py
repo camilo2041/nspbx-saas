@@ -122,7 +122,7 @@ async def login(payload: LoginRequest, request: Request, session: AsyncSession =
     nombre = payload.username.strip().lower()[:100]
     ip = limitador.ip_cliente(request)
     # Antes de tocar la base o gastar un PBKDF2: quien ya está bloqueado no obtiene ni una pista.
-    limitador.exigir_libre(ip, nombre)
+    await limitador.exigir_libre(ip, nombre)
     usuario = (
         (await session.execute(select(User).where(User.username == nombre)))
         .unique()
@@ -140,10 +140,10 @@ async def login(payload: LoginRequest, request: Request, session: AsyncSession =
     correcta = await asyncio.to_thread(verificar_password, payload.password, hash_referencia)
 
     if not usuario or not correcta:
-        limitador.registrar_fallo(ip, nombre)
+        await limitador.registrar_fallo(ip, nombre)
         logger.info("Intento de acceso fallido para '%s' desde %s", payload.username[:100], ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario o contraseña incorrectos")
-    limitador.registrar_exito(ip, nombre)
+    await limitador.registrar_exito(ip, nombre)
     if not usuario.enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Esta cuenta está desactivada")
     if usuario.tenant_id is not None:
@@ -251,12 +251,12 @@ async def activar_mfa(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Primero genera el código para la app")
     clave = f"mfa:{fresco.id}"
     ip = limitador.ip_cliente(request)
-    limitador.exigir_libre(ip, clave)
+    await limitador.exigir_libre(ip, clave)
     paso = mfa.verificar(fresco.mfa_secret, payload.codigo, fresco.mfa_last_step)
     if paso is None:
-        limitador.registrar_fallo(ip, clave)
+        await limitador.registrar_fallo(ip, clave)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El código no es correcto. Revisa la hora del teléfono.")
-    limitador.registrar_exito(ip, clave)
+    await limitador.registrar_exito(ip, clave)
     codigos = mfa.nuevos_codigos_recuperacion()
     fresco.mfa_enabled = True
     fresco.mfa_last_step = paso
@@ -284,11 +284,11 @@ async def desactivar_mfa(
     fresco = await session.get(User, usuario.id)
     clave = f"mfa:{fresco.id}"
     ip = limitador.ip_cliente(request)
-    limitador.exigir_libre(ip, clave)
+    await limitador.exigir_libre(ip, clave)
     if not fresco.mfa_enabled or not await asyncio.to_thread(verificar_password, payload.password, fresco.password_hash) or not _codigo_valido(fresco, payload.codigo):
-        limitador.registrar_fallo(ip, clave)
+        await limitador.registrar_fallo(ip, clave)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contraseña o código incorrectos")
-    limitador.registrar_exito(ip, clave)
+    await limitador.registrar_exito(ip, clave)
     fresco.mfa_enabled = False
     fresco.mfa_secret = None
     fresco.mfa_recovery = None
@@ -311,12 +311,12 @@ async def verificar_mfa(payload: MfaVerificarRequest, request: Request, session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión no válida")
     clave = f"mfa:{usuario.id}"
     ip = limitador.ip_cliente(request)
-    limitador.exigir_libre(ip, clave)
+    await limitador.exigir_libre(ip, clave)
     if not _codigo_valido(usuario, payload.codigo):
-        limitador.registrar_fallo(ip, clave)
+        await limitador.registrar_fallo(ip, clave)
         await session.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Código incorrecto")
-    limitador.registrar_exito(ip, clave)
+    await limitador.registrar_exito(ip, clave)
     usuario.last_login_at = datetime.utcnow()
     await session.commit()
     await session.refresh(usuario)
