@@ -18,6 +18,7 @@ import {
   Tr,
   Badge,
 } from "@/components/ui";
+import { useOffsetPorFiltro } from "@/lib/paginacion";
 import { api } from "@/lib/api";
 
 const POR_PAGINA = 25;
@@ -290,7 +291,7 @@ export default function AiUsagePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busqueda, setBusqueda] = useState("");
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useOffsetPorFiltro([days, busqueda]);
 
   const load = async () => {
     setLoading(true);
@@ -314,15 +315,11 @@ export default function AiUsagePage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days, busqueda, offset]);
 
-  // Buscar o cambiar el rango vuelve a la primera página (ver el mismo
-  // criterio en /calls y /appointments).
-  useEffect(() => {
-    setOffset(0);
-  }, [days, busqueda]);
 
   const sinDatos = !loading && summary?.calls === 0;
 

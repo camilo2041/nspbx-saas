@@ -38,6 +38,7 @@ export function DiagnosticoCampana({ campaignId, version }: { campaignId: number
   }, [campaignId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     cargar();
     const t = setInterval(cargar, 5000);
     return () => clearInterval(t);

@@ -132,7 +132,9 @@ export default function ConsolaAgente() {
   // sabía en cuál se había quedado.
   const [arranque, setArranque] = useState<{ paso: string; error?: string } | null>(null);
   const connRef = useRef(connState);
-  connRef.current = connState;
+  useEffect(() => {
+    connRef.current = connState;
+  }, [connState]);
 
   useEffect(() => {
     // Por defecto quedan elegidas las campañas en curso (o todas si ninguna lo está).

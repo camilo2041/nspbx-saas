@@ -189,7 +189,9 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
   // Otras pantallas abren el asistente con una pregunta ya hecha (la ayuda
   // «¿Qué es esto?»: window.dispatchEvent(new CustomEvent("nspbx:preguntar", {detail: "…"}))).
   const enviarRef = useRef(enviar);
-  enviarRef.current = enviar;
+  useEffect(() => {
+    enviarRef.current = enviar;
+  }, [enviar]);
   useEffect(() => {
     const onPreguntar = (e: Event) => {
       const pregunta = (e as CustomEvent<string>).detail;

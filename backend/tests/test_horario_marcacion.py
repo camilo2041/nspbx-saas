@@ -9,10 +9,10 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from app.core.database import async_session, engine
-from app.models import Campaign, CampaignNumber, License, SystemSettings, Tenant, Trunk
+from app.models import Campaign, CampaignNumber, License, Tenant, Trunk
 from app.services import horario_marcacion as hm
 from app.services.ajustes import get_or_create_settings
 

@@ -141,9 +141,12 @@ export function HangupNodeView({ data, selected }: { data: FlowNodeData; selecte
   );
 }
 
+/** Lo que React Flow le pasa a cada nodo (solo lo que usan las vistas). */
+type PropsNodo = { data: FlowNodeData; selected?: boolean };
+
 export const nodeTypes = {
-  menu: (p: any) => <MenuNodeView data={p.data} selected={p.selected} />,
-  transfer: (p: any) => <TransferNodeView data={p.data} selected={p.selected} />,
-  hangup: (p: any) => <HangupNodeView data={p.data} selected={p.selected} />,
-  horario: (p: any) => <HorarioNodeView data={p.data} selected={p.selected} />,
+  menu: (p: PropsNodo) => <MenuNodeView data={p.data} selected={p.selected} />,
+  transfer: (p: PropsNodo) => <TransferNodeView data={p.data} selected={p.selected} />,
+  hangup: (p: PropsNodo) => <HangupNodeView data={p.data} selected={p.selected} />,
+  horario: (p: PropsNodo) => <HorarioNodeView data={p.data} selected={p.selected} />,
 };

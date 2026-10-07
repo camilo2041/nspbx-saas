@@ -21,7 +21,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import permissions
-from app.core.auth import requiere
 from app.core.database import get_admin_session
 from app.core.security import hash_password
 from app.models import Extension, License, Tenant, User, VoiceBot

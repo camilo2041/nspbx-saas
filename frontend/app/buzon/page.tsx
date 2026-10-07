@@ -91,6 +91,7 @@ export default function BuzonPage() {
   }, [filtro, extension]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     cargar();
     const t = setInterval(cargar, 30000);
     return () => clearInterval(t);

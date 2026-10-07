@@ -26,7 +26,7 @@ from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
 from app.core.config import settings
-from app.core.database import Base, async_session, engine, verificar_rol_sin_privilegios
+from app.core.database import async_session, engine, verificar_rol_sin_privilegios
 from app.core.security import hash_password
 from app.models import CampaignNumber, NodoFreeswitch, Queue, Tenant, Trunk, User
 

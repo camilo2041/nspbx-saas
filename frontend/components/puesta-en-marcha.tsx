@@ -52,6 +52,7 @@ export function PuestaEnMarcha({ delay = 0 }: { delay?: number }) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- lee localStorage después de montar (no existe en el servidor)
     setOculta(leerOculta());
     cargar();
     const t = setInterval(cargar, 15000);

@@ -21,6 +21,7 @@ import {
   Td,
   Tr,
 } from "@/components/ui";
+import { useOffsetPorFiltro } from "@/lib/paginacion";
 import { api } from "@/lib/api";
 import { LlamadasEnVivo } from "@/components/llamadas-en-vivo";
 import { useAuth } from "@/lib/auth";
@@ -411,8 +412,8 @@ export default function CallsPage() {
   const [cargandoResumen, setCargandoResumen] = useState(false);
 
   // Árbol de fechas (panel izquierdo). `null` en diaSeleccionado = "Todas".
-  const [offset, setOffset] = useState(0);
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
+  const [offset, setOffset] = useOffsetPorFiltro([direction, status, search, diaSeleccionado]);
   const [diasCount, setDiasCount] = useState<{ dia: string; total: number }[]>([]);
   const [expandedAnios, setExpandedAnios] = useState<Set<number>>(new Set());
   const [expandedMeses, setExpandedMeses] = useState<Set<string>>(new Set());
@@ -449,6 +450,7 @@ export default function CallsPage() {
   }, [direction, status, search]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     loadDias();
   }, [loadDias]);
 
@@ -522,15 +524,9 @@ export default function CallsPage() {
   }, [direction, status, search, diaSeleccionado, offset]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     load();
   }, [load]);
-
-  // Cualquier cambio de filtro o de día vuelve a la primera página: con
-  // el offset viejo, filtrar podía mostrar "sin resultados" aunque sí
-  // hubiera coincidencias más arriba.
-  useEffect(() => {
-    setOffset(0);
-  }, [direction, status, search, diaSeleccionado]);
 
   // Refresco automático: las llamadas entran solas mientras se mira la pantalla.
   useEffect(() => {

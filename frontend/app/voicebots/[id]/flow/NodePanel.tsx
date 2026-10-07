@@ -52,6 +52,7 @@ export function NodePanel({
 
   useEffect(() => {
     if (provider === "edge") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- cambiar de proveedor recarga su lista de voces
       setVoices(initialVoices);
       setVoice(initialVoices[0]?.id || "");
       return;

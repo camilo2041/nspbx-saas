@@ -83,6 +83,7 @@ export default function CobranzaPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     load();
   }, [load]);
 

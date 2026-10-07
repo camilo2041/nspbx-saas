@@ -1,0 +1,15 @@
+# Lint del backend (lo corre el CI: .github/workflows/ci.yml).
+line-length = 140
+target-version = "py311"
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+# Configuran el logging ANTES de importar el resto, a propósito: si no, los
+# logger.info() de los módulos importados se pierden (ver el comentario en cada uno).
+"app/main.py" = ["E402"]
+"app/voicebot_server.py" = ["E402"]
+# Las pruebas importan por bloques, junto a la sección que los usa, y
+# reciben fixtures de otros módulos como parámetros (pytest): F811 ahí es falso.
+"tests/*" = ["E402", "F811"]

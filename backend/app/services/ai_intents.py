@@ -12,7 +12,7 @@ gestión nueva —"recordatorio de pago", "encuesta de satisfacción"— es
 agregar una entrada a este diccionario, sin tocar el motor de la llamada.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 from app.core.clock import fecha_en_palabras, hora_en_palabras

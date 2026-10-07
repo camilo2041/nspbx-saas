@@ -394,7 +394,7 @@ def _append_dnd_hook(context: ET.Element, extensions: list, tenant_id: int) -> N
     numbers = "|".join(e.number for e in extensions)
 
     cortar = ET.SubElement(context, "extension", attrib={"name": "nspbx_dnd_cortar", "continue": "false"})
-    c1 = ET.SubElement(cortar, "condition", attrib={"field": "destination_number", "expression": f"^({numbers})$"})
+    ET.SubElement(cortar, "condition", attrib={"field": "destination_number", "expression": f"^({numbers})$"})
     c2 = ET.SubElement(cortar, "condition", attrib={"field": f"${{db(select/dnd/${{destination_number}}_t{int(tenant_id)})}}", "expression": "^on$"})
     ET.SubElement(c2, "action", attrib={"application": "answer"})
     # Con buzón: quien llama deja su mensaje en vez de solo oír el aviso.

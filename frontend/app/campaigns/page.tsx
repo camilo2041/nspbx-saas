@@ -27,6 +27,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { AvisoHorarioCampanas } from "@/components/aviso-horario-campanas";
+import { useOffsetPorFiltro } from "@/lib/paginacion";
 import { api } from "@/lib/api";
 import {
   CampaignNumber,
@@ -124,7 +125,7 @@ export default function CampaignsPage() {
   const [numbers, setNumbers] = useState<CampaignNumber[]>([]);
   const [buscarNumero, setBuscarNumero] = useState("");
   const [estadoNumero, setEstadoNumero] = useState("");
-  const [offsetNumeros, setOffsetNumeros] = useState(0);
+  const [offsetNumeros, setOffsetNumeros] = useOffsetPorFiltro([buscarNumero, estadoNumero]);
   const [stats, setStats] = useState<CampaignStats | null>(null);
   const [bulk, setBulk] = useState("");
   const [uploadResult, setUploadResult] = useState<CampaignNumbersUploadResult | null>(null);
@@ -169,6 +170,7 @@ export default function CampaignsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     load();
   }, [load]);
 
@@ -324,12 +326,10 @@ export default function CampaignsPage() {
   // exigiría traerlos todos, que es justo lo que se quiere evitar).
   useEffect(() => {
     if (!selected) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     recargarNumeros(selected.id).catch(() => {});
   }, [selected, recargarNumeros]);
 
-  useEffect(() => {
-    setOffsetNumeros(0);
-  }, [buscarNumero, estadoNumero]);
 
   const closeDetail = async () => {
     setSelected(null);
@@ -1080,16 +1080,16 @@ export default function CampaignsPage() {
                   Esta campaña espera <span className="font-mono">{nombresColumnas.join(", ")}</span> — lo que
                   usa su mensaje de apertura. Cada línea de abajo: teléfono; {nombresColumnas.join("; ")}.
                   {selected?.ai_intent === "cobranza" ? (
-                    <> "cliente", "monto", "vencimiento" y "factura" además cargan/actualizan la deuda en Cobranza.</>
+                    <> «cliente», «monto», «vencimiento» y «factura» además cargan/actualizan la deuda en Cobranza.</>
                   ) : (
-                    <> "cliente" y "fecha" (AAAA-MM-DD HH:MM) además cargan/actualizan la cita en la Agenda.</>
+                    <> «cliente» y «fecha» (AAAA-MM-DD HH:MM) además cargan/actualizan la cita en la Agenda.</>
                   )}
                 </Note>
               ) : (
                 <Note tone="muted">
                   Esta campaña no tiene mensaje de apertura con {"{variables}"}, así que cada línea de abajo es
                   solo un teléfono. Si querés un saludo personalizado, editá la campaña y escribí algo como
-                  "Hola {"{cliente}"}..." — las variables para cargar los números salen de ahí solas.
+                  «Hola {"{cliente}"}...» — las variables para cargar los números salen de ahí solas.
                 </Note>
               )}
               <div className="mt-2 flex items-center gap-2">

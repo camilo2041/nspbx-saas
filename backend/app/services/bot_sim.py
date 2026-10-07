@@ -6,7 +6,6 @@
   horarios lee la agenda real, todo lo demás responde "como si" funcionara y NO
   escribe nada. Así se puede probar un guion sin mover citas ni registrar promesas.
 """
-import json
 import logging
 import re
 from datetime import datetime, timedelta

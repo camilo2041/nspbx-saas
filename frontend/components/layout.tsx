@@ -497,6 +497,7 @@ function Marco({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- lee localStorage después de montar (no existe en el servidor)
       setCollapsed(localStorage.getItem(SIDEBAR_KEY) === "1");
       setAvanzado(localStorage.getItem(AVANZADO_KEY) === "1");
     } catch {

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { EditorHorario } from "@/components/editor-horario";
-import { Button, Card, Check, ErrorBanner, Input, Note, PageHeader, Select, Toggle } from "@/components/ui";
+import { Button, Card, Check, ErrorBanner, Input, Note, PageHeader, Toggle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Extension, Trunk } from "@/lib/types";

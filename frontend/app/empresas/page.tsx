@@ -744,7 +744,7 @@ export default function EmpresasPage() {
           </div>
         </div>
       </Modal>
-      <PruebaHumo empresa={probarEmpresa} onCerrar={() => setProbarEmpresa(null)} />
+      <PruebaHumo key={probarEmpresa?.id ?? "ninguna"} empresa={probarEmpresa} onCerrar={() => setProbarEmpresa(null)} />
       <MoverEmpresa empresa={moverEmpresa} nodos={nodos} onCerrar={() => setMoverEmpresa(null)} onCambio={load} />
       <ConsumoMensual plataforma />
       <AvisosCsp />

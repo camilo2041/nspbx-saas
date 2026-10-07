@@ -3,7 +3,7 @@ from datetime import datetime
 from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -363,7 +363,7 @@ async def listas_de_campana(campaign_id: int, session: AsyncSession = Depends(ge
     )
     for lista_id, estado, n in filas.all():
         conteos.setdefault(lista_id, {})[estado] = n
-    return [_lista_out(l, conteos.get(l.id, {})) for l in listas]
+    return [_lista_out(lista, conteos.get(lista.id, {})) for lista in listas]
 
 
 def _lista_out(lista: Lista, conteo: dict[str, int] | None = None) -> dict:

@@ -54,6 +54,9 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
+      # Importaciones sin usar, nombres ambiguos, errores de sintaxis (backend/ruff.toml).
+      - name: Lint (ruff)
+        run: ruff check app tests
       - name: Pruebas con RLS (como en producción)
         run: python -m pytest -q
       # La misma suite con la API usando el rol dueño, que se saltea RLS:
@@ -107,6 +110,29 @@ jobs:
       # fecha de revisión) están en <carpeta>/audit-aceptadas.json.
       - run: node scripts/auditar-npm.mjs frontend
       - run: node scripts/auditar-npm.mjs mobile
+
+  panel:
+    name: Panel web (tipos, lint y compilación)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      # Que compile para producción: un error que solo aparece al compilar
+      # (una página que no se puede generar) se ve aquí y no al desplegar.
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://ejemplo.invalid
 
   movil:
     name: App móvil (tipos y colores iguales al panel)

@@ -24,6 +24,7 @@ import {
   Td,
   Tr,
 } from "@/components/ui";
+import { useOffsetPorFiltro } from "@/lib/paginacion";
 import { api } from "@/lib/api";
 import { Appointment, GestionRow } from "@/lib/types";
 
@@ -69,7 +70,7 @@ export default function AppointmentsPage() {
   const [dayFilter, setDayFilter] = useState("");
   const [busqueda, setBusqueda] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("");
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useOffsetPorFiltro([dayFilter, busqueda, estadoFiltro]);
 
   const [gestion, setGestion] = useState<GestionRow[]>([]);
   const [gestionLoading, setGestionLoading] = useState(true);
@@ -88,6 +89,7 @@ export default function AppointmentsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     loadGestion();
   }, [loadGestion]);
 
@@ -108,15 +110,9 @@ export default function AppointmentsPage() {
   }, [dayFilter, busqueda, estadoFiltro, offset]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     load();
   }, [load]);
-
-  // Cambiar de filtro tiene que volver a la primera página: si alguien
-  // estaba en la página 4 y busca un paciente, con el offset viejo la
-  // búsqueda salía "sin resultados" aunque sí hubiera coincidencias.
-  useEffect(() => {
-    setOffset(0);
-  }, [dayFilter, busqueda, estadoFiltro]);
 
   const openCreate = () => {
     setEditing(null);

@@ -388,11 +388,10 @@ class SystemSettings(Base):
     # FreeSWITCH y a Postgres a la vez).
     backup_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    # --- Conector Issabel (ARI) --------------------------------------
-    # Issabel como motor telefónico externo: NSPBX se conecta como una app
-    # Stasis de Asterisk para recibir/originar llamadas y streamear el
-    # audio por WebSocket (ver app/services/ari.py). Vacío = desactivado
-    # (NSPBX sigue usando su propio FreeSWITCH).
+    # --- Conector Issabel (ARI): SIN USO --------------------------------
+    # Se planeó usar Issabel como motor externo, pero el conector nunca se
+    # arrancó y se retiró (junto con su tarjeta en Ajustes). Las columnas se
+    # conservan para no borrar datos guardados; nada las lee.
     ari_base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ari_user: Mapped[str | None] = mapped_column(String(80), nullable=True)
     ari_password: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
