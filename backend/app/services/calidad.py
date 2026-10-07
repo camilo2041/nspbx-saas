@@ -11,6 +11,7 @@ empresa, a mano o con una sugerencia de la IA que alguien revisa.
 import json
 import logging
 import re
+from datetime import datetime
 
 from sqlalchemy import select
 
@@ -82,6 +83,23 @@ async def agente_de(session, call: CallLog) -> int | None:
     return None
 
 
+async def _anotar_uso(session, call: CallLog, stt_segundos: int = 0, uso_llm: dict | None = None) -> None:
+    """Lo que gastó la IA en esta llamada, en Consumo IA (origen «calidad»)."""
+    import secrets
+
+    from app.models import AiCallUsage
+
+    uso_llm = uso_llm or {}
+    session.add(AiCallUsage(
+        tenant_id=call.tenant_id, call_uuid=f"calidad-{call.id}-{secrets.token_hex(4)}", origen="calidad",
+        stt_provider="deepgram" if stt_segundos else None, stt_seconds=int(stt_segundos or 0),
+        llm_calls=1 if uso_llm is not None and (uso_llm.get("prompt_tokens") or uso_llm.get("completion_tokens")) else 0,
+        llm_prompt_tokens=int(uso_llm.get("prompt_tokens") or 0),
+        llm_completion_tokens=int(uso_llm.get("completion_tokens") or 0),
+        outcome="completed", started_at=datetime.utcnow(),
+    ))
+
+
 async def transcripcion(session, call: CallLog) -> list[dict]:
     """La de la grabación; se transcribe (y se guarda) la primera vez."""
     if call.transcripcion:
@@ -103,6 +121,8 @@ async def transcripcion(session, call: CallLog) -> list[dict]:
         logger.exception("No se pudo transcribir la llamada %s", call.id)
         raise ErrorCalidad(f"No se pudo transcribir la grabación: {exc}", 502) from None
     call.transcripcion = turnos or []
+    # Deepgram cobra por minuto de audio: el de la grabación entera.
+    await _anotar_uso(session, call, stt_segundos=call.billsec or call.duration or 0)
     await session.commit()
     return call.transcripcion
 
@@ -133,7 +153,7 @@ async def sugerir(session, call: CallLog, lista: list[CriterioCalidad]) -> dict:
     charla = "\n".join(f"{t.get('rol', '?').upper()}: {t.get('texto', '')}" for t in turnos)[:20000]
     lista_txt = "\n".join(f'- id {c.id}: {c.nombre}{f" ({c.descripcion})" if c.descripcion else ""}' for c in lista)
     try:
-        mensaje, _ = await llm.chat(
+        mensaje, uso = await llm.chat(
             base, modelo, clave,
             [
                 {
@@ -153,6 +173,8 @@ async def sugerir(session, call: CallLog, lista: list[CriterioCalidad]) -> dict:
             tool_choice="none",
             tools=[],
         )
+        await _anotar_uso(session, call, uso_llm=uso)
+        await session.commit()
         datos = _json_de(mensaje.get("content") or "")
     except Exception as exc:
         logger.warning("La IA no pudo evaluar la llamada %s: %s", call.id, exc)

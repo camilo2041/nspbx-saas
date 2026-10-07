@@ -44,6 +44,9 @@ type Summary = {
   avg_duration: number;
   cost_per_minute: number;
   providers: Provider[];
+  /** Solo las llamadas del voizbot; `cost_usd` suma también la calidad con IA. */
+  cost_voicebot_usd?: number;
+  calidad?: { evaluaciones: number; stt_seconds: number; cost_usd: number };
 };
 
 type Provider = {
@@ -364,7 +367,11 @@ export default function AiUsagePage() {
               label={`Costo estimado · ${days} días`}
               value={usd(summary?.cost_usd ?? 0)}
               color="amber"
-              hint={`${usd(summary?.cost_per_call ?? 0)} por llamada`}
+              hint={
+                summary?.calidad?.cost_usd
+                  ? `Voizbot ${usd(summary.cost_voicebot_usd ?? 0)} · Calidad ${usd(summary.calidad.cost_usd)}`
+                  : `${usd(summary?.cost_per_call ?? 0)} por llamada`
+              }
               delay={70}
             />
             <StatCard
@@ -411,6 +418,24 @@ export default function AiUsagePage() {
                 />
               </CardBody>
             </Card>
+
+            {!!summary?.calidad?.evaluaciones || !!summary?.calidad?.stt_seconds ? (
+              <Card>
+                <CardHeader
+                  title="Calidad con IA"
+                  subtitle="Transcribir grabaciones y proponer evaluaciones (a mano o la muestra de cada noche). Suma al costo total."
+                />
+                <CardBody>
+                  <Filas
+                    filas={[
+                      ["Evaluaciones propuestas", miles(summary.calidad.evaluaciones)],
+                      ["Audio transcrito", dur(summary.calidad.stt_seconds)],
+                      ["Costo", usd(summary.calidad.cost_usd)],
+                    ]}
+                  />
+                </CardBody>
+              </Card>
+            ) : null}
           </div>
 
           {/* Una tarjeta por proveedor que realmente se usó. Se arma con lo

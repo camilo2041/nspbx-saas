@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import text, update
+from sqlalchemy import select, text, update
 
 from app.core import permissions
 from app.core.database import async_session
@@ -203,3 +203,66 @@ async def test_login_bloquea_tras_cinco_fallos(cliente, mundo):
         assert n == 1
     finally:
         await _limpiar_intentos()
+
+
+# --- H4: el gasto de la calidad con IA en Consumo IA ----------------------------------------
+
+import uuid as uuidlib  # noqa: E402
+
+from sqlalchemy import delete  # noqa: E402
+
+from app.models import AiCallUsage, CallLog, SystemSettings  # noqa: E402
+from app.services import deepgram, llm  # noqa: E402
+
+
+async def test_transcribir_y_sugerir_quedan_en_consumo_ia(cliente, mundo, monkeypatch, tmp_path):
+    audio = tmp_path / "qa.wav"
+    audio.write_bytes(b"RIFF")
+    monkeypatch.setattr("app.api.calls._local_recording_path", lambda ruta: audio)
+
+    async def transcribir(datos, clave):
+        return [{"rol": "Hablante 1", "texto": "Hola, buenas tardes"}]
+
+    async def chat(base, modelo, clave, mensajes, **kw):
+        return {"content": '{"puntajes": {}, "comentario": "Bien."}'}, {"prompt_tokens": 1200, "completion_tokens": 80}
+
+    monkeypatch.setattr(deepgram, "transcribir_grabacion", transcribir)
+    monkeypatch.setattr(llm, "chat", chat)
+    async with async_session() as s:
+        call = CallLog(tenant_id=mundo.alfa.id, uuid=f"qa-h4-{uuidlib.uuid4()}", direction="inbound", status="answered",
+                       caller_number="3005550000", callee_number="1000", billsec=150, recording_path="/rec/qa.wav")
+        s.add(call)
+        await s.execute(update(SystemSettings).where(SystemSettings.tenant_id == mundo.alfa.id)
+                        .values(ai_llm_api_key="sk-prueba", deepgram_api_key="dg-prueba"))
+        await s.commit()
+    cab = mundo.alfa.cabeceras(permissions.SUPERVISOR)
+    admin = mundo.alfa.cabeceras(permissions.ADMIN)
+    try:
+        antes = (await cliente.get("/api/ai-usage/summary", headers=admin)).json()
+        r = await cliente.post(f"/api/calidad/llamadas/{call.id}/sugerencia", headers=cab)
+        assert r.status_code == 200, r.text
+        # La segunda vez ya está transcrita: solo cuesta el modelo.
+        assert (await cliente.post(f"/api/calidad/llamadas/{call.id}/sugerencia", headers=cab)).status_code == 200
+        async with async_session() as s:
+            filas = (await s.execute(select(AiCallUsage).where(AiCallUsage.call_uuid.like(f"calidad-{call.id}-%")))).scalars().all()
+        assert sorted((f.stt_seconds, f.llm_prompt_tokens) for f in filas) == [(0, 1200), (0, 1200), (150, 0)]
+        assert all(f.origen == "calidad" and f.tenant_id == mundo.alfa.id for f in filas)
+
+        despues = (await cliente.get("/api/ai-usage/summary", headers=admin)).json()
+        assert despues["calls"] == antes["calls"]  # no son llamadas del voizbot
+        assert despues["calidad"]["evaluaciones"] == antes["calidad"]["evaluaciones"] + 2
+        assert despues["calidad"]["stt_seconds"] == antes["calidad"]["stt_seconds"] + 150
+        assert despues["calidad"]["cost_usd"] > antes["calidad"]["cost_usd"]
+        assert despues["cost_usd"] > antes["cost_usd"]
+        listado = (await cliente.get("/api/ai-usage/calls?limit=500", headers=admin)).json()
+        assert not [c for c in listado if str(c.get("call_uuid", "")).startswith("calidad-")]
+        # Otra empresa no lo ve.
+        beta = (await cliente.get("/api/ai-usage/summary", headers=mundo.beta.cabeceras(permissions.ADMIN))).json()
+        assert beta["calidad"]["evaluaciones"] == 0
+    finally:
+        async with async_session() as s:
+            await s.execute(delete(AiCallUsage).where(AiCallUsage.call_uuid.like(f"calidad-{call.id}-%")))
+            await s.execute(delete(CallLog).where(CallLog.id == call.id))
+            await s.execute(update(SystemSettings).where(SystemSettings.tenant_id == mundo.alfa.id)
+                            .values(ai_llm_api_key=None, deepgram_api_key=None))
+            await s.commit()

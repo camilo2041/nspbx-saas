@@ -590,6 +590,10 @@ class AiCallUsage(Base):
 
     # completed | no_speech | max_turns | hangup | error
     outcome: Mapped[str] = mapped_column(String(20), default="completed")
+    # voizbot: una conversación. calidad: una evaluación de la IA (transcribir
+    # la grabación y/o calificarla, services/calidad.py): cuesta, pero no es
+    # una llamada del bot y no entra en sus métricas.
+    origen: Mapped[str] = mapped_column(String(20), default="voizbot", server_default="voizbot")
     # Si la conversación terminó con una gestión hecha sobre la agenda:
     # es el numerador de la tasa de contención.
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
