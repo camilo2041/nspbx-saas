@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     # la base, una corrupción del volumen de datos se lleva puesto también
     # el respaldo.
     backups_dir: str = "/backups"
+    # /metrics para Prometheus: solo con este token (Authorization: Bearer).
+    # Vacío = el endpoint no existe.
+    metrics_token: str = ""
 
     fs_domain: str = "nspbx.local"
 

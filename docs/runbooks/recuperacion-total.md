@@ -23,6 +23,14 @@ tiempo y deja una línea en `backups/simulacros.log`. No toca producción.
 Una vez por trimestre, completarlo en un servidor de pruebas con los pasos
 de abajo y anotar el tiempo total: **ese es el RTO real**.
 
+El panel muestra el estado de las tres capas en Plataforma › Empresas ›
+«Respaldos» (services/operacion.py): el volcado diario, el último paquete
+cifrado de `backups/offsite/` (atrasado si tiene más de 48 h) y la última
+línea de `backups/simulacros.log` (atrasado si tiene más de 35 días). Con
+`METRICS_TOKEN`, las mismas cifras salen en `/metrics` para alertar desde
+Prometheus (`nspbx_respaldo_externo_edad_horas`, `nspbx_simulacro_ok`,
+`nspbx_simulacro_edad_dias`).
+
 ## Qué hace falta tener fuera del servidor
 
 - El último paquete off-site (`nspbx-*.tar.gz.enc`) y su `.sha256`.

@@ -654,3 +654,64 @@ async def test_calidad_automatica_apagada_o_antes_de_la_hora(mundo, monkeypatch,
         await s.execute(update(SystemSettings).where(SystemSettings.tenant_id == mundo.alfa.id).values(calidad_auto_por_agente=3))
         await s.commit()
     assert await calidad_auto.muestreo.ciclo(ahora=now_local().replace(hour=1)) == {}
+
+
+# --- G7: operación ----------------------------------------------------------------------------------
+
+import gzip  # noqa: E402
+import os  # noqa: E402
+import time as reloj  # noqa: E402
+
+from app.services import operacion  # noqa: E402
+
+
+def test_estado_de_la_copia_externa_y_del_simulacro(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "backups_dir", str(tmp_path))
+    assert operacion.copia_externa()["hay"] is False and operacion.simulacro()["hay"] is False
+    (tmp_path / "nspbx-20261001-030000.sql.gz").write_bytes(gzip.compress(b"-- viejo"))
+    (tmp_path / "nspbx-20261007-030000.sql.gz").write_bytes(gzip.compress(b"-- nuevo"))
+    assert operacion.ultimo_volcado().name == "nspbx-20261007-030000.sql.gz"
+
+    (tmp_path / "offsite").mkdir()
+    viejo = tmp_path / "offsite" / "nspbx-20261001-033000.tar.gz.enc"
+    nuevo = tmp_path / "offsite" / "nspbx-20261007-033000.tar.gz.enc"
+    for f, horas in ((viejo, 150), (nuevo, 5)):
+        f.write_bytes(b"x")
+        t = reloj.time() - horas * 3600
+        os.utime(f, (t, t))
+    e = operacion.copia_externa()
+    assert e["archivo"] == nuevo.name and 4.9 <= e["horas"] <= 5.1 and e["al_dia"] is True
+    os.utime(nuevo, (reloj.time() - 72 * 3600,) * 2)
+    assert operacion.copia_externa()["al_dia"] is False
+
+    registro = tmp_path / "simulacros.log"
+    hace = datetime.now().astimezone() - timedelta(days=3)
+    registro.write_text(
+        "2026-01-01T03:00:00+00:00 FALLO archivo=x motivo=\"sin datos\"\n"
+        f"{hace.isoformat(timespec='seconds')} OK archivo=backups/nspbx-1.sql.gz empresas=2 usuarios=9 rto=41s\n"
+    )
+    sim = operacion.simulacro()
+    assert (sim["ok"], sim["dias"], sim["al_dia"]) == (True, 3, True) and "rto=41s" in sim["detalle"]
+    registro.write_text(registro.read_text() + "2026-10-07T03:00:00+00:00 FALLO archivo=y motivo=\"psql\"\n")
+    assert operacion.simulacro()["ok"] is False and operacion.simulacro()["al_dia"] is False
+
+
+async def test_metricas_y_estado_de_operacion(cliente, mundo, monkeypatch, tmp_path):
+    assert (await cliente.get("/metrics")).status_code == 404  # sin token configurado no existe
+    monkeypatch.setattr(settings, "metrics_token", "token-de-metricas")
+    assert (await cliente.get("/metrics", headers={"Authorization": "Bearer otro"})).status_code == 404
+
+    async def api(cmd, *a, **kw):
+        return "3 total."
+
+    monkeypatch.setattr(esl, "api", api)
+    monkeypatch.setattr(settings, "backups_dir", str(tmp_path))
+    await cliente.get("/health")
+    r = await cliente.get("/metrics", headers={"Authorization": "Bearer token-de-metricas"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/plain")
+    assert 'nspbx_http_peticiones_total{metodo="GET",ruta="/health",codigo="2xx"}' in r.text
+    assert "nspbx_canales 3" in r.text and "nspbx_base_ok 1" in r.text
+
+    op = (await cliente.get("/api/plataforma/operacion", headers=mundo.cabeceras_plataforma())).json()
+    assert op["metricas"] is True and op["externo"]["hay"] is False and op["simulacro"]["hay"] is False
+    assert (await cliente.get("/api/plataforma/operacion", headers=mundo.alfa.cabeceras(permissions.ADMIN))).status_code == 403

@@ -193,6 +193,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/plataforma/nodos/{nodo_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/nodos/{nodo_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/nodos/{nodo_id}/probar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/operacion` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/salientes/colgar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |

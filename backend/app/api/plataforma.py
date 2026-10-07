@@ -165,6 +165,28 @@ async def prueba_de_humo(datos: PruebaHumo, usuario: User = Depends(usuario_actu
     return resultado
 
 
+@router.get("/operacion")
+async def operacion(session: AsyncSession = Depends(get_admin_session)):
+    """Respaldo diario, copia externa cifrada y último simulacro de
+    restauración (services/operacion.py)."""
+    from app.core.config import settings as cfg
+    from app.models import SystemSettings
+    from app.services import operacion as op
+
+    ultimo = (
+        await session.execute(select(SystemSettings.last_backup_at, SystemSettings.last_backup_ok, SystemSettings.last_backup_error)
+                              .order_by(SystemSettings.last_backup_at.desc().nulls_last()).limit(1))
+    ).first()
+    volcado = op.ultimo_volcado()
+    return {
+        "respaldo": {"at": ultimo[0] if ultimo else None, "ok": ultimo[1] if ultimo else None,
+                     "error": ultimo[2] if ultimo else None, "archivo": volcado.name if volcado else None},
+        "externo": op.copia_externa(),
+        "simulacro": op.simulacro(),
+        "metricas": bool(cfg.metrics_token),
+    }
+
+
 @router.get("/sin-ruta")
 async def numeros_sin_ruta(session: AsyncSession = Depends(get_admin_session)):
     """Números a los que entran llamadas por una troncal sin ninguna ruta de

@@ -5,6 +5,7 @@ import secrets
 
 from app.core.auditoria import MiddlewareAuditoria, configurar_logging
 from app.core.cabeceras import MiddlewareCabeceras
+from app.core.metricas import MiddlewareMetricas
 
 # Sin esto, los logger.info() de todo el proyecto se perdían en silencio:
 # uvicorn configura SUS PROPIOS loggers ("uvicorn", "uvicorn.error") pero
@@ -16,7 +17,7 @@ from app.core.cabeceras import MiddlewareCabeceras
 # core/auditoria.py.
 configurar_logging()
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
@@ -761,6 +762,8 @@ app = FastAPI(
 # Auditoría y request_id. Se agrega antes que CORS para quedar por dentro:
 # las respuestas a preflight de CORS no son acciones de nadie.
 app.add_middleware(MiddlewareAuditoria)
+# Métricas de las peticiones para /metrics (core/metricas.py).
+app.add_middleware(MiddlewareMetricas)
 # Cabeceras de seguridad (nosniff, sin caché, sin iframes): ver core/cabeceras.py.
 app.add_middleware(MiddlewareCabeceras)
 app.add_middleware(
@@ -928,3 +931,20 @@ app.include_router(festivos_api.router, **_con(permissions.AJUSTES_GESTIONAR))
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": settings.app_name}
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metricas_prometheus(authorization: str | None = Header(default=None)):
+    """Para Prometheus (core/metricas.py). Sin METRICS_TOKEN no existe; con él,
+    solo con `Authorization: Bearer <token>`."""
+    import hmac
+
+    from fastapi.responses import PlainTextResponse
+
+    from app.core import metricas
+
+    token = settings.metrics_token
+    dado = (authorization or "")[7:] if (authorization or "").startswith("Bearer ") else ""
+    if not token or not hmac.compare_digest(dado.encode(), token.encode()):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return PlainTextResponse(await metricas.texto(), media_type="text/plain; version=0.0.4")
