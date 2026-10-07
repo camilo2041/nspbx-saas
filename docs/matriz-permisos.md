@@ -187,6 +187,8 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/plataforma/consumo` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/consumo/csv` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/csp` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/desbloqueos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/desbloqueos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/destinos-bloqueados` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/destinos-bloqueados` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/humo` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
