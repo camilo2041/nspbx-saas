@@ -67,6 +67,7 @@ GUIAS = {
     "reporte-entrantes": "Ver el nivel de servicio y el abandono (reporte de entrantes)",
     "evaluar-llamada": "Evaluar la calidad de una llamada",
     "saludo-buzon": "Grabar el saludo del buzón de voz",
+    "buzon-remoto": "Escuchar el buzón desde otro teléfono o el celular (PIN y *96)",
     "festivos": "Cerrar en festivos o en una fecha especial",
     "supervisar-agente": "Escuchar o susurrar a un agente en vivo",
     "importar-contactos": "Importar contactos al CRM",

@@ -152,6 +152,9 @@ class Extension(Base):
     password: Mapped[str] = mapped_column(TextoCifrado())
     caller_id_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     voicemail: Mapped[bool] = mapped_column(Boolean, default=True)
+    # PIN para escuchar el buzón desde otro teléfono (*96 o un número
+    # entrante «buzon_remoto»). Cifrado como la clave SIP; None = sin acceso remoto.
+    voicemail_pin: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Puede llamar afuera fuera del horario laboral de la empresa (guardias).
     # Solo cuenta si la empresa limita las salientes al horario (Ajustes).

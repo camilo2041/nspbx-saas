@@ -9,6 +9,7 @@ import {
   CardHeader,
   EmptyState,
   ErrorBanner,
+  Input,
   PageHeader,
   Select,
   Table,
@@ -138,6 +139,7 @@ export default function BuzonPage() {
       )}
 
       <MiSaludo />
+      <PinRemoto />
 
       <Card>
         <CardHeader
@@ -315,6 +317,77 @@ function MiSaludo() {
         <p className="w-full text-xs text-muted">
           También desde tu teléfono: marca <b>*98</b> para grabar tu saludo y <b>*97</b> para escuchar tus mensajes nuevos.
         </p>
+        {error && <p className="w-full text-xs text-danger-text">{error}</p>}
+      </div>
+    </Card>
+  );
+}
+
+/** PIN para escuchar el buzón desde otro teléfono (*96 o un número entrante). */
+function PinRemoto() {
+  const [estado, setEstado] = useState<{ extension: string; tiene_pin: boolean; marcar: string } | null>(null);
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [trabajando, setTrabajando] = useState(false);
+
+  const cargar = useCallback(() => {
+    api.get<{ extension: string; tiene_pin: boolean; marcar: string }>("/api/buzon/pin").then(setEstado, () => setEstado(null));
+  }, []);
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+
+  if (!estado) return null;
+
+  const guardar = async () => {
+    setTrabajando(true);
+    setError("");
+    try {
+      setEstado(await api.put("/api/buzon/pin", { pin }));
+      setPin("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el PIN");
+    } finally {
+      setTrabajando(false);
+    }
+  };
+
+  return (
+    <Card className="mb-4" guia="buzon:pin">
+      <CardHeader
+        title="Escuchar desde otro teléfono"
+        subtitle={
+          estado.tiene_pin
+            ? `Marca ${estado.marcar} desde cualquier extensión (o el número que te configuren), luego tu extensión y tu PIN.`
+            : `Ponle un PIN a tu buzón para escucharlo marcando ${estado.marcar} desde otro teléfono. Sin PIN, solo desde el tuyo (*97) o aquí.`
+        }
+      />
+      <div className="flex flex-wrap items-end gap-2 px-5 pb-5">
+        <div className="w-44">
+          <Input
+            label={estado.tiene_pin ? "Nuevo PIN" : "PIN (4 a 8 números)"}
+            type="password"
+            value={pin}
+            onChange={(v) => setPin(v.replace(/[^0-9]/g, "").slice(0, 8))}
+            placeholder="••••••"
+          />
+        </div>
+        <Button size="sm" onClick={guardar} loading={trabajando} disabled={pin.length < 4}>
+          {estado.tiene_pin ? "Cambiar PIN" : "Guardar PIN"}
+        </Button>
+        {estado.tiene_pin && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={async () => {
+              await api.del("/api/buzon/pin");
+              cargar();
+            }}
+          >
+            Quitar el PIN
+          </Button>
+        )}
+        <p className="w-full text-xs text-muted">Evita PIN fáciles (1111, 1234 o tu extensión): no se aceptan.</p>
         {error && <p className="w-full text-xs text-danger-text">{error}</p>}
       </div>
     </Card>

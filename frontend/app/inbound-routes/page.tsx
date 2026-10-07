@@ -24,7 +24,7 @@ import { EditorHorario } from "@/components/editor-horario";
 import { api } from "@/lib/api";
 import { Extension, InboundRoute, Queue, VoiceBot } from "@/lib/types";
 
-type DestType = "extension" | "voicemail" | "queue" | "voicebot" | "hangup";
+type DestType = "extension" | "voicemail" | "queue" | "voicebot" | "buzon_remoto" | "hangup";
 
 const empty: Omit<InboundRoute, "id" | "created_at"> = {
   name: "",
@@ -107,7 +107,7 @@ export default function InboundRoutesPage() {
     try {
       const payload = {
         ...form,
-        destination_value: form.destination_type === "hangup" ? null : destPick || null,
+        destination_value: form.destination_type === "hangup" || form.destination_type === "buzon_remoto" ? null : destPick || null,
         horario: form.horario || null,
         fuera_horario_tipo: form.horario ? form.fuera_horario_tipo || "hangup" : null,
         fuera_horario_valor:
@@ -139,6 +139,7 @@ export default function InboundRoutesPage() {
 
   const destLabel = (r: InboundRoute) => {
     if (r.destination_type === "hangup") return "Colgar";
+    if (r.destination_type === "buzon_remoto") return "Escuchar el buzón (con PIN)";
     if (r.destination_type === "extension") {
       const ext = extensions.find((e) => e.number === r.destination_value);
       return `Ext. ${r.destination_value}${ext?.caller_id_name ? ` (${ext.caller_id_name})` : ""}`;
@@ -302,10 +303,11 @@ export default function InboundRoutesPage() {
               { value: "voicemail", label: "El buzón de voz de una persona (deja un mensaje)" },
               { value: "queue", label: "Un grupo de atención (suena en varias personas)" },
               { value: "voicebot", label: "El voizbot (contesta solo)" },
+              { value: "buzon_remoto", label: "Escuchar mensajes del buzón (pide extensión y PIN)" },
               { value: "hangup", label: "Colgar" },
             ]}
           />
-          {form.destination_type !== "hangup" && (
+          {form.destination_type !== "hangup" && form.destination_type !== "buzon_remoto" && (
             <Select
               label={form.destination_type === "queue" ? "¿Qué grupo?" : form.destination_type === "voicebot" ? "¿Qué voizbot?" : form.destination_type === "voicemail" ? "¿El buzón de quién?" : "¿Quién?"}
               value={destPick}

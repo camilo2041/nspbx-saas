@@ -302,6 +302,27 @@ export const GUIAS: Guia[] = [
     ],
   },
   {
+    id: "buzon-remoto",
+    titulo: "Escuchar mi buzón desde otro teléfono",
+    descripcion: "Ponerle un PIN y marcar *96 desde cualquier extensión o un número entrante.",
+    palabras: ["buzon", "pin", "remoto", "otro telefono", "celular", "afuera", "escuchar", "mensajes", "96"],
+    permiso: PERMISOS.llamadasPropias,
+    pasos: [
+      {
+        ruta: "/buzon",
+        marca: "buzon:pin",
+        titulo: "Ponle un PIN",
+        texto: "Escribe un PIN de 4 a 8 números (no 1111, 1234 ni tu extensión) y guárdalo.",
+      },
+      {
+        ruta: "/buzon",
+        titulo: "Marca *96",
+        texto:
+          "Desde cualquier extensión marca *96, luego tu extensión y numeral, y tu PIN y numeral. Para hacerlo desde el celular, un administrador puede poner un número entrante con destino «Escuchar mensajes del buzón».",
+      },
+    ],
+  },
+  {
     id: "festivos",
     titulo: "Cerrar en festivos o en una fecha especial",
     descripcion: "Que los números y el IVR atiendan como «cerrado» los festivos.",

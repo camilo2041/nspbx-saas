@@ -628,12 +628,12 @@ HorarioAtencion = Annotated[Optional[str], Field(default=None, max_length=500), 
 class InboundRouteBase(BaseModel):
     name: NombreVisible
     did_pattern: DidEntrante
-    destination_type: str = Field(..., pattern="^(extension|voicemail|queue|voicebot|hangup)$")
+    destination_type: str = Field(..., pattern="^(extension|voicemail|queue|voicebot|buzon_remoto|hangup)$")
     destination_value: Optional[DestinoRuta] = None
     priority: int = Field(default=10, ge=0, le=1000)
     enabled: bool = True
     horario: HorarioAtencion = None
-    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|voicemail|queue|voicebot|hangup)$")
+    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|voicemail|queue|voicebot|buzon_remoto|hangup)$")
     fuera_horario_valor: Optional[DestinoRuta] = None
 
     @model_validator(mode="after")
@@ -653,12 +653,12 @@ class InboundRouteCreate(InboundRouteBase):
 class InboundRouteUpdate(BaseModel):
     name: Optional[NombreVisible] = None
     did_pattern: Optional[DidEntrante] = None
-    destination_type: Optional[str] = Field(default=None, pattern="^(extension|voicemail|queue|voicebot|hangup)$")
+    destination_type: Optional[str] = Field(default=None, pattern="^(extension|voicemail|queue|voicebot|buzon_remoto|hangup)$")
     destination_value: Optional[DestinoRuta] = None
     priority: Optional[int] = Field(default=None, ge=0, le=1000)
     enabled: Optional[bool] = None
     horario: HorarioAtencion = None
-    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|voicemail|queue|voicebot|hangup)$")
+    fuera_horario_tipo: Optional[str] = Field(default=None, pattern="^(extension|voicemail|queue|voicebot|buzon_remoto|hangup)$")
     fuera_horario_valor: Optional[DestinoRuta] = None
 
 
