@@ -21,9 +21,12 @@ export function Card({
   hover = false,
   delay = 0,
   animate = true,
+  guia,
 }: {
   children: ReactNode;
   className?: string;
+  /** Marca para el asistente guiado (components/guia.tsx): `data-guia`. */
+  guia?: string;
   /** Eleva la tarjeta y le da brillo al pasar el mouse. */
   hover?: boolean;
   /** Retardo de la animación de entrada, en ms (para escalonar grillas). */
@@ -32,6 +35,7 @@ export function Card({
 }) {
   return (
     <div
+      data-guia={guia}
       style={delay ? { animationDelay: `${delay}ms` } : undefined}
       className={`rounded-2xl border border-line bg-gradient-to-b from-surface to-surface-2/60 shadow-[var(--shadow-1)] ${
         hover ? "card-lift sheen" : ""
@@ -125,9 +129,12 @@ export function Button({
   loading,
   title,
   className = "",
+  guia,
 }: {
   children: ReactNode;
   onClick?: () => void;
+  /** Marca para el asistente guiado (components/guia.tsx): `data-guia`. */
+  guia?: string;
   variant?: Variant;
   size?: "sm" | "md";
   type?: "button" | "submit";
@@ -141,6 +148,7 @@ export function Button({
     <button
       type={type}
       title={title}
+      data-guia={guia}
       onClick={onClick}
       disabled={disabled || loading}
       className={`press inline-flex items-center justify-center gap-1.5 rounded-xl font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none ${sizes} ${VARIANTS[variant]} ${className}`}
@@ -208,8 +216,10 @@ export function Input({
   hint,
   disabled,
   mono,
+  guia,
 }: {
   label: string;
+  guia?: string;
   value: string | number;
   onChange: (v: string) => void;
   type?: string;
@@ -223,6 +233,7 @@ export function Input({
     <Field label={label} hint={hint}>
       <input
         type={type}
+        data-guia={guia}
         value={value}
         required={required}
         disabled={disabled}
@@ -379,8 +390,10 @@ export function Select({
   placeholder,
   hint,
   disabled,
+  guia,
 }: {
   label: string;
+  guia?: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
@@ -392,6 +405,7 @@ export function Select({
     <Field label={label} hint={hint}>
       <div className="relative">
         <select
+          data-guia={guia}
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
@@ -422,14 +436,17 @@ export function Toggle({
   checked,
   onChange,
   disabled,
+  guia,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
+  guia?: string;
 }) {
   return (
     <button
       type="button"
+      data-guia={guia}
       role="switch"
       aria-checked={checked}
       disabled={disabled}
@@ -957,10 +974,13 @@ export function Segmented<T extends string>({
   value,
   onChange,
   options,
+  guia,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: string; disabled?: boolean; title?: string }[];
+  /** Prefijo para las guías en pantalla: cada opción queda como `${guia}:${valor}`. */
+  guia?: string;
 }) {
   return (
     <div className="flex gap-1.5 rounded-xl border border-line bg-surface-2 p-1">
@@ -972,6 +992,7 @@ export function Segmented<T extends string>({
             type="button"
             disabled={o.disabled}
             title={o.title}
+            data-guia={guia ? `${guia}:${o.value}` : undefined}
             onClick={() => onChange(o.value)}
             className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
               active

@@ -137,7 +137,7 @@ export function ImportarCsv({ campos, onImportado }: { campos: CampoContacto[]; 
         {!vista && (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-line-strong px-6 py-10 text-center">
             <p className="text-sm text-fg-soft">Elige el archivo. Primero verás una vista previa: no se guarda nada hasta confirmar.</p>
-            <Button onClick={() => archivoRef.current?.click()} loading={trabajando}>
+            <Button guia="crm:elegir-archivo" onClick={() => archivoRef.current?.click()} loading={trabajando}>
               Elegir archivo (Excel o CSV)
             </Button>
             <input
@@ -201,7 +201,7 @@ export function ImportarCsv({ campos, onImportado }: { campos: CampoContacto[]; 
             )}
 
             <div className="mt-4 flex items-center gap-2">
-              <Button onClick={importar} loading={trabajando} disabled={!tieneTelefono}>
+              <Button guia="crm:importar-ya" onClick={importar} loading={trabajando} disabled={!tieneTelefono}>
                 Importar {vista.total_filas} fila(s)
               </Button>
               {!tieneTelefono && <span className="text-xs text-warn-text">Falta indicar la columna del teléfono.</span>}

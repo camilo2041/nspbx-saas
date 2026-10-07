@@ -163,7 +163,7 @@ export default function InboundRoutesPage() {
       <PageHeader
         title="Números entrantes"
         subtitle="A dónde va una llamada cuando alguien marca tu número: a una persona, a un grupo o al voizbot. Término técnico: rutas entrantes por DID."
-        actions={<Button onClick={openCreate}>+ Configurar número</Button>}
+        actions={<Button guia="entrantes:nuevo" onClick={openCreate}>+ Configurar número</Button>}
       />
 
       {error && (

@@ -131,7 +131,7 @@ export function CargarClientes({
             Sube tu base de clientes en <b>Excel (.xlsx)</b> o CSV, con los nombres de las columnas en la primera fila. Antes de
             cargar verás qué entendimos de cada columna.
           </p>
-          <Button onClick={() => archivoRef.current?.click()} loading={trabajando}>
+          <Button guia="clientes:elegir-archivo" onClick={() => archivoRef.current?.click()} loading={trabajando}>
             Elegir archivo
           </Button>
           <input
@@ -193,7 +193,7 @@ export function CargarClientes({
           </div>
           {!usados.has("telefono") && <Note tone="warn">Indica cuál columna es el teléfono.</Note>}
           <div className="flex flex-wrap gap-2">
-            <Button onClick={cargar} loading={trabajando} disabled={!usados.has("telefono")}>
+            <Button guia="clientes:cargar" onClick={cargar} loading={trabajando} disabled={!usados.has("telefono")}>
               Cargar {vista.total_filas} cliente(s)
             </Button>
             <Button variant="secondary" onClick={() => setVista(null)}>

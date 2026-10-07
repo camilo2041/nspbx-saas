@@ -215,7 +215,7 @@ function Evaluar() {
                   )}
                 </Td>
                 <Td align="right">
-                  <Button size="sm" variant={f.evaluacion ? "secondary" : "primary"} onClick={() => setAbierta(f.id)}>
+                  <Button size="sm" variant={f.evaluacion ? "secondary" : "primary"} guia="calidad:evaluar" onClick={() => setAbierta(f.id)}>
                     {f.evaluacion ? "Ver" : "Evaluar"}
                   </Button>
                 </Td>
@@ -394,7 +394,7 @@ function EvaluarLlamada({ callId, onCerrar }: { callId: number; onCerrar: (guard
             )}
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-fg">Criterios</span>
-              <Button size="sm" variant="secondary" onClick={sugerir} loading={trabajando === "ia"}>
+              <Button size="sm" variant="secondary" guia="calidad:sugerir" onClick={sugerir} loading={trabajando === "ia"}>
                 ✨ Sugerir con IA
               </Button>
             </div>

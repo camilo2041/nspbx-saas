@@ -256,7 +256,7 @@ export default function ConsolaAgente() {
               )}
               {arranque?.error && <Note tone="warn">{arranque.error}</Note>}
               <div className="flex flex-wrap items-center gap-3">
-                <Button onClick={empezar} loading={!!arranque?.paso} disabled={elegidas.length === 0 || !entorno?.extension}>
+                <Button guia="agente:empezar" onClick={empezar} loading={!!arranque?.paso} disabled={elegidas.length === 0 || !entorno?.extension}>
                   Empezar a trabajar
                 </Button>
                 {arranque?.paso && <span className="text-sm text-fg-soft">{arranque.paso}</span>}
@@ -327,7 +327,7 @@ export default function ConsolaAgente() {
               </Button>
             )}
             {agente.estado === "PAUSA" && (
-              <Button size="sm" variant="success" onClick={() => hacer("listo", "listo")} loading={trabajando === "listo"} disabled={!agente.audio}>
+              <Button size="sm" variant="success" guia="agente:listo" onClick={() => hacer("listo", "listo")} loading={trabajando === "listo"} disabled={!agente.audio}>
                 Listo
               </Button>
             )}

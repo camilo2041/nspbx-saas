@@ -147,7 +147,7 @@ export default function ReportesPage() {
     <div>
       <PageHeader title="Reportes" subtitle="Del contact center, por rango de días. Ver o bajar un reporte queda en la auditoría." />
       <div className="mb-4 overflow-x-auto">
-        <Segmented value={vista} onChange={setVista} options={VISTAS} />
+        <Segmented guia="reportes" value={vista} onChange={setVista} options={VISTAS} />
       </div>
       {error && (
         <div className="mb-4">

@@ -265,7 +265,7 @@ function MiSaludo() {
   };
 
   return (
-    <Card className="mb-4">
+    <Card className="mb-4" guia="buzon:saludo">
       <CardHeader
         title={`Mi saludo · extensión ${saludo.extension}`}
         subtitle={
@@ -285,7 +285,7 @@ function MiSaludo() {
           </Button>
         )}
         {url && <audio src={url} controls autoPlay className="h-9" />}
-        <Button size="sm" variant="secondary" loading={trabajando} onClick={() => entrada.current?.click()}>
+        <Button size="sm" variant="secondary" guia="buzon:subir-saludo" loading={trabajando} onClick={() => entrada.current?.click()}>
           {saludo.propio ? "Cambiarlo (WAV)" : "Subir mi saludo (WAV)"}
         </Button>
         {saludo.propio && (

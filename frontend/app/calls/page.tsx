@@ -255,6 +255,7 @@ function Grabacion({ call }: { call: CallLog }) {
           type="button"
           onClick={cargar}
           disabled={estado === "cargando"}
+          data-guia="llamadas:reproducir"
           title="Reproducir grabación"
           aria-label="Reproducir grabación"
           className="press inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line text-fg-soft transition-colors hover:border-line-strong hover:bg-surface-2 disabled:opacity-50"

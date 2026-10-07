@@ -6,6 +6,7 @@ import { ReactNode, useEffect, useState } from "react";
 
 import { AyudaPantalla } from "@/components/ayuda-pantalla";
 import { AssistantWidget } from "@/components/assistant-widget";
+import { GuiaEnPantalla } from "@/components/guia";
 import { CommandPalette } from "@/components/command-palette";
 import { FichaCliente } from "@/components/ficha-cliente";
 import { FloatingCallWidget } from "@/components/floating-call-widget";
@@ -450,6 +451,7 @@ export default function SidebarLayout({ children }: { children: ReactNode }) {
         <FloatingCallWidget />
         <FichaCliente />
         <AssistantWidget />
+        <GuiaEnPantalla />
         <Marco>{children}</Marco>
       </SoftphoneProvider>
     </AuthProvider>
@@ -622,6 +624,7 @@ function Marco({ children }: { children: ReactNode }) {
                     <Link
                       key={item.href}
                       href={item.href}
+                      data-guia={`menu:${item.href}`}
                       onClick={() => setMobileOpen(false)}
                       title={collapsed ? item.label : undefined}
                       className={`group relative flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] font-medium transition-all duration-200 ${
