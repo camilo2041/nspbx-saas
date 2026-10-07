@@ -21,6 +21,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { AuditTable } from "@/components/audit-table";
+import { DesbloqueosPlataforma } from "@/components/desbloqueos-plataforma";
 import { OperacionPlataforma } from "@/components/operacion-plataforma";
 import { PruebaHumo } from "@/components/prueba-humo";
 import { AvisosCsp } from "@/components/avisos-csp";
@@ -481,6 +482,7 @@ export default function EmpresasPage() {
       )}
 
       <OperacionPlataforma />
+      <DesbloqueosPlataforma />
 
       {nodos.length > 0 && <ServidoresFreeswitch nodos={nodos} onCambio={load} />}
 

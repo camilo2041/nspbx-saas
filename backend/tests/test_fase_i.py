@@ -98,3 +98,70 @@ async def test_registrar_el_token_de_avisos(cliente, mundo):
         async with async_session() as s:
             await s.execute(delete(DeviceToken).where(DeviceToken.token == "avisos-reg"))
             await s.commit()
+
+
+# --- I3: desbloquear una IP de fail2ban --------------------------------------------------
+
+import time  # noqa: E402
+
+from app.models import DesbloqueoIp  # noqa: E402
+from app.services import desbloqueos, fail2ban  # noqa: E402
+
+
+@pytest.fixture
+def bloqueada(monkeypatch):
+    b = fail2ban.Bloqueo(jail="freeswitch", ip="203.0.113.7", desde=int(time.time()) - 60, segundos=86400, veces=1)
+    monkeypatch.setattr(fail2ban, "bloqueos", lambda: [b])
+    monkeypatch.setattr(fail2ban, "disponible", lambda: True)
+    return b
+
+
+async def _limpiar_pedidos():
+    async with async_session() as s:
+        await s.execute(delete(DesbloqueoIp))
+        await s.commit()
+
+
+async def test_solo_la_plataforma_pide_desbloquear(cliente, mundo, bloqueada):
+    await _limpiar_pedidos()
+    try:
+        cuerpo = {"jail": "freeswitch", "ip": "203.0.113.7"}
+        assert (await cliente.post("/api/plataforma/desbloqueos", headers=mundo.alfa.cabeceras(permissions.ADMIN),
+                                   json=cuerpo)).status_code == 403
+        plataforma = mundo.cabeceras_plataforma()
+        r = await cliente.post("/api/plataforma/desbloqueos", headers=plataforma, json=cuerpo)
+        assert r.status_code == 201 and r.json()["estado"] == "pendiente"
+        # El mismo pedido dos veces es uno solo.
+        otra = await cliente.post("/api/plataforma/desbloqueos", headers=plataforma, json=cuerpo)
+        assert otra.json()["id"] == r.json()["id"]
+        # Solo IP bloqueadas ahora, y en ese jail.
+        for malo in ({"jail": "freeswitch", "ip": "198.51.100.1"}, {"jail": "sshd", "ip": "203.0.113.7"},
+                     {"jail": "freeswitch", "ip": "no-es-ip"}, {"jail": "x; rm -rf /", "ip": "203.0.113.7"}):
+            assert (await cliente.post("/api/plataforma/desbloqueos", headers=plataforma, json=malo)).status_code == 422, malo
+        vista = (await cliente.get("/api/plataforma/desbloqueos", headers=plataforma)).json()
+        assert vista["bloqueos"][0]["ip"] == "203.0.113.7" and len(vista["pedidos"]) == 1
+        assert vista["pedidos"][0]["sin_atender"] is False
+    finally:
+        await _limpiar_pedidos()
+
+
+async def test_el_puente_del_host_lista_y_anota(mundo, bloqueada, capsys):
+    from app import desbloqueos as puente
+
+    await _limpiar_pedidos()
+    try:
+        async with async_session() as s:
+            p = await desbloqueos.pedir(s, "freeswitch", "203.0.113.7", "oficina de alfa", "plataforma")
+        assert await puente._pendientes() == 0
+        assert capsys.readouterr().out.strip() == f"{p.id} freeswitch 203.0.113.7"
+        assert await puente._resultado(p.id, "hecho", None) == 0
+        async with async_session() as s:
+            fila = await s.get(DesbloqueoIp, p.id)
+            assert fila.estado == "hecho" and fila.resuelto_en is not None
+            # Uno resuelto no se vuelve a tocar.
+            assert await desbloqueos.resolver(s, p.id, "error") is False
+        # Solo estados finales: nada de «bloquear».
+        assert await puente._resultado(p.id, "bloquear", None) == 2
+        assert await puente._pendientes() == 0 and capsys.readouterr().out.strip() == ""
+    finally:
+        await _limpiar_pedidos()
