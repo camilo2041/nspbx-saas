@@ -77,6 +77,21 @@ async def disposiciones(
     return _responder("disposiciones", await reportes.disposiciones(session, r, agrupar, campaign_id), formato, r)
 
 
+@router.get("/entrantes")
+async def entrantes(
+    desde: date,
+    hasta: date,
+    umbral_s: int = Query(default=20, ge=1, le=600),
+    cola: str | None = Query(default=None, max_length=100),
+    formato: str = _FORMATO,
+    session: AsyncSession = Depends(get_session),
+):
+    """Llamadas que entraron a grupos de atención: nivel de servicio (atendidas
+    antes de `umbral_s` segundos), abandono y espera."""
+    r = _rango(desde, hasta)
+    return _responder("entrantes", await reportes.entrantes(session, r, umbral_s, cola), formato, r)
+
+
 @router.get("/cumplimiento")
 async def cumplimiento(
     desde: date,
@@ -112,7 +127,7 @@ def _destinatarios(v: str | None) -> str | None:
 
 class ProgramadoIn(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=80)
-    tipo: str = Field(..., pattern="^(agentes|campanas|disposiciones|cumplimiento)$")
+    tipo: str = Field(..., pattern="^(agentes|campanas|disposiciones|cumplimiento|entrantes)$")
     frecuencia: str = Field(..., pattern="^(diaria|semanal|mensual)$")
     hora: int = Field(default=7, ge=0, le=23)
     destinatarios: str = Field(..., max_length=2000)
@@ -127,7 +142,7 @@ class ProgramadoIn(BaseModel):
 
 class ProgramadoUpdate(BaseModel):
     nombre: str | None = Field(default=None, min_length=1, max_length=80)
-    tipo: str | None = Field(default=None, pattern="^(agentes|campanas|disposiciones|cumplimiento)$")
+    tipo: str | None = Field(default=None, pattern="^(agentes|campanas|disposiciones|cumplimiento|entrantes)$")
     frecuencia: str | None = Field(default=None, pattern="^(diaria|semanal|mensual)$")
     hora: int | None = Field(default=None, ge=0, le=23)
     destinatarios: str | None = Field(default=None, max_length=2000)

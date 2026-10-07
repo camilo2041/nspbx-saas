@@ -21,6 +21,8 @@ import {
   Tr,
 } from "@/components/ui";
 import { AuditTable } from "@/components/audit-table";
+import { OperacionPlataforma } from "@/components/operacion-plataforma";
+import { PruebaHumo } from "@/components/prueba-humo";
 import { AvisosCsp } from "@/components/avisos-csp";
 import { ConsumoMensual } from "@/components/consumo-mensual";
 import { MoverEmpresa, ServidoresFreeswitch, nombreServidor } from "@/components/servidores-freeswitch";
@@ -60,6 +62,17 @@ const ESTADO_LICENCIA: Record<string, { label: string; badge: string }> = {
   suspendida: { label: "Suspendida", badge: "amber" },
 };
 
+interface NumeroSinRuta {
+  id: number;
+  numero: string;
+  para: string | null;
+  origen: string | null;
+  troncal: string | null;
+  empresa: string | null;
+  veces: number;
+  ultima_vez: string;
+}
+
 const PLANES = [
   { value: "trial", label: "Prueba (15 días)" },
   { value: "free", label: "Gratis" },
@@ -98,6 +111,7 @@ export default function EmpresasPage() {
   const [globalCortado, setGlobalCortado] = useState<boolean | null>(null);
   const [cambiandoGlobal, setCambiandoGlobal] = useState(false);
   const [alertas, setAlertas] = useState<AlertaTrafico[]>([]);
+  const [sinRuta, setSinRuta] = useState<NumeroSinRuta[]>([]);
   // Destinos internacionales bloqueados para todas las empresas.
   const [bloqueados, setBloqueados] = useState<{ prefijos: string; fijos: string[] } | null>(null);
   const [textoBloqueados, setTextoBloqueados] = useState("");
@@ -105,6 +119,7 @@ export default function EmpresasPage() {
   // Servidores FreeSWITCH (docs/escala.md §4).
   const [nodos, setNodos] = useState<NodoFreeswitch[]>([]);
   const [moverEmpresa, setMoverEmpresa] = useState<Empresa | null>(null);
+  const [probarEmpresa, setProbarEmpresa] = useState<Empresa | null>(null);
 
   const abrirLicencia = (e: Empresa) => {
     const lic = e.licencia;
@@ -165,6 +180,7 @@ export default function EmpresasPage() {
       setGlobalCortado(global.outbound_blocked);
       // Informativo: si falla, la lista de empresas igual se muestra.
       api.get<AlertaTrafico[]>("/api/plataforma/alertas").then(setAlertas).catch(() => setAlertas([]));
+      api.get<NumeroSinRuta[]>("/api/plataforma/sin-ruta").then(setSinRuta).catch(() => setSinRuta([]));
       cargarNodos();
       api
         .get<{ prefijos: string; fijos: string[] }>("/api/plataforma/destinos-bloqueados")
@@ -429,6 +445,43 @@ export default function EmpresasPage() {
         </Card>
       )}
 
+      {sinRuta.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader
+            title="Llamadas a números sin ruta"
+            subtitle="Entraron por un proveedor a un número que ninguna empresa tiene en Rutas entrantes, y se colgaron. Falta crear la ruta, o el proveedor manda el número en otro formato."
+          />
+          <Table head={["Número", "Empresa (por el proveedor)", "Llamadas", "Última", "Quién llamó", ""]}>
+            {sinRuta.map((n) => (
+              <Tr key={n.id}>
+                <Td strong>
+                  {n.numero}
+                  {n.para && n.para !== n.numero && <span className="block text-xs text-muted">Para: {n.para}</span>}
+                </Td>
+                <Td muted>{n.empresa ?? (n.troncal ? `Proveedor ${n.troncal}` : "Desconocida")}</Td>
+                <Td>{n.veces}</Td>
+                <Td muted>{new Date(n.ultima_vez + "Z").toLocaleString()}</Td>
+                <Td muted>{n.origen ?? "—"}</Td>
+                <Td>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      await api.del(`/api/plataforma/sin-ruta/${n.id}`).catch(() => undefined);
+                      setSinRuta((xs) => xs.filter((x) => x.id !== n.id));
+                    }}
+                  >
+                    Quitar
+                  </Button>
+                </Td>
+              </Tr>
+            ))}
+          </Table>
+        </Card>
+      )}
+
+      <OperacionPlataforma />
+
       {nodos.length > 0 && <ServidoresFreeswitch nodos={nodos} onCambio={load} />}
 
       <Card>
@@ -510,6 +563,9 @@ export default function EmpresasPage() {
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => cerrarSesionesEmpresa(e)} title="Saca a todos sus usuarios de todos sus equipos">
                         Cerrar sesiones
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setProbarEmpresa(e)} title="Llamadas de prueba dentro de su central">
+                        Probar la central
                       </Button>
                       <Button size="sm" variant="secondary" onClick={() => abrirEditar(e)}>
                         Editar
@@ -680,6 +736,7 @@ export default function EmpresasPage() {
           </div>
         </div>
       </Modal>
+      <PruebaHumo empresa={probarEmpresa} onCerrar={() => setProbarEmpresa(null)} />
       <MoverEmpresa empresa={moverEmpresa} nodos={nodos} onCerrar={() => setMoverEmpresa(null)} onCambio={load} />
       <ConsumoMensual plataforma />
       <AvisosCsp />

@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
-from app.services import buzon, deepgram, llm, tiempos_llamada
+from app.services import buzon, deepgram, humo, llm, sin_ruta, tiempos_llamada
 from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
@@ -216,6 +216,12 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     if existing:
         return {"ok": True, "duplicate": True}
 
+    if variables.get("nspbx_sin_ruta"):
+        # Un número sin ruta de entrada: no es una llamada de ninguna empresa.
+        await sin_ruta.registrar(session, variables)
+        await session.commit()
+        return {"ok": True, "sin_ruta": True}
+
     tenant_id = await _tenant_de_cdr(session, variables)
     if tenant_id is None:
         logger.warning("CDR %s sin empresa identificable; se descarta", uuid)
@@ -274,12 +280,21 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         lead_id=lead_id,
         disposicion_id=disposicion_id,
         abandonada=True if variables.get("nspbx_abandonada") == "true" else None,
+        **datos_de_cola(variables),
     )
     if variables.get("nspbx_buzon_ext"):
         # La llamada terminó en el buzón: no es una «contestada» aunque el
         # canal se haya contestado para grabar el mensaje.
         call.status = "voicemail"
     session.add(call)
+    if variables.get("nspbx_pide_devolucion"):
+        # Marcó 1 en la fila: se anota para devolverle la llamada (services/vigia_colas.py).
+        from app.services import vigia_colas
+
+        await vigia_colas.anotar(session, variables, tenant_id, caller)
+    if variables.get("nspbx_buzon_oido"):
+        # *97: se oyeron completos los mensajes hasta ese (config_generator._append_buzon_escuchar).
+        await buzon.marcar_oidos(session, variables, tenant_id)
     mensaje = None
     if variables.get("nspbx_buzon_ext"):
         mensaje = await buzon.registrar(session, variables, tenant_id, uuid, caller, call.caller_name)
@@ -288,9 +303,47 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
     except Exception:
         await session.rollback()  # carrera con otro POST del mismo uuid
         return {"ok": True}
-    if mensaje is not None:
+    # La prueba de humo (services/humo.py) deja mensajes de prueba: sin correo.
+    if mensaje is not None and not (caller or "").startswith(humo.PREFIJO):
         asyncio.create_task(buzon.avisar(tenant_id, mensaje.id))
     return {"ok": True}
+
+
+def _epoch(valor) -> int | None:
+    try:
+        n = int(float(valor or 0))
+    except (TypeError, ValueError):
+        return None
+    return n or None
+
+
+def datos_de_cola(variables: dict) -> dict:
+    """Grupo, espera y resultado de una llamada que pasó por mod_callcenter
+    (variables cc_* que deja en la pata del cliente). Vacío si no pasó.
+
+    - atendida: un agente contestó (cc_queue_answered_epoch).
+    - desbordada: se acabó la espera (TIMEOUT / NO_AGENT_TIMEOUT) y siguió al
+      destino de «si nadie contesta».
+    - abandonada: quien llamaba colgó esperando (BREAK_OUT u otra causa).
+    """
+    if (variables.get("cc_side") or "member") != "member":
+        return {}  # la pata del agente también lleva cc_queue: se cuenta una vez
+    cola, _, _ = (variables.get("cc_queue") or "").partition("@")
+    entro = _epoch(variables.get("cc_queue_joined_epoch"))
+    if not cola or not entro or len(cola) > 100:
+        return {}
+    contesto = _epoch(variables.get("cc_queue_answered_epoch"))
+    if contesto:
+        agente = (variables.get("cc_agent") or "").partition("@")[0][:20] or None
+        return {"cola": cola, "cola_espera_s": max(0, contesto - entro), "cola_resultado": "atendida", "cola_agente": agente}
+    salio = (
+        _epoch(variables.get("cc_queue_canceled_epoch"))
+        or _epoch(variables.get("cc_queue_terminated_epoch"))
+        or (_epoch(variables.get("end_epoch")))
+    )
+    motivo = (variables.get("cc_cancel_reason") or "").upper()
+    resultado = "desbordada" if motivo in ("TIMEOUT", "NO_AGENT_TIMEOUT", "EXIT_WITH_KEY") else "abandonada"
+    return {"cola": cola, "cola_espera_s": max(0, (salio or entro) - entro), "cola_resultado": resultado, "cola_agente": None}
 
 
 async def _agente_de_cdr(session: AsyncSession, variables: dict, tenant_id: int, uuid: str):
@@ -609,11 +662,16 @@ async def get_summary(
     if not dg_key or not llm_key:
         return {**datos, "available": False, "reason": "Faltan las API keys de Deepgram y del modelo de lenguaje en Ajustes."}
 
-    try:
-        turnos = await deepgram.transcribir_grabacion(local.read_bytes(), dg_key)
-    except Exception as exc:
-        logger.exception("No se pudo transcribir la llamada %s", call_id)
-        return {**datos, "available": False, "reason": f"No se pudo transcribir la grabación: {exc}"}
+    if call.transcripcion is not None:
+        turnos = call.transcripcion
+    else:
+        try:
+            turnos = await deepgram.transcribir_grabacion(local.read_bytes(), dg_key)
+        except Exception as exc:
+            logger.exception("No se pudo transcribir la llamada %s", call_id)
+            return {**datos, "available": False, "reason": f"No se pudo transcribir la grabación: {exc}"}
+        # Se guarda: la evaluación de calidad la reusa sin volver a pagarla.
+        call.transcripcion = turnos or []
 
     if not turnos:
         # Hay archivo pero sin voz: pasa con llamadas que se cortaron al
@@ -636,7 +694,7 @@ async def get_summary(
                 {
                     "role": "system",
                     "content": (
-                        "Resumes llamadas de un consultorio odontológico para que alguien del equipo "
+                        "Resumes llamadas de una empresa para que alguien del equipo "
                         "entienda de un vistazo qué pasó. Escribe en español, en tercera persona, "
                         "máximo tres frases. Di qué pidió la persona, qué se resolvió y si quedó algo "
                         "pendiente. La transcripción es automática y puede traer errores: si algo no se "

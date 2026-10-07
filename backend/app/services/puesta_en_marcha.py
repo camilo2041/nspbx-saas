@@ -34,7 +34,7 @@ async def _proveedor_conectado(troncales: list[Trunk], slug: str, tenant_id: int
     None si no se pudo preguntar a FreeSWITCH."""
     try:
         for t in troncales:
-            estado = (await esl.gateway_status(nombre_gateway(t.name, slug))).get("state")
+            estado = (await esl.gateway_status(nombre_gateway(t.name, slug), tenant_id=tenant_id)).get("state")
             if estado in ("REGED", "NOREG"):
                 return True
         return False

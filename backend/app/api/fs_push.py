@@ -10,8 +10,6 @@ teléfono real. Ver services/push.py y mobile/SETUP.md.
 import asyncio
 import logging
 import re
-import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -22,7 +20,7 @@ from fastapi import HTTPException
 from app.core import validacion
 from app.core.firmas import firma_push_valida
 from app.core.database import get_admin_session
-from app.models import DeviceToken, Extension, Tenant
+from app.models import Tenant
 from app.services import esl, push
 
 logger = logging.getLogger(__name__)
@@ -81,43 +79,5 @@ async def avisar_llamada_entrante(
     if not tenant:
         return {"ok": False, "motivo": "empresa no encontrada"}
 
-    dispositivos = (
-        await session.execute(
-            select(DeviceToken)
-            .join(Extension, Extension.id == DeviceToken.extension_id)
-            .where(DeviceToken.tenant_id == tenant.id, Extension.number == extension)
-        )
-    ).scalars().all()
-    if not dispositivos:
-        return {"ok": True, "enviados": 0}
-
-    # Forma exacta que espera `expo-callkit-telecom` del lado de la app
-    # (IncomingCallEvent, ver mobile/SETUP.md): `serverCallId` es el uuid
-    # de canal de FreeSWITCH, así la app puede correlacionar el push con
-    # el INVITE que le va a llegar por SIP apenas reconecte.
-    evento_llamada = {
-        "eventId": str(uuid.uuid4()),
-        "serverCallId": call_uuid or str(uuid.uuid4()),
-        "hasVideo": False,
-        "startedAt": datetime.now(timezone.utc).isoformat(),
-        "caller": {
-            "id": caller_id_number or "desconocido",
-            "displayName": caller_id_name or caller_id_number or "Desconocido",
-            "phoneNumber": caller_id_number or None,
-        },
-        "metadata": {"extension": extension, "tenantSlug": slug},
-    }
-
-    async def _enviar(d: DeviceToken):
-        try:
-            if d.token_type == "APNS_VOIP":
-                await asyncio.wait_for(push.enviar_voip_ios(d.token, evento_llamada), timeout=2)
-            elif d.token_type == "FCM":
-                await asyncio.wait_for(push.enviar_push_android(d.token, evento_llamada), timeout=2)
-        except asyncio.TimeoutError:
-            logger.warning("Timeout enviando push a dispositivo %s (%s)", d.id, d.platform)
-        except Exception:
-            logger.exception("Error enviando push a dispositivo %s (%s)", d.id, d.platform)
-
-    await asyncio.gather(*(_enviar(d) for d in dispositivos))
-    return {"ok": True, "enviados": len(dispositivos)}
+    enviados = await push.avisar_llamada(session, tenant.id, slug, extension, call_uuid, caller_id_number, caller_id_name)
+    return {"ok": True, "enviados": enviados}

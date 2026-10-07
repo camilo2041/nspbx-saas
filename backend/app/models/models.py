@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -439,6 +440,15 @@ class SystemSettings(Base):
     # Salientes de los teléfonos solo en horario laboral (opcional). Fuera de
     # él, solo las extensiones con `outbound_after_hours` (ver salientes.py).
     outbound_hours_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Los festivos de Colombia cuentan como «cerrado» en las rutas entrantes,
+    # el bloque Horario del IVR y el widget web que tienen horario (services/festivos.py).
+    festivos_cerrado: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Calidad automática (services/calidad_auto.py): cada noche la IA propone la
+    # evaluación de hasta N llamadas grabadas por agente del día anterior
+    # (0 = apagado), con un tope total por noche (cuesta por llamada).
+    calidad_auto_por_agente: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    calidad_auto_tope: Mapped[int] = mapped_column(Integer, default=20, server_default="20")
+    calidad_auto_ultima: Mapped[date | None] = mapped_column(Date, nullable=True)
     outbound_hours_weekdays: Mapped[str] = mapped_column(String(11), default="07:00-19:00", server_default="07:00-19:00")
     outbound_hours_saturday: Mapped[str] = mapped_column(String(11), default="08:00-13:00", server_default="08:00-13:00")
     outbound_hours_sundays_holidays: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
@@ -479,7 +489,10 @@ class CallLog(Base):
     __tablename__ = "call_logs"
     # Reportes por campaña y rango (services/reportes.py). El de empresa y
     # fecha lo crea main._COLUMN_PATCHES desde antes.
-    __table_args__ = (Index("ix_call_logs_campana_inicio", "campaign_id", "started_at"),)
+    __table_args__ = (
+        Index("ix_call_logs_campana_inicio", "campaign_id", "started_at"),
+        Index("ix_call_logs_cola_inicio", "cola", "started_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = _tenant_fk()
@@ -529,6 +542,15 @@ class CallLog(Base):
     disposicion_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # El cliente contestó y no hubo agente a tiempo (predictivo).
     abandonada: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Entró a un grupo de atención (mod_callcenter: variables cc_* del CDR).
+    # Base del reporte de entrantes (services/reportes.entrantes).
+    cola: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    cola_espera_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cola_resultado: Mapped[str | None] = mapped_column(String(12), nullable=True)  # atendida|abandonada|desbordada
+    cola_agente: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Transcripción de la grabación ([{rol, texto}]), guardada la primera vez
+    # que se pide (resumen o evaluación de calidad): se paga una sola vez.
+    transcripcion: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     campaign: Mapped["Campaign | None"] = relationship(back_populates="calls")
 
@@ -719,6 +741,8 @@ class Queue(Base):
     record: Mapped[bool] = mapped_column(Boolean, default=False)
     failover_extension: Mapped[str | None] = mapped_column(String(30), nullable=True)
     announce_position: Mapped[bool] = mapped_column(Boolean, default=False)
+    # «Marca 1 y te devolvemos la llamada sin perder tu turno» (services/vigia_colas.py).
+    devolucion: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -1329,6 +1353,12 @@ class AgenteVivo(Base):
     pausa_pendiente_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Antes de marcar a mano desde la pausa: a qué vuelve después.
     volver_a_pausa_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # El cliente está oyendo música (en espera) fuera de la sala del agente.
+    en_espera: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Transferencia consultada: la persona a la que se consulta, en la sala
+    # del agente mientras el cliente espera (services/transferencias.py).
+    consulta_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    consulta_destino: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
 class Callback(Base):
@@ -1433,7 +1463,7 @@ class ReporteProgramado(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = _tenant_fk()
     nombre: Mapped[str] = mapped_column(String(80))
-    tipo: Mapped[str] = mapped_column(String(20))  # agentes|campanas|disposiciones|cumplimiento
+    tipo: Mapped[str] = mapped_column(String(20))  # agentes|campanas|disposiciones|cumplimiento|entrantes
     frecuencia: Mapped[str] = mapped_column(String(10))  # diaria|semanal|mensual
     hora: Mapped[int] = mapped_column(Integer, default=7, server_default="7")  # hora local de envío
     destinatarios: Mapped[str] = mapped_column(Text)
@@ -1509,4 +1539,128 @@ class MensajeBuzon(Base):
     ruta: Mapped[str] = mapped_column(String(500))
     duracion: Mapped[int] = mapped_column(Integer, default=0)  # segundos de mensaje
     escuchado: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Lo que dijo, si hay API key de Deepgram (services/buzon.transcribir).
+    transcripcion: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SesionWebcall(Base):
+    """Credencial SIP temporal de un visitante del widget de llamada web
+    (services/webcall.py). En la base y no en memoria: con varias réplicas,
+    el directorio de FreeSWITCH puede preguntarle a una que no la creó."""
+
+    __tablename__ = "webcall_sesiones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(20), unique=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    password: Mapped[str] = mapped_column(TextoCifrado())
+    ip: Mapped[str] = mapped_column(String(64), index=True)
+    creada: Mapped[float] = mapped_column(Float, index=True)  # epoch (time.time())
+    registrada: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Colgó o se cerró: ya no cuenta como activa, pero sigue para el límite por IP.
+    terminada: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+
+class CriterioCalidad(Base):
+    """Un punto de la evaluación de calidad de llamadas de la empresa
+    («Saludó y se presentó», «Dio información correcta»…)."""
+
+    __tablename__ = "criterios_calidad"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    nombre: Mapped[str] = mapped_column(String(120))
+    descripcion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    peso: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    orden: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+
+class EvaluacionLlamada(Base):
+    """La evaluación de calidad de una llamada grabada (services/calidad.py).
+    `puntajes`: {id de criterio: 0 no cumple | 1 a medias | 2 cumple}."""
+
+    __tablename__ = "evaluaciones_llamada"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    call_id: Mapped[int] = mapped_column(ForeignKey("call_logs.id", ondelete="CASCADE"), index=True)
+    agente_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    evaluador_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    puntajes: Mapped[dict] = mapped_column(JSON)
+    total_pct: Mapped[float] = mapped_column(Float)
+    comentario: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # manual | ia (la sugerencia de la IA, revisada y guardada por alguien)
+    origen: Mapped[str] = mapped_column(String(10), default="manual", server_default="manual")
+    # False = la propuso el muestreo nocturno y nadie la confirmó todavía
+    # (services/calidad_auto.py): no cuenta en los promedios ni la ve el agente.
+    revisada: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class NumeroSinRuta(Base):
+    """Un número al que entraron llamadas por la troncal sin ninguna ruta de
+    entrada que lo atienda (el dialplan las cuelga: config_generator
+    `no_route`). De la plataforma, no de una empresa: el número no es de
+    nadie todavía. Lo ve la plataforma; la empresa dueña de la troncal
+    (gateway `<slug>_…`) recibe un aviso (services/alertas.py)."""
+
+    __tablename__ = "numeros_sin_ruta"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    numero: Mapped[str] = mapped_column(String(64), unique=True)
+    para: Mapped[str | None] = mapped_column(String(64), nullable=True)  # encabezado To
+    origen: Mapped[str | None] = mapped_column(String(64), nullable=True)  # quién llamó (la última vez)
+    troncal: Mapped[str | None] = mapped_column(String(120), nullable=True)  # gateway de FreeSWITCH
+    veces: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    primera_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ultima_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class CupoUso(Base):
+    """Cuántas veces se usó algo caro (el asistente, el simulador de bots)
+    en la ventana actual. En la base y no en memoria: con varias réplicas
+    el tope es uno solo (core/cupos.py)."""
+
+    __tablename__ = "cupos_uso"
+
+    clave: Mapped[str] = mapped_column(String(120), primary_key=True)
+    ventana: Mapped[int] = mapped_column(BigInteger)  # epoch // duración de la ventana
+    conteo: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Devolucion(Base):
+    """Alguien que esperaba en un grupo marcó 1 para que le devolvieran la
+    llamada (services/vigia_colas.py). Cuando le toca y hay un agente libre,
+    la central lo llama y lo pone de primero en la fila."""
+
+    __tablename__ = "devoluciones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    queue_id: Mapped[int | None] = mapped_column(ForeignKey("queues.id", ondelete="SET NULL"), nullable=True, index=True)
+    numero: Mapped[str] = mapped_column(String(30))
+    did: Mapped[str | None] = mapped_column(String(30), nullable=True)  # el número que había marcado
+    # pendiente | llamando | hecha | fallida | cancelada
+    estado: Mapped[str] = mapped_column(String(12), default="pendiente", server_default="pendiente", index=True)
+    intentos: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    pedida_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    proximo_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # no antes de esto (reintento)
+    hecha_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    detalle: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
+class FechaEspecial(Base):
+    """Un día con horario distinto en la empresa: cierre por inventario, 24
+    y 31 de diciembre… (services/festivos.py). `franja` vacía = cerrado todo
+    el día; «08:00-12:00» = abierto solo en esa franja."""
+
+    __tablename__ = "fechas_especiales"
+    __table_args__ = (UniqueConstraint("tenant_id", "fecha", name="ux_fechas_especiales_tenant_fecha"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = _tenant_fk()
+    fecha: Mapped[date] = mapped_column(Date, index=True)
+    nombre: Mapped[str] = mapped_column(String(80))
+    franja: Mapped[str | None] = mapped_column(String(11), nullable=True)

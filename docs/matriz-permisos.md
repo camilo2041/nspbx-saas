@@ -56,9 +56,28 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/auth/sesiones/{sesion_id}` | sesión (la propia cuenta) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/buzon` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/buzon/resumen` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| DELETE | `/api/buzon/saludo` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/buzon/saludo` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/buzon/saludo` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/buzon/saludo/audio` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | DELETE | `/api/buzon/{mensaje_id}` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | PUT | `/api/buzon/{mensaje_id}` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/buzon/{mensaje_id}/audio` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/calidad/automatico` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/calidad/automatico` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/calidad/criterios` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| PUT | `/api/calidad/criterios` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| DELETE | `/api/calidad/evaluaciones/{evaluacion_id}` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/calidad/evaluaciones/{evaluacion_id}/revisar` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/calidad/llamadas` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/calidad/llamadas/{call_id}` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/calidad/llamadas/{call_id}/evaluaciones` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/calidad/llamadas/{call_id}/sugerencia` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/calidad/llamadas/{call_id}/transcribir` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/calidad/mias` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/calidad/por-revisar` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/calidad/resumen` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/calidad/tendencia` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/calls` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls/dias` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/calls/serie` | `llamadas:ver_propias` | ✓ | ✓ | ✓ | ✓ |
@@ -130,6 +149,10 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/extensions/{extension_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | PUT | `/api/extensions/{extension_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/extensions/{extension_id}/call` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/festivos` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| PUT | `/api/festivos` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| POST | `/api/festivos/especiales` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| DELETE | `/api/festivos/especiales/{fecha_id}` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/inbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/inbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | DELETE | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
@@ -144,6 +167,13 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/integraciones/webhooks/{webhook_id}/entregas` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/integraciones/webhooks/{webhook_id}/probar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/integraciones/webhooks/{webhook_id}/rotar-secreto` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/llamada/destinos` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/espera` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| GET | `/api/llamada/ficha` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/transferencia/cancelar` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/transferencia/completar` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/transferencia/conferencia` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
+| POST | `/api/llamada/transferir` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
 | GET | `/api/outbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/outbound-routes` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | DELETE | `/api/outbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
@@ -156,15 +186,19 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/plataforma/csp` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/destinos-bloqueados` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/destinos-bloqueados` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/humo` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/nodos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/nodos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/nodos/empresas/{tenant_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | DELETE | `/api/plataforma/nodos/{nodo_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/nodos/{nodo_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/nodos/{nodo_id}/probar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/operacion` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/salientes` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/salientes/colgar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/sin-ruta` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| DELETE | `/api/plataforma/sin-ruta/{numero_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/privacidad/titular/consultar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/privacidad/titular/suprimir` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/queues` | `colas:gestionar` | ✓ | ✓ | ✗ | ✗ |
@@ -177,6 +211,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/reportes/campanas` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/reportes/cumplimiento` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/reportes/disposiciones` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
+| GET | `/api/reportes/entrantes` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/reportes/programados` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | POST | `/api/reportes/programados` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
 | DELETE | `/api/reportes/programados/{programado_id}` | `reportes:ver` | ✓ | ✓ | ✓ | ✗ |
@@ -196,6 +231,9 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | PUT | `/api/supervision/campanas/{campaign_id}/nivel` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
 | POST | `/api/supervision/campanas/{campaign_id}/pausar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
 | POST | `/api/supervision/campanas/{campaign_id}/reanudar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| GET | `/api/supervision/devoluciones` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
+| POST | `/api/supervision/devoluciones/{devolucion_id}/cancelar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
+| GET | `/api/supervision/grupos` | `supervision:ver` | ✓ | ✓ | ✓ | ✗ |
 | GET | `/api/supervision/monitoreo` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
 | POST | `/api/supervision/monitoreo/colgar` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |
 | POST | `/api/supervision/monitoreo/modo` | `supervision:intervenir`, `supervision:ver` | ✓ | ✓ | ✗ | ✗ |

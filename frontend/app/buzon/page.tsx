@@ -137,6 +137,8 @@ export default function BuzonPage() {
         </div>
       )}
 
+      <MiSaludo />
+
       <Card>
         <CardHeader
           title={sinEscuchar ? `${sinEscuchar} mensaje(s) sin escuchar` : "Mensajes"}
@@ -198,6 +200,7 @@ export default function BuzonPage() {
                 <Td>{tiempoCorto(m.duracion)}</Td>
                 <Td>
                   <Reproductor mensaje={m} onEscuchado={() => marcar(m, true)} />
+                  {m.transcripcion && <p className="mt-1 max-w-md text-xs italic text-muted">«{m.transcripcion}»</p>}
                 </Td>
                 <Td align="right">
                   <div className="flex flex-wrap justify-end gap-1.5">
@@ -223,5 +226,97 @@ export default function BuzonPage() {
         El audio de los mensajes se borra solo, con la misma retención que las grabaciones de llamadas (Ajustes).
       </p>
     </div>
+  );
+}
+
+/** El saludo que oye quien llama cuando nadie contesta (el propio o el general). */
+function MiSaludo() {
+  const [saludo, setSaludo] = useState<{ extension: string; propio: boolean; segundos: number | null } | null>(null);
+  const [trabajando, setTrabajando] = useState(false);
+  const [error, setError] = useState("");
+  const [url, setUrl] = useState<string | null>(null);
+  const entrada = useRef<HTMLInputElement | null>(null);
+
+  const cargar = useCallback(() => {
+    api.get<{ extension: string; propio: boolean; segundos: number | null }>("/api/buzon/saludo").then(setSaludo, () => setSaludo(null));
+  }, []);
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+  useEffect(() => () => {
+    if (url) URL.revokeObjectURL(url);
+  }, [url]);
+
+  if (!saludo) return null;
+
+  const subir = async (archivo: File) => {
+    setTrabajando(true);
+    setError("");
+    try {
+      const datos = new FormData();
+      datos.append("archivo", archivo);
+      await api.form("/api/buzon/saludo", datos);
+      cargar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo subir el saludo");
+    } finally {
+      setTrabajando(false);
+    }
+  };
+
+  return (
+    <Card className="mb-4">
+      <CardHeader
+        title={`Mi saludo · extensión ${saludo.extension}`}
+        subtitle={
+          saludo.propio
+            ? `Quien te llama oye tu saludo (${saludo.segundos ?? "?"} s) antes de dejar el mensaje.`
+            : "Quien te llama oye el saludo general: «La persona que llamas no está disponible…»."
+        }
+      />
+      <div className="flex flex-wrap items-center gap-2 px-5 pb-5">
+        {saludo.propio && !url && (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={async () => setUrl(URL.createObjectURL(await api.getBlob("/api/buzon/saludo/audio")))}
+          >
+            Escucharlo
+          </Button>
+        )}
+        {url && <audio src={url} controls autoPlay className="h-9" />}
+        <Button size="sm" variant="secondary" loading={trabajando} onClick={() => entrada.current?.click()}>
+          {saludo.propio ? "Cambiarlo (WAV)" : "Subir mi saludo (WAV)"}
+        </Button>
+        {saludo.propio && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={async () => {
+              await api.del("/api/buzon/saludo");
+              setUrl(null);
+              cargar();
+            }}
+          >
+            Volver al general
+          </Button>
+        )}
+        <input
+          ref={entrada}
+          type="file"
+          accept="audio/wav,.wav"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) subir(f);
+            e.target.value = "";
+          }}
+        />
+        <p className="w-full text-xs text-muted">
+          También desde tu teléfono: marca <b>*98</b> para grabar tu saludo y <b>*97</b> para escuchar tus mensajes nuevos.
+        </p>
+        {error && <p className="w-full text-xs text-danger-text">{error}</p>}
+      </div>
+    </Card>
   );
 }

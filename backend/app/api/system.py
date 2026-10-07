@@ -96,7 +96,7 @@ async def diagnostics(session: AsyncSession = Depends(get_session)):
     troncales = []
     for t in trunks:
         try:
-            g = await gateway_status(nombre_gateway(t.name, slugs.get(t.tenant_id, "x")))
+            g = await gateway_status(nombre_gateway(t.name, slugs.get(t.tenant_id, "x")), tenant_id=t.tenant_id)
         except Exception:
             g = {"state": None, "status": None, "contact_ip": None}
         troncales.append(

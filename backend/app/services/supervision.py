@@ -185,6 +185,12 @@ async def campanas_en_vivo(session, agentes_vivos: list[dict] | None = None) -> 
     return filas
 
 
+def _grupos(tenant_id: int) -> list[dict]:
+    from app.services.vigia_colas import vigia
+
+    return vigia.foto(tenant_id)
+
+
 async def resumen(session, tenant_id: int) -> dict:
     """Lo del wallboard: cifras grandes de toda la operación."""
     from app.services.tiempo_real import tiempo_real
@@ -226,6 +232,8 @@ async def resumen(session, tenant_id: int) -> dict:
             }
             for c in campanas
         ],
+        # Grupos de atención (services/vigia_colas.py): sin teléfonos, solo cifras.
+        "grupos": _grupos(tenant_id),
         # Solo nombre y estado: una TV en un pasillo no muestra teléfonos.
         "agentes_lista": [
             {"nombre": a["nombre"], "estado": a["estado"], "en_estado_s": a["en_estado_s"],

@@ -80,9 +80,10 @@ export default function VoiceBotFlowPage() {
     []
   );
 
-  const addNode = (type: "menu" | "transfer" | "hangup") => {
+  const addNode = (type: "menu" | "transfer" | "hangup" | "horario") => {
     const id = newId();
-    const label = type === "menu" ? "Menú de audio" : type === "transfer" ? "Transferir" : "Colgar";
+    const label =
+      type === "menu" ? "Menú de audio" : type === "transfer" ? "Transferir" : type === "horario" ? "¿Estamos abiertos?" : "Colgar";
     setNodes((nds) => [
       ...nds,
       { id, type, position: { x: 300 + Math.random() * 200, y: 100 + Math.random() * 300 }, data: { label } },
@@ -175,6 +176,9 @@ export default function VoiceBotFlowPage() {
           </Button>
           <Button variant="secondary" onClick={() => addNode("transfer")}>
             + Transferir
+          </Button>
+          <Button variant="secondary" onClick={() => addNode("horario")}>
+            + Horario
           </Button>
           <Button variant="secondary" onClick={() => addNode("hangup")}>
             + Colgar

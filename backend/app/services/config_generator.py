@@ -141,6 +141,9 @@ def _acciones_buzon(condition: ET.Element, tenant_id: int, extension: str) -> No
     mismo aislamiento y el backend ya sabe servirlo."""
     carpeta = f"$${{recordings_dir}}/{carpeta_grabaciones(tenant_id)}/buzon/{extension}"
     ET.SubElement(condition, "action", attrib={"application": "answer"})
+    # La empresa explícita en el CDR: una llamada que entra directo al contexto
+    # (loopback, la prueba de humo) no trae el dominio de una ruta entrante.
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": f"nspbx_tenant_id={int(tenant_id)}"})
     ET.SubElement(condition, "action", attrib={"application": "set", "data": f"nspbx_buzon_ext={extension}"})
     ET.SubElement(
         condition,
@@ -150,15 +153,89 @@ def _acciones_buzon(condition: ET.Element, tenant_id: int, extension: str) -> No
     # `system` y no `bgsystem`: `record` necesita la carpeta ya creada.
     ET.SubElement(condition, "action", attrib={"application": "system", "data": f"mkdir -p {carpeta}"})
     ET.SubElement(condition, "action", attrib={"application": "sleep", "data": "500"})
-    _decir(
-        condition,
-        "buzon_saludo",
-        "La persona que llamas no esta disponible. Deja tu mensaje despues del tono y cuelga al terminar.",
-    )
+    _saludo_buzon(condition, carpeta)
     ET.SubElement(condition, "action", attrib={"application": "playback", "data": "tone_stream://%(500,0,1000)"})
     # Hasta BUZON_MAX_SEG; corta solo tras 5 s de silencio (umbral 200).
     ET.SubElement(condition, "action", attrib={"application": "record", "data": f"${{nspbx_buzon}} {BUZON_MAX_SEG} 200 5"})
     ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+
+def _saludo_buzon(condition: ET.Element, carpeta: str) -> None:
+    """El saludo propio de la extensión (`saludo.wav` en su carpeta, grabado
+    con *98 o subido en el panel) o, si no tiene, el general. La extensión
+    puede ser una variable del canal: se decide al ejecutarse (Lua en línea)."""
+    general = voice_prompts.prompt_path("buzon_saludo")
+    respaldo = (
+        f"session:streamFile('{general}')"
+        if general
+        else "session:execute('speak', 'flite|kal|La persona que llamas no esta disponible. Deja tu mensaje despues del tono.')"
+    )
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": f"nspbx_buzon_dir={carpeta}"})
+    codigo = (
+        "~local f = (session:getVariable('nspbx_buzon_dir') or '') .. '/saludo.wav'; "
+        "local h = io.open(f, 'r'); "
+        f"if h then h:close(); session:streamFile(f) else {respaldo} end"
+    )
+    ET.SubElement(condition, "action", attrib={"application": "lua", "data": codigo})
+
+
+def _append_buzon_grabar_saludo(context: ET.Element, extensions: list, tenant_id: int) -> None:
+    """*98: grabar el saludo propio del buzón desde el teléfono de la
+    extensión (la que se autenticó, `${user_name}`). Lo vuelve a reproducir
+    al terminar."""
+    con_buzon = _numeros_con_buzon(extensions)
+    if not con_buzon:
+        return
+    ext = ET.SubElement(context, "extension", attrib={"name": "nspbx_buzon_saludo", "continue": "false"})
+    ET.SubElement(ext, "condition", attrib={"field": "destination_number", "expression": r"^\*98$"})
+    c = ET.SubElement(ext, "condition", attrib={"field": "${user_name}", "expression": f"^({'|'.join(con_buzon)})$"})
+    carpeta = f"$${{recordings_dir}}/{carpeta_grabaciones(tenant_id)}/buzon/$1"
+    ET.SubElement(c, "action", attrib={"application": "answer"})
+    ET.SubElement(c, "action", attrib={"application": "system", "data": f"mkdir -p {carpeta}"})
+    ET.SubElement(c, "action", attrib={"application": "sleep", "data": "500"})
+    _decir(c, "buzon_grabar_saludo", "Record your greeting after the tone.")
+    ET.SubElement(c, "action", attrib={"application": "playback", "data": "tone_stream://%(500,0,1000)"})
+    ET.SubElement(c, "action", attrib={"application": "set", "data": "playback_terminators=#"})
+    ET.SubElement(c, "action", attrib={"application": "record", "data": f"{carpeta}/saludo.wav 30 200 3"})
+    _decir(c, "buzon_saludo_listo", "Your greeting was saved.")
+    ET.SubElement(c, "action", attrib={"application": "playback", "data": f"{carpeta}/saludo.wav"})
+    ET.SubElement(c, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+
+def _append_buzon_escuchar(context: ET.Element, extensions: list, nuevos: dict[str, list]) -> None:
+    """*97: escuchar los mensajes nuevos desde el teléfono de la extensión.
+
+    El dialplan se arma en cada llamada (xml_curl), así que la lista de
+    mensajes sin escuchar ya viene en él. Tras cada mensaje queda en el canal
+    `nspbx_buzon_oido=<id>`; con el CDR se marcan como escuchados los que se
+    oyeron completos (api/calls.py)."""
+    con_buzon = _numeros_con_buzon(extensions)
+    if not con_buzon:
+        return
+    for numero in con_buzon:
+        mensajes = nuevos.get(numero) or []
+        if not mensajes:
+            continue
+        ext = ET.SubElement(context, "extension", attrib={"name": f"nspbx_buzon_escuchar_{numero}", "continue": "false"})
+        ET.SubElement(ext, "condition", attrib={"field": "destination_number", "expression": r"^\*97$"})
+        c = ET.SubElement(ext, "condition", attrib={"field": "${user_name}", "expression": f"^{numero}$"})
+        ET.SubElement(c, "action", attrib={"application": "answer"})
+        ET.SubElement(c, "action", attrib={"application": "sleep", "data": "500"})
+        n = len(mensajes)
+        _decir(c, f"buzon_nuevos_{n if n <= 9 else 'mas'}", f"You have {n} new messages.")
+        for mensaje_id, ruta in mensajes:
+            ET.SubElement(c, "action", attrib={"application": "playback", "data": "tone_stream://%(300,0,800)"})
+            ET.SubElement(c, "action", attrib={"application": "playback", "data": ruta})
+            ET.SubElement(c, "action", attrib={"application": "set", "data": f"nspbx_buzon_oido={int(mensaje_id)}"})
+            ET.SubElement(c, "action", attrib={"application": "sleep", "data": "700"})
+        _decir(c, "buzon_fin", "No more messages.")
+        ET.SubElement(c, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+    vacio = ET.SubElement(context, "extension", attrib={"name": "nspbx_buzon_escuchar", "continue": "false"})
+    c = ET.SubElement(vacio, "condition", attrib={"field": "destination_number", "expression": r"^\*97$"})
+    ET.SubElement(c, "action", attrib={"application": "answer"})
+    ET.SubElement(c, "action", attrib={"application": "sleep", "data": "500"})
+    _decir(c, "buzon_sin_nuevos", "You have no new messages.")
+    ET.SubElement(c, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
 
 
 def _append_buzon_directo(context: ET.Element, extensions: list, tenant_id: int) -> None:
@@ -745,11 +822,61 @@ def _append_queue_routes(context: ET.Element, queues: list, dominio: str) -> Non
         ET.SubElement(condition, "action", attrib={"application": "set", "data": "hangup_after_bridge=true"})
         if getattr(queue, "announce_position", False):
             _decir_posicion(condition, qkey)
+        if getattr(queue, "devolucion", False):
+            _append_devolucion(context, condition, queue, qkey)
+            continue
         ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})
-        if queue.failover_extension and validacion.DESTINO_RE.fullmatch(queue.failover_extension):
-            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML {context.get('name')}"})
-        else:
-            ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+        _salida_de_cola(condition, queue, context.get("name"))
+
+
+def _salida_de_cola(condition: ET.Element, queue, contexto: str) -> None:
+    """Al salir de la fila sin agente: el desborde o colgar."""
+    if queue.failover_extension and validacion.DESTINO_RE.fullmatch(queue.failover_extension):
+        ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{queue.failover_extension} XML {contexto}"})
+    else:
+        ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+
+def _append_devolucion(context: ET.Element, condition: ET.Element, queue, qkey: str) -> None:
+    """«Marca 1 y te devolvemos la llamada» (services/vigia_colas.py).
+
+    - En la fila, la tecla 1 saca a quien llama (`cc_exit_keys`) con
+      `cc_cancel_reason=EXIT_WITH_KEY`. Las condiciones del dialplan se
+      evalúan al buscar la extensión, no después de `callcenter`, así que la
+      salida va a `cola_salida_<número>_${cc_cancel_reason}`, que se resuelve
+      al ejecutarse: con la tecla, a la devolución; si no, al desborde.
+    - La devolución confirma, deja `nspbx_pide_devolucion` en el CDR (el
+      backend la anota) y cuelga.
+    - `devolver_<número>_<teléfono>`: por donde entra la llamada que hace la
+      central al devolverla. Muestra al agente el número del cliente y lo pone
+      de primero en la fila (`cc_base_score`).
+    """
+    contexto = context.get("name")
+    numero = re.escape(str(queue.extension))
+    ET.SubElement(condition, "action", attrib={"application": "set", "data": "cc_exit_keys=1"})
+    ET.SubElement(condition, "action", attrib={"application": "callcenter", "data": qkey})
+    ET.SubElement(
+        condition, "action",
+        attrib={"application": "transfer", "data": f"cola_salida_{queue.extension}_${{cc_cancel_reason}} XML {contexto}"},
+    )
+
+    pedida = ET.SubElement(context, "extension", attrib={"name": f"devolucion_{queue.name}", "continue": "false"})
+    c = ET.SubElement(pedida, "condition", attrib={"field": "destination_number", "expression": f"^cola_salida_{numero}_EXIT_WITH_KEY$"})
+    ET.SubElement(c, "action", attrib={"application": "set", "data": f"nspbx_tenant_id={int(queue.tenant_id)}"})
+    ET.SubElement(c, "action", attrib={"application": "set", "data": f"nspbx_pide_devolucion={int(queue.id)}"})
+    _decir(c, "cola_devolucion_ok", "Listo. Te llamaremos apenas te toque.")
+    ET.SubElement(c, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+    salida = ET.SubElement(context, "extension", attrib={"name": f"cola_salida_{queue.name}", "continue": "false"})
+    c = ET.SubElement(salida, "condition", attrib={"field": "destination_number", "expression": f"^cola_salida_{numero}_.*$"})
+    _salida_de_cola(c, queue, contexto)
+
+    devolver = ET.SubElement(context, "extension", attrib={"name": f"devolver_{queue.name}", "continue": "false"})
+    c = ET.SubElement(devolver, "condition", attrib={"field": "destination_number", "expression": f"^devolver_{numero}_(\\+?[0-9]{{7,15}})$"})
+    ET.SubElement(c, "action", attrib={"application": "set_profile_var", "data": "caller_id_number=$1"})
+    ET.SubElement(c, "action", attrib={"application": "set_profile_var", "data": "caller_id_name=Devolucion"})
+    ET.SubElement(c, "action", attrib={"application": "set", "data": "cc_base_score=100000"})
+    ET.SubElement(c, "action", attrib={"application": "transfer", "data": f"{queue.extension} XML {contexto}"})
 
 
 def _decir_posicion(condition: ET.Element, qkey: str) -> None:
@@ -758,8 +885,8 @@ def _decir_posicion(condition: ET.Element, qkey: str) -> None:
     mod_callcenter no anuncia la posición. Se cuentan los que esperan
     (Waiting/Trying) en `callcenter_config queue list members` con un Lua en
     línea (mod_lua) y se reproduce el aviso pre-generado de ese número
-    (voice_prompts: cola_delante_0…9 y _mas). Si el audio no existe todavía
-    (sin API key de voz) no dice nada: mejor callar que la voz de respaldo
+    (voice_prompts: cola_delante_0…9 y _mas, WAV o MP3). Si el audio no existe
+    todavía no dice nada: mejor callar que la voz de respaldo
     en inglés. Cualquier error de Lua solo se registra y la llamada sigue.
     """
     carpeta = f"{voice_prompts.FS_SIDE_SOUNDS_DIR}/{voice_prompts.PROMPTS_DIR}"
@@ -771,9 +898,11 @@ def _decir_posicion(condition: ET.Element, qkey: str) -> None:
         "for l in string.gmatch(r, '[^\\n]+') do "
         "if string.find(l, '|Waiting|', 1, true) or string.find(l, '|Trying|', 1, true) then n = n + 1 end "
         "end; "
-        f"local f = '{carpeta}/cola_delante_' .. (n > 9 and 'mas' or tostring(n)) .. '.wav'; "
-        "local h = io.open(f, 'r'); "
-        "if h then h:close(); session:streamFile(f) end"
+        f"local b = '{carpeta}/cola_delante_' .. (n > 9 and 'mas' or tostring(n)); "
+        "for _, x in ipairs({'.wav', '.mp3'}) do "
+        "local h = io.open(b .. x, 'r'); "
+        "if h then h:close(); session:streamFile(b .. x); break end "
+        "end"
     )
     ET.SubElement(condition, "action", attrib={"application": "lua", "data": codigo})
 
@@ -812,7 +941,7 @@ def _append_inbound_routes(
     # robaba TODAS las llamadas entrantes, sin ningún error visible.
     ordered = sorted((r for r in routes if r.enabled), key=lambda r: (_es_comodin(r), r.priority, r.id))
     from app.core.clock import now_local
-    from app.services import webcall
+    from app.services import festivos
 
     ahora = now_local()
     exactas: list[tuple] = []
@@ -830,7 +959,7 @@ def _append_inbound_routes(
         # Horario de atención: el dialplan se arma en cada llamada (xml_curl),
         # así que basta mirar la hora de ahora.
         horario = getattr(route, "horario", None)
-        if horario and not webcall.is_open(horario, ahora):
+        if horario and not festivos.abierto(horario, route.tenant_id, ahora):
             tipo, valor = getattr(route, "fuera_horario_tipo", None) or "hangup", getattr(route, "fuera_horario_valor", None)
             if tipo != "hangup" and not validacion.destino_valido(tipo, valor):
                 tipo, valor = "hangup", None
@@ -865,6 +994,9 @@ def _append_inbound_routes(
 
     fallback = ET.SubElement(public_context, "extension", attrib={"name": "no_route", "continue": "false"})
     fb_cond = ET.SubElement(fallback, "condition", attrib={"field": "destination_number", "expression": ".*"})
+    # Marca para el CDR: no es una llamada de ninguna empresa, sino un número
+    # sin ruta que la plataforma tiene que ver (api/calls.py:_sin_ruta).
+    ET.SubElement(fb_cond, "action", attrib={"application": "set", "data": "nspbx_sin_ruta=1"})
     ET.SubElement(fb_cond, "action", attrib={"application": "hangup", "data": "UNALLOCATED_NUMBER"})
 
 
@@ -1030,6 +1162,8 @@ def build_dialplan_xml(
         _append_dnd_hook(context, extensions, t["tenant_id"])
         _append_mobile_push_hook(context, extensions, t.get("push_extensions") or set(), slugs.get(t["tenant_id"], ""))
         _append_buzon_directo(context, extensions, t["tenant_id"])
+        _append_buzon_grabar_saludo(context, extensions, t["tenant_id"])
+        _append_buzon_escuchar(context, extensions, t.get("buzon_nuevos") or {})
         _append_push_bridge_routes(context, t.get("push_extensions") or set(), extensions, dominio, t["tenant_id"])
         _append_local_extension_route(context, extensions, dominio, t["tenant_id"])
         _append_voicebot_routes(section, context, bots, dominio, t["tenant_id"])

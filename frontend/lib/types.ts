@@ -50,7 +50,7 @@ export interface VoiceBot {
   created_at: string;
 }
 
-export type FlowNodeType = "menu" | "transfer" | "hangup";
+export type FlowNodeType = "menu" | "transfer" | "hangup" | "horario";
 
 export interface FlowNodeData {
   [key: string]: unknown;
@@ -62,6 +62,10 @@ export interface FlowNodeData {
   whisper_audio_path?: string | null;
   ai_intent?: string;
   whisper_text?: string | null;
+  /** Nodo «Transferir»: a qué va `extension` (por omisión, una extensión). */
+  destino_tipo?: "extension" | "grupo" | "buzon" | "numero";
+  /** Nodo «Horario»: JSON {"mon": ["08:00", "18:00"], ...}. */
+  horario?: string | null;
 }
 
 export interface FlowNode {
@@ -263,6 +267,7 @@ export interface Queue {
   record: boolean;
   failover_extension: string | null;
   announce_position: boolean;
+  devolucion?: boolean;
   enabled: boolean;
   created_at: string;
 }
@@ -808,6 +813,8 @@ export interface EstadoConsola {
     telefono: string | null;
     contestada_at: string | null;
     pausa_pendiente_id: number | null;
+    en_espera?: boolean;
+    consulta_destino?: string | null;
     token_audio: string | null;
     extension: string | null;
   } | null;
@@ -901,6 +908,7 @@ export interface MiMonitoreo {
 
 export interface ResumenWallboard {
   generado_at: string;
+  grupos?: import("@/components/grupos-en-vivo").GrupoEnVivo[];
   empresa?: string;
   agentes: { conectados: number; listos: number; en_llamada: number; en_pausa: number; disposicion: number; pausas_excedidas: number };
   llamadas: { activas: number; timbrando: number; en_espera: number };
@@ -1003,7 +1011,7 @@ export interface Cumplimiento {
 export interface ReporteProgramado {
   id: number;
   nombre: string;
-  tipo: "agentes" | "campanas" | "disposiciones" | "cumplimiento";
+  tipo: "agentes" | "campanas" | "disposiciones" | "cumplimiento" | "entrantes";
   frecuencia: "diaria" | "semanal" | "mensual";
   hora: number;
   destinatarios: string;
@@ -1068,5 +1076,11 @@ export interface MensajeBuzon {
   caller_name: string | null;
   duracion: number;
   escuchado: boolean;
+  transcripcion?: string | null;
   created_at: string | null;
+}
+
+export interface DestinosTransferencia {
+  extensiones: { numero: string; nombre: string | null; buzon: boolean }[];
+  grupos: { numero: string; nombre: string }[];
 }

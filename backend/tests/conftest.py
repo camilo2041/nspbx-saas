@@ -65,7 +65,7 @@ os.environ.update(
 )
 
 from dataclasses import dataclass, field  # noqa: E402
-from datetime import datetime, timedelta  # noqa: E402
+from datetime import date, datetime, timedelta  # noqa: E402
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402
@@ -77,6 +77,9 @@ from app.core.database import async_session, engine  # noqa: E402
 from app.core.security import crear_token, hash_password  # noqa: E402
 from app.main import _TABLAS_CON_RLS, app, migrar  # noqa: E402
 from app.models import (  # noqa: E402
+    Devolucion,
+    EvaluacionLlamada,
+    FechaEspecial,
     AiCallUsage,
     ApiKey,
     Appointment,
@@ -112,6 +115,10 @@ from app.models import (  # noqa: E402
 from app.services.ajustes import get_or_create_settings  # noqa: E402
 
 FS_SECRET = os.environ["FS_XML_SECRET"]
+
+
+# Una fecha especial lejana por empresa (para la prueba de aislamiento).
+FECHA_ESPECIAL_SEMBRADA = date(2030, 1, 2)
 
 
 @dataclass
@@ -252,7 +259,12 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         tenant_id=tid, extension="1000", call_uuid=f"vm-{marca}", caller_number=f"{telefono}06",
         caller_name=f"Llamante {marca}", ruta=f"/var/lib/freeswitch/recordings/t{tid}/buzon/1000/{marca}.wav", duracion=5,
     )
-    session.add_all([entrega, programado, buzon])
+    devolucion = Devolucion(tenant_id=tid, queue_id=queue.id, numero=f"{telefono}07", pedida_at=datetime.utcnow())
+    especial = FechaEspecial(tenant_id=tid, fecha=FECHA_ESPECIAL_SEMBRADA, nombre=f"Cierre {marca}")
+    # Una propuesta de la calidad automática sin revisar.
+    propuesta = EvaluacionLlamada(tenant_id=tid, call_id=llamada.id, puntajes={}, total_pct=0.0, origen="ia", revisada=False,
+                                  comentario=f"Propuesta {marca}")
+    session.add_all([entrega, programado, buzon, devolucion, especial, propuesta])
     await session.flush()
 
     for rol in (permissions.ADMIN, permissions.SUPERVISOR, permissions.ASESOR):
@@ -298,6 +310,9 @@ async def _sembrar(session, slug: str, marca: str, telefono: str) -> Empresa:
         "entrega_webhook": entrega.id,
         "reporte_programado": programado.id,
         "mensaje_buzon": buzon.id,
+        "devolucion": devolucion.id,
+        "fecha_especial": especial.id,
+        "evaluacion": propuesta.id,
     }
     return e
 

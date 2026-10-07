@@ -124,10 +124,17 @@ def _interseccion(a, b):
 
 
 def franja(ajustes, intencion: str | None, d: date) -> tuple[time, time] | None:
-    """Desde y hasta cuándo se puede marcar ese día, o None si no se marca."""
+    """Desde y hasta cuándo se puede marcar ese día, o None si no se marca.
+    Una fecha especial de la empresa (services/festivos.py) la cierra o la
+    acorta."""
+    from app.services import festivos
+
     propia = _franja_del_dia(horario_de(ajustes), d)
     if (intencion or "").strip().lower() == "cobranza":
-        return _interseccion(propia, _franja_del_dia(LEGAL, d))
+        propia = _interseccion(propia, _franja_del_dia(LEGAL, d))
+    especial = festivos.especial(getattr(ajustes, "tenant_id", None), d)
+    if especial is not None:
+        return _interseccion(propia, especial[1])
     return propia
 
 

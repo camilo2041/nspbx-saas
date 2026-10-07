@@ -19,6 +19,7 @@ import {
 } from "@/components/ui";
 import { ConsumoMensual } from "@/components/consumo-mensual";
 import { WebcallEmbed } from "@/components/webcall-embed";
+import { CalendarioFestivos } from "@/components/calendario-festivos";
 import { api } from "@/lib/api";
 import { DetectedIp, Diagnostics, EstadoSalientes, MaintenanceStatus, Queue, SystemSettings, TtsVoice } from "@/lib/types";
 
@@ -313,6 +314,8 @@ export default function SettingsPage() {
           <ErrorBanner message={error} onClose={() => setError("")} />
         </div>
       )}
+
+      <CalendarioFestivos />
 
         {infra && (
       <Card className="mb-4">

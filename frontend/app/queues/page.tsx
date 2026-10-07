@@ -22,7 +22,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { api } from "@/lib/api";
-import { Extension, Queue } from "@/lib/types";
+import { Extension, Queue, VoiceBot } from "@/lib/types";
 
 const STRATEGIES = [
   { value: "ring-all", label: "Suena en todos a la vez (recomendado)" },
@@ -35,13 +35,15 @@ const STRATEGIES = [
   { value: "random", label: "Aleatorio" },
 ];
 
-type Desborde = "hangup" | "extension" | "voicemail" | "queue" | "otro";
+type Desborde = "hangup" | "extension" | "voicemail" | "queue" | "voicebot" | "otro";
 const PREFIJO_BUZON = "*99";
+const PREFIJO_BOT = "bot_";
 
 /** Qué hay en `failover_extension`: *99<ext> es el buzón de esa extensión. */
 function tipoDesborde(valor: string | null | undefined, extensiones: Extension[], colas: Queue[]): Desborde {
   if (!valor) return "hangup";
   if (valor.startsWith(PREFIJO_BUZON)) return "voicemail";
+  if (valor.startsWith(PREFIJO_BOT)) return "voicebot";
   if (extensiones.some((e) => e.number === valor)) return "extension";
   if (colas.some((q) => q.extension === valor)) return "queue";
   return "otro";
@@ -65,6 +67,7 @@ const empty: Omit<Queue, "id" | "created_at"> = {
   record: false,
   failover_extension: "",
   announce_position: false,
+  devolucion: false,
   enabled: true,
 };
 
@@ -77,6 +80,7 @@ export default function QueuesPage() {
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Queue | null>(null);
   const [form, setForm] = useState(empty);
+  const [bots, setBots] = useState<VoiceBot[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,6 +92,8 @@ export default function QueuesPage() {
       setItems(qs);
       setExtensions(exts);
       setError("");
+      // Los voizbots son opcionales (módulo aparte): sin acceso, la lista queda vacía.
+      api.get<VoiceBot[]>("/api/voicebots").then(setBots, () => setBots([]));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error");
     } finally {
@@ -146,15 +152,32 @@ export default function QueuesPage() {
     if (tipo === "voicemail") return `Buzón de ${nombre(v) || `la ${v}`}${espera}`;
     if (tipo === "extension") return `${nombre(v) || `Ext. ${v}`}${espera}`;
     if (tipo === "queue") return `Grupo ${items.find((x) => x.extension === v)?.name ?? v}${espera}`;
+    if (tipo === "voicebot") return `Voizbot ${bots.find((b) => `${PREFIJO_BOT}${b.id}` === v)?.name ?? v}${espera}`;
     return `${v}${espera}`;
   };
 
+  // Personas de este grupo que están también en otros (sus tiempos se combinan).
+  const compartidas = form.agents
+    .map((n) => ({
+      persona: extensions.find((e) => e.number === n)?.caller_id_name || n,
+      grupos: items.filter((q) => q.id !== editing?.id && q.enabled && q.agents.includes(n)).map((q) => q.name),
+    }))
+    .filter((c) => c.grupos.length > 0);
+
   const tipoForm = tipoDesborde(form.failover_extension, extensions, items);
-  const cambiarDesborde = (tipo: Desborde, valor = "") =>
+  const cambiarDesborde = (tipo: Desborde, valor = "") => {
+    // Al cambiar de tipo sin elegir todavía, el primero de la lista (un valor
+    // vacío se leería como «Colgar» y el selector volvería atrás).
+    if (!valor) {
+      if (tipo === "voicebot") valor = bots[0] ? `${PREFIJO_BOT}${bots[0].id}` : "";
+      if (tipo === "queue") valor = items.find((q) => q.id !== editing?.id)?.extension ?? "";
+      if (tipo === "extension") valor = extensions[0]?.number ?? "";
+    }
     setForm({
       ...form,
       failover_extension: tipo === "hangup" ? "" : tipo === "voicemail" ? (valor ? `${PREFIJO_BUZON}${valor}` : PREFIJO_BUZON) : valor,
     });
+  };
 
   const remove = async (q: Queue) => {
     if (!confirm(`¿Eliminar la cola ${q.name}?`)) return;
@@ -317,12 +340,21 @@ export default function QueuesPage() {
                 { value: "voicemail", label: "El buzón de voz de una persona (deja un mensaje)" },
                 { value: "extension", label: "Una persona" },
                 { value: "queue", label: "Otro grupo" },
+                ...(bots.length || tipoForm === "voicebot" ? [{ value: "voicebot", label: "Un voizbot (asistente de voz)" }] : []),
                 { value: "hangup", label: "Colgar" },
               ]}
             />
             {tipoForm !== "hangup" && (
               <Select
-                label={tipoForm === "queue" ? "¿Qué grupo?" : tipoForm === "voicemail" ? "¿El buzón de quién?" : "¿Quién?"}
+                label={
+                  tipoForm === "queue"
+                    ? "¿Qué grupo?"
+                    : tipoForm === "voicebot"
+                      ? "¿Qué voizbot?"
+                      : tipoForm === "voicemail"
+                        ? "¿El buzón de quién?"
+                        : "¿Quién?"
+                }
                 value={valorDesborde(form.failover_extension)}
                 onChange={(v) => cambiarDesborde(tipoForm === "otro" ? "extension" : tipoForm, v)}
                 placeholder="— Elige —"
@@ -331,7 +363,9 @@ export default function QueuesPage() {
                     ? items
                         .filter((q) => q.id !== editing?.id)
                         .map((q) => ({ value: q.extension, label: `${q.extension} — ${q.name}` }))
-                    : extensions
+                    : tipoForm === "voicebot"
+                      ? bots.map((b) => ({ value: `${PREFIJO_BOT}${b.id}`, label: b.name }))
+                      : extensions
                         .filter((e) => tipoForm !== "voicemail" || e.voicemail)
                         .map((e) => ({ value: e.number, label: `${e.number} — ${e.caller_id_name || "sin nombre"}` }))
                 }
@@ -364,10 +398,20 @@ export default function QueuesPage() {
             <span className="text-sm text-fg-soft">
               Decirle a quien espera cuántas personas tiene antes
               <span className="block text-xs text-muted">
-                Al entrar al grupo. Mientras espera oye música y, cada 30 s, «Gracias por esperar».
+                Al entrar al grupo y, mientras espera con música, cada 45 s: «Gracias por esperar» y cuántas personas tiene antes.
               </span>
             </span>
             <Toggle checked={form.announce_position} onChange={(v) => setForm({ ...form, announce_position: v })} />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
+            <span className="text-sm text-fg-soft">
+              Ofrecer devolverle la llamada
+              <span className="block text-xs text-muted">
+                Mientras espera oye «marca 1 y te devolvemos la llamada sin perder tu turno». Si marca 1, cuelga y la
+                central lo llama apenas haya un agente libre y le toque, y lo pone de primero.
+              </span>
+            </span>
+            <Toggle checked={!!form.devolucion} onChange={(v) => setForm({ ...form, devolucion: v })} />
           </div>
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
             <span className="text-sm text-fg-soft">Grabar las llamadas del grupo</span>
@@ -383,6 +427,12 @@ export default function QueuesPage() {
               Opciones avanzadas <span className="text-xs font-normal text-muted">(tiempos de espera y timbre)</span>
             </summary>
             <div className="grid grid-cols-2 gap-3 border-t border-line p-3">
+              {compartidas.length > 0 && (
+                <p className="col-span-2 rounded-lg bg-surface-2 px-3 py-2 text-xs text-fg-soft">
+                  {compartidas.map((c) => `${c.persona} también está en ${c.grupos.join(", ")}`).join(". ")}. A una persona
+                  que está en varios grupos se le aplica el valor más alto de estos tres tiempos entre todos sus grupos.
+                </p>
+              )}
               <Input
                 label="Segundos que suena en cada persona"
                 type="number"

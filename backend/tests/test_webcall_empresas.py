@@ -8,18 +8,20 @@ de esa empresa.
 """
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import delete, text, update
 
 from app.core.database import async_session
-from app.models import SystemSettings
+from app.models import SesionWebcall, SystemSettings
 from app.services import webcall
 
 from .conftest import FS_SECRET
 
 
 @pytest.fixture(autouse=True)
-def registro_limpio(monkeypatch):
-    monkeypatch.setattr(webcall, "registry", webcall.WebcallRegistry())
+async def registro_limpio(mundo):
+    async with async_session() as s:
+        await s.execute(delete(SesionWebcall))
+        await s.commit()
 
 
 async def _activar(empresa, **kw):
@@ -71,3 +73,43 @@ async def test_ajustes_dan_el_identificador_para_el_snippet(cliente, mundo):
     r = await cliente.get("/api/system/settings", headers=mundo.beta.cabeceras())
     assert r.status_code == 200, r.text
     assert r.json()["webcall_empresa"] == mundo.beta.slug
+
+
+async def test_el_registro_se_comparte_entre_replicas(mundo):
+    """Dos registros (dos réplicas del backend) ven las mismas sesiones: la
+    que crea una la encuentra el directorio servido por la otra."""
+    una, otra = webcall.WebcallRegistry(), webcall.WebcallRegistry()
+    sesion = await una.create("10.1.1.1", mundo.alfa.id)
+    vista = await otra.get(sesion.username)
+    assert vista is not None and vista.password == sesion.password and vista.tenant_id == mundo.alfa.id
+    assert await otra.active_count(mundo.alfa.id) == 1
+    await otra.end(sesion.username)
+    assert await una.get(sesion.username) is None
+    assert await una.active_count(mundo.alfa.id) == 0
+    # La clave no queda en claro en la base.
+    async with async_session() as s:
+        crudo = (await s.execute(text("SELECT password FROM webcall_sesiones WHERE username = :u"), {"u": sesion.username})).scalar_one()
+    assert sesion.password not in crudo
+
+
+async def test_expiracion_y_limite_por_ip(mundo, monkeypatch):
+    reg = webcall.WebcallRegistry()
+    ahora = [1_000_000.0]
+    monkeypatch.setattr(webcall.time, "time", lambda: ahora[0])
+    sin_usar = await reg.create("10.2.2.2", mundo.alfa.id)
+    usada = await reg.create("10.2.2.2", mundo.alfa.id)
+    assert await reg.get(usada.username) is not None  # FreeSWITCH la pidió: queda registrada
+    ahora[0] += webcall._REGISTER_TTL + 1
+    # La que nadie usó vence a los 2 minutos; la usada sigue.
+    assert await reg.get(sin_usar.username) is None
+    assert await reg.get(usada.username) is not None
+    assert await reg.active_count(mundo.alfa.id) == 1
+    for _ in range(webcall._RATE_MAX - 2):
+        await reg.create("10.2.2.2", mundo.alfa.id)
+    assert not await reg.rate_ok("10.2.2.2") and await reg.rate_ok("10.3.3.3")
+    # Pasada la ventana, el barrido borra lo vencido y la IP vuelve a poder.
+    ahora[0] += webcall._SESSION_MAX + 1
+    await reg.sweep()
+    assert await reg.rate_ok("10.2.2.2")
+    async with async_session() as s:
+        assert (await s.execute(text("SELECT count(*) FROM webcall_sesiones"))).scalar_one() == 0

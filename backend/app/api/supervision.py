@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import permissions
 from app.core.auth import requiere, usuario_actual
 from app.core.database import async_session, get_session, sesion_de_empresa, traer_propio
-from app.models import Campaign, CampaignNumber, Tenant, TokenWallboard, User
+from app.models import Campaign, CampaignNumber, Devolucion, Queue, Tenant, TokenWallboard, User
 from app.services import supervision
 from app.services.supervision import ErrorSupervision, monitoreo
 
@@ -78,6 +78,55 @@ async def agentes_en_vivo(session: AsyncSession = Depends(get_session)):
 @router.get("/campanas")
 async def campanas_en_vivo(session: AsyncSession = Depends(get_session)):
     return await supervision.campanas_en_vivo(session)
+
+
+@router.get("/grupos")
+async def grupos_en_vivo(usuario: User = Depends(usuario_actual)):
+    """Foto de los grupos de atención (services/vigia_colas.py)."""
+    if usuario.tenant_id is None:
+        return []
+    return supervision._grupos(usuario.tenant_id)
+
+
+def _devolucion_out(d: Devolucion, grupos: dict[int, str]) -> dict:
+    return {
+        "id": d.id, "grupo": grupos.get(d.queue_id or 0), "numero": d.numero, "estado": d.estado,
+        "intentos": d.intentos, "pedida_at": d.pedida_at, "hecha_at": d.hecha_at, "detalle": d.detalle,
+    }
+
+
+@router.get("/devoluciones")
+async def devoluciones(horas: int = 24, session: AsyncSession = Depends(get_session)):
+    """Las devoluciones de llamada pedidas en las últimas `horas`, con sus cifras."""
+    horas = max(1, min(horas, 24 * 31))
+    filas = (
+        await session.execute(
+            select(Devolucion).where(Devolucion.pedida_at >= datetime.utcnow() - timedelta(hours=horas))
+            .order_by(Devolucion.pedida_at.desc()).limit(500)
+        )
+    ).scalars().all()
+    grupos = dict((await session.execute(select(Queue.id, Queue.name))).all())
+    cuenta: dict[str, int] = {}
+    for d in filas:
+        cuenta[d.estado] = cuenta.get(d.estado, 0) + 1
+    hechas = [(d.hecha_at - d.pedida_at).total_seconds() for d in filas if d.estado == "hecha" and d.hecha_at]
+    return {
+        "cifras": {**cuenta, "total": len(filas),
+                   "espera_promedio_s": round(sum(hechas) / len(hechas)) if hechas else None},
+        "lista": [_devolucion_out(d, grupos) for d in filas[:100]],
+    }
+
+
+@router.post("/devoluciones/{devolucion_id}/cancelar", dependencies=_INTERVENIR)
+async def cancelar_devolucion(devolucion_id: int, session: AsyncSession = Depends(get_session)):
+    d = await traer_propio(session, Devolucion, devolucion_id)
+    if d is None:
+        raise HTTPException(status_code=404, detail="Devolución no encontrada")
+    if d.estado not in ("pendiente",):
+        raise HTTPException(status_code=409, detail="Solo se cancela una devolución pendiente")
+    d.estado, d.detalle, d.hecha_at = "cancelada", "Cancelada por un supervisor", datetime.utcnow()
+    await session.commit()
+    return {"ok": True}
 
 
 @router.get("/resumen")

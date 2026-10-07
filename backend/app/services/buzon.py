@@ -90,6 +90,48 @@ async def registrar(
     return mensaje
 
 
+async def marcar_oidos(session: AsyncSession, variables: dict, tenant_id: int) -> int:
+    """Al escuchar por *97 se reproducen en orden; `nspbx_buzon_oido` es el
+    último que terminó. Se marcan ese y los anteriores de esa extensión."""
+    try:
+        ultimo = int(variables.get("nspbx_buzon_oido") or 0)
+    except ValueError:
+        return 0
+    m = await session.get(MensajeBuzon, ultimo) if ultimo else None
+    if m is None or m.tenant_id != tenant_id:
+        return 0
+    filas = (
+        await session.execute(
+            select(MensajeBuzon).where(MensajeBuzon.tenant_id == tenant_id, MensajeBuzon.extension == m.extension,
+                                       MensajeBuzon.escuchado.is_(False), MensajeBuzon.created_at <= m.created_at)
+        )
+    ).scalars().all()
+    for f in filas:
+        f.escuchado = True
+    return len(filas)
+
+
+async def transcribir(session: AsyncSession, mensaje: MensajeBuzon, tenant_id: int) -> str | None:
+    """Lo que dijo quien dejó el mensaje (Deepgram, si la empresa tiene la
+    API key). Se guarda en el mensaje; sin clave o si falla, None."""
+    from app.services import deepgram
+    from app.services.ajustes import ajustes_de
+
+    ajustes = await ajustes_de(session, tenant_id)
+    clave = (ajustes.deepgram_api_key if ajustes else None) or ""
+    local = ruta_local(mensaje.ruta, tenant_id)
+    if not clave or local is None or not local.exists():
+        return None
+    try:
+        turnos = await asyncio.wait_for(deepgram.transcribir_grabacion(local.read_bytes(), clave), timeout=60)
+    except Exception as exc:
+        logger.warning("Buzón: no se pudo transcribir el mensaje %s: %s", mensaje.id, exc)
+        return None
+    texto = " ".join((t.get("texto") or "").strip() for t in (turnos or [])).strip()
+    mensaje.transcripcion = texto[:4000] or None
+    return mensaje.transcripcion
+
+
 async def destinatarios(session: AsyncSession, tenant_id: int, ext: str) -> list[str]:
     """Correos de quienes tienen esa extensión."""
     filas = (
@@ -112,6 +154,7 @@ def armar_correo(mensaje: MensajeBuzon, para: list[str], empresa: str, audio: Pa
     m.set_content(
         f"{quien}{numero} te dejó un mensaje de voz de {mensaje.duracion} segundos en la extensión "
         f"{mensaje.extension} ({empresa}).\n\n"
+        + (f"Dice (transcripción automática):\n«{mensaje.transcripcion}»\n\n" if mensaje.transcripcion else "")
         + ("El audio va adjunto. " if audio else "")
         + "También puedes escucharlo en el panel, en «Buzón de voz».\n"
     )
@@ -123,11 +166,23 @@ def armar_correo(mensaje: MensajeBuzon, para: list[str], empresa: str, audio: Pa
 
 
 async def avisar(tenant_id: int, mensaje_id: int) -> None:
-    """Correo a la persona de la extensión, en segundo plano y sin fallar:
-    si no hay SMTP o no tiene correo, el mensaje igual queda en el panel."""
+    """En segundo plano y sin fallar: transcribe el mensaje (si hay clave de
+    Deepgram), avisa al celular de la persona (Android) y le manda un correo
+    con el audio y lo que dijo. Si algo falta, el mensaje igual queda en el
+    panel y en la app."""
     from app.core.database import sesion_de_empresa
-    from app.services import reportes_programados
+    from app.services import push, reportes_programados
 
+    try:
+        async with sesion_de_empresa(tenant_id) as session:
+            mensaje = await session.get(MensajeBuzon, mensaje_id)
+            if mensaje is None:
+                return
+            await transcribir(session, mensaje, tenant_id)
+            await session.commit()
+            await push.avisar_mensaje_buzon(session, tenant_id, mensaje)
+    except Exception:
+        logger.exception("Buzón: no se pudo transcribir o avisar al celular del mensaje %s", mensaje_id)
     if not reportes_programados.correo_configurado():
         return
     try:

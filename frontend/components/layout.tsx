@@ -7,6 +7,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { AyudaPantalla } from "@/components/ayuda-pantalla";
 import { AssistantWidget } from "@/components/assistant-widget";
 import { CommandPalette } from "@/components/command-palette";
+import { FichaCliente } from "@/components/ficha-cliente";
 import { FloatingCallWidget } from "@/components/floating-call-widget";
 import { IncomingCallBanner } from "@/components/incoming-call-banner";
 import { ThemeToggle } from "@/components/theme";
@@ -125,6 +126,16 @@ const GROUPS: NavGroup[] = [
           <>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
             <circle cx="12" cy="12" r="3" />
+          </>
+        ),
+      },
+      {
+        href: "/calidad",
+        label: "Calidad",
+        permiso: PERMISOS.llamadasPropias,
+        icon: icon(
+          <>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8-4.3-4.1 5.9-.9z" />
           </>
         ),
       },
@@ -375,6 +386,7 @@ const MODULO_POR_SECCION: Record<string, string | null> = {
   "/softphone": "pbx",
   "/calls": "pbx",
   "/buzon": "pbx",
+  "/calidad": "pbx",
   "/configurar": "pbx",
   "/extensions": "pbx",
   "/trunks": "pbx",
@@ -436,6 +448,7 @@ export default function SidebarLayout({ children }: { children: ReactNode }) {
       <SoftphoneProvider>
         <IncomingCallBanner />
         <FloatingCallWidget />
+        <FichaCliente />
         <AssistantWidget />
         <Marco>{children}</Marco>
       </SoftphoneProvider>

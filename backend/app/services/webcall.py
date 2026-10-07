@@ -1,12 +1,12 @@
-"""Registro efímero de las llamadas web (widget "hablar con un agente").
+"""Registro de las llamadas web (widget "hablar con un agente").
 
 Un visitante anónimo de un sitio web pide una credencial SIP temporal por
 `POST /api/webcall/session`; con ella su navegador se registra en
-FreeSWITCH y entra a UNA cola de call center. No hay tabla en Postgres: el
-registro vive en memoria de este proceso (uvicorn corre un solo worker),
-se limpia solo por expiración y se pierde en un reinicio del backend —
-aceptable, una llamada web dura minutos y este contenedor casi no
-reinicia; si pasara, el visitante vuelve a tocar el botón.
+FreeSWITCH y entra a UNA cola de call center. Las sesiones viven en la tabla
+`webcall_sesiones` (antes, en memoria de un solo proceso: con varias
+réplicas del backend, el directorio de FreeSWITCH le preguntaba a una que no
+la había creado y el visitante no podía registrarse). Se limpian solas por
+expiración (`sweep`, desde el MaintenanceWorker).
 
 Cada sesión recuerda su empresa (`tenant_id`): de ahí salen el dominio y
 el contexto `webcall_<slug>` que le arma el directorio (ver
@@ -19,7 +19,6 @@ a esa cola. Aunque se filtre una credencial, no sirve para marcar a ningún
 lado más.
 """
 
-import asyncio
 import re
 import secrets
 import time
@@ -54,70 +53,109 @@ class GuestSession:
 
 
 class WebcallRegistry:
-    def __init__(self) -> None:
-        self._lock = asyncio.Lock()
-        self._sessions: dict[str, GuestSession] = {}
-        self._by_ip: dict[str, list[float]] = {}
+    """Sesiones en Postgres, con la sesión del dueño: el endpoint de
+    directorio y el widget no tienen usuario ni empresa fijada."""
 
-    def _prune_locked(self) -> None:
-        ahora = time.time()
-        for user, s in list(self._sessions.items()):
-            edad = ahora - s.created
-            if edad > _SESSION_MAX or (not s.registered and edad > _REGISTER_TTL):
-                del self._sessions[user]
+    @staticmethod
+    def _vigente(ahora: float):
+        from sqlalchemy import and_, or_
+
+        from app.models import SesionWebcall as S
+
+        return and_(
+            S.terminada.is_(False),
+            S.creada > ahora - _SESSION_MAX,
+            or_(S.registrada.is_(True), S.creada > ahora - _REGISTER_TTL),
+        )
 
     async def sweep(self) -> None:
-        """Barrido periódico (lo llama el MaintenanceWorker). Libera cupos
-        de sesiones abandonadas que el navegador nunca cerró."""
-        async with self._lock:
-            self._prune_locked()
-            corte = time.time() - _RATE_WINDOW
-            for ip in list(self._by_ip):
-                self._by_ip[ip] = [t for t in self._by_ip[ip] if t > corte]
-                if not self._by_ip[ip]:
-                    del self._by_ip[ip]
+        """Barrido periódico (lo llama el MaintenanceWorker). Borra lo que ya
+        no está vigente ni cuenta para el límite por IP."""
+        from sqlalchemy import delete, not_
+
+        from app.core.database import async_session
+        from app.models import SesionWebcall as S
+
+        ahora = time.time()
+        async with async_session() as session:
+            await session.execute(
+                delete(S).where(not_(self._vigente(ahora)), S.creada < ahora - _RATE_WINDOW)
+            )
+            await session.commit()
 
     async def rate_ok(self, ip: str) -> bool:
-        async with self._lock:
-            ahora = time.time()
-            recientes = [t for t in self._by_ip.get(ip, []) if ahora - t < _RATE_WINDOW]
-            self._by_ip[ip] = recientes
-            return len(recientes) < _RATE_MAX
+        from sqlalchemy import func, select
+
+        from app.core.database import async_session
+        from app.models import SesionWebcall as S
+
+        async with async_session() as session:
+            n = (
+                await session.execute(
+                    select(func.count()).select_from(S).where(S.ip == ip, S.creada > time.time() - _RATE_WINDOW)
+                )
+            ).scalar_one()
+        return n < _RATE_MAX
 
     async def active_count(self, tenant_id: int) -> int:
-        async with self._lock:
-            self._prune_locked()
-            return sum(s.tenant_id == tenant_id for s in self._sessions.values())
+        from sqlalchemy import func, select
+
+        from app.core.database import async_session
+        from app.models import SesionWebcall as S
+
+        async with async_session() as session:
+            return (
+                await session.execute(
+                    select(func.count()).select_from(S).where(S.tenant_id == tenant_id, self._vigente(time.time()))
+                )
+            ).scalar_one()
 
     async def create(self, ip: str, tenant_id: int) -> GuestSession:
-        async with self._lock:
-            self._prune_locked()
-            username = "web" + "".join(secrets.choice("0123456789") for _ in range(9))
-            s = GuestSession(
-                username=username,
-                password=secrets.token_urlsafe(18),
-                created=time.time(),
-                ip=ip,
-                tenant_id=tenant_id,
-            )
-            self._sessions[username] = s
-            self._by_ip.setdefault(ip, []).append(time.time())
-            return s
+        from app.core.database import async_session
+        from app.models import SesionWebcall
+
+        s = GuestSession(
+            username="web" + "".join(secrets.choice("0123456789") for _ in range(9)),
+            password=secrets.token_urlsafe(18),
+            created=time.time(),
+            ip=ip[:64],
+            tenant_id=tenant_id,
+        )
+        async with async_session() as session:
+            session.add(SesionWebcall(username=s.username, tenant_id=tenant_id, password=s.password, ip=s.ip,
+                                      creada=s.created))
+            await session.commit()
+        return s
 
     async def get(self, username: str) -> GuestSession | None:
         """Lo usa el endpoint de directorio en cada lookup de FreeSWITCH.
         Un lookup cuenta como "se usó la credencial": marca la sesión como
         registrada para que no se la lleve la expiración corta."""
-        async with self._lock:
-            self._prune_locked()
-            s = self._sessions.get(username)
-            if s and not s.registered:
-                s.registered = True
-            return s
+        from sqlalchemy import select
+
+        from app.core.database import async_session
+        from app.models import SesionWebcall as S
+
+        async with async_session() as session:
+            fila = (
+                await session.execute(select(S).where(S.username == username, self._vigente(time.time())))
+            ).scalar_one_or_none()
+            if fila is None:
+                return None
+            if not fila.registrada:
+                fila.registrada = True
+                await session.commit()
+            return GuestSession(fila.username, fila.password, fila.creada, fila.ip, fila.tenant_id, True)
 
     async def end(self, username: str) -> None:
-        async with self._lock:
-            self._sessions.pop(username, None)
+        from sqlalchemy import update
+
+        from app.core.database import async_session
+        from app.models import SesionWebcall as S
+
+        async with async_session() as session:
+            await session.execute(update(S).where(S.username == username).values(terminada=True))
+            await session.commit()
 
 
 registry = WebcallRegistry()

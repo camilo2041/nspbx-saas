@@ -62,7 +62,14 @@ def _sin_control(v: str) -> str:
     return v
 
 
+def _desborde(v: str) -> str:
+    """A dónde va el grupo si nadie contesta: un número (extensión, otro
+    grupo, *99<ext> del buzón) o un voizbot de la empresa (bot_<id>)."""
+    return v if val.BOT_RE.fullmatch(v) else _telefono(v)
+
+
 Telefono = Annotated[str, Field(min_length=1, max_length=40), AfterValidator(_telefono)]
+DestinoDesborde = Annotated[str, Field(min_length=1, max_length=40), AfterValidator(_desborde)]
 Extension = Annotated[str, Field(min_length=1, max_length=20), AfterValidator(_extension)]
 NombreTecnico = Annotated[str, Field(min_length=1, max_length=100), AfterValidator(_nombre)]
 HostSip = Annotated[str, Field(min_length=1, max_length=255), AfterValidator(_host)]
@@ -805,8 +812,9 @@ class QueueBase(BaseModel):
     max_no_answer: int = Field(default=3, ge=0, le=20)
     wrap_up_time: int = Field(default=10, ge=0, le=600)
     record: bool = False
-    failover_extension: Optional[Telefono] = None
+    failover_extension: Optional[DestinoDesborde] = None
     announce_position: bool = False
+    devolucion: bool = False
     enabled: bool = True
 
 
@@ -826,8 +834,9 @@ class QueueUpdate(BaseModel):
     max_no_answer: Optional[int] = Field(default=None, ge=0, le=20)
     wrap_up_time: Optional[int] = Field(default=None, ge=0, le=600)
     record: Optional[bool] = None
-    failover_extension: Optional[Telefono] = None
+    failover_extension: Optional[DestinoDesborde] = None
     announce_position: Optional[bool] = None
+    devolucion: Optional[bool] = None
     enabled: Optional[bool] = None
 
 
@@ -848,6 +857,7 @@ class QueueOut(BaseModel):
     record: bool
     failover_extension: Optional[str] = None
     announce_position: bool
+    devolucion: bool = False
     enabled: bool
     created_at: datetime
 

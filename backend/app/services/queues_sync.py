@@ -5,13 +5,12 @@ from pathlib import Path
 
 from app.core import validacion
 from app.core.config import settings
-from app.services import esl, voice_prompts
+from app.services import esl
 
 logger = logging.getLogger(__name__)
 
 CALLCENTER_CONF_PATH = "autoload_configs/callcenter.conf.xml"
 # Cada cuánto se repite «Gracias por esperar» a quien está en la fila.
-FRECUENCIA_AVISO_SEG = 30
 
 
 def parse_agents(agents_json: str | None) -> list[str]:
@@ -41,8 +40,27 @@ def _agent_key(extension: str, dominio: str) -> str:
     return f"{extension}@{dominio}"
 
 
-def _contacto(queue, ext: str, dominio: str) -> str:
-    return f"[leg_timeout={queue.agent_ring_timeout}]user/{ext}@{dominio}"
+def _contacto(timbrado: int, ext: str, dominio: str) -> str:
+    return f"[leg_timeout={int(timbrado)}]user/{ext}@{dominio}"
+
+
+def parametros_agente(ext: str, queue, todas: list | None = None) -> dict[str, int]:
+    """Timbrado, llamadas sin contestar antes de pausar y descanso tras cada
+    llamada de UNA extensión.
+
+    En mod_callcenter son del AGENTE, no de la cola: una persona en dos
+    grupos tiene un solo valor. Antes quedaba el del último grupo guardado
+    (al azar, para quien lo veía); ahora es siempre el más holgado de los
+    grupos activos de la empresa en los que está, y el panel lo avisa."""
+    grupos = [
+        q for q in (todas or [queue])
+        if q.tenant_id == queue.tenant_id and q.enabled and ext in parse_agents(q.agents)
+    ] or [queue]
+    return {
+        "ring": max(q.agent_ring_timeout for q in grupos),
+        "max_no_answer": max(q.max_no_answer for q in grupos),
+        "wrap_up_time": max(q.wrap_up_time for q in grupos),
+    }
 
 
 def _agentes_validos(queue) -> list[str]:
@@ -98,14 +116,10 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
             # a todos silenciosamente, así que se mantiene "Available".
             "agent-no-answer-status": "Available",
         }
-        if getattr(queue, "announce_position", False):
-            # «Gracias por esperar» cada 30 s sobre la música (la posición se
-            # dice al entrar: config_generator._append_queue_routes). Solo si
-            # el audio ya se generó: un archivo que no existe corta la espera.
-            aviso = voice_prompts.prompt_path("cola_aviso")
-            if aviso:
-                params["announce-sound"] = aviso
-                params["announce-frequency"] = str(FRECUENCIA_AVISO_SEG)
+        # «Anunciar posición»: la posición se dice al entrar
+        # (config_generator._decir_posicion) y, mientras espera, «Gracias por
+        # esperar» + la posición cada pocos segundos (services/vigia_colas.py).
+        # Ya no va como announce-sound del grupo: sonaría dos veces.
         if queue.record:
             # queue_t<id>_…: de qué empresa es cada grabación de cola (en la
             # raíz y no en la carpeta t<id>, que mod_callcenter no crea solo).
@@ -121,7 +135,8 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
             akey = _agent_key(ext, dominios[queue.tenant_id])
             if akey not in seen_agents:
                 seen_agents.add(akey)
-                contact = _contacto(queue, ext, dominios[queue.tenant_id])
+                p = parametros_agente(ext, queue, queues)
+                contact = _contacto(p["ring"], ext, dominios[queue.tenant_id])
                 ET.SubElement(
                     agents_el,
                     "agent",
@@ -130,8 +145,8 @@ def build_callcenter_xml(queues: list, dominios: dict[int, str]) -> str:
                         "type": "callback",
                         "contact": contact,
                         "status": "Available",
-                        "max-no-answer": str(queue.max_no_answer),
-                        "wrap-up-time": str(queue.wrap_up_time),
+                        "max-no-answer": str(p["max_no_answer"]),
+                        "wrap-up-time": str(p["wrap_up_time"]),
                         "reject-delay-time": "2",
                         "busy-delay-time": "10",
                     },
@@ -172,7 +187,7 @@ async def _estado_agente(ext: str, tenant_id: int) -> str:
     return esl.ESTADO_AGENTE_DND[dnd.strip() == "on"]
 
 
-async def _asegurar_agentes(queue, dominio: str) -> None:
+async def _asegurar_agentes(queue, dominio: str, todas: list | None = None) -> None:
     """Crea en mod_callcenter los agentes y tiers de la cola que falten.
 
     `queue load/reload` solo relee los parámetros de la COLA: los agentes y
@@ -187,10 +202,11 @@ async def _asegurar_agentes(queue, dominio: str) -> None:
         # Si ya existe responde -ERR y no pasa nada; los parámetros se
         # actualizan igual abajo (lo que se editó en el panel).
         await _run(f"callcenter_config agent add {akey} callback", tid)
+        p = parametros_agente(ext, queue, todas)
         for campo, valor in (
-            ("contact", _contacto(queue, ext, dominio)),
-            ("max_no_answer", str(queue.max_no_answer)),
-            ("wrap_up_time", str(queue.wrap_up_time)),
+            ("contact", _contacto(p["ring"], ext, dominio)),
+            ("max_no_answer", str(p["max_no_answer"])),
+            ("wrap_up_time", str(p["wrap_up_time"])),
             ("reject_delay_time", "2"),
             ("busy_delay_time", "10"),
             # Con "no molestar" queda en pausa: guardar la cola no debe
@@ -202,7 +218,7 @@ async def _asegurar_agentes(queue, dominio: str) -> None:
             await _run(f"callcenter_config tier add {qkey} {akey} 1 1", tid)
 
 
-async def sync_queue(queue, dominio: str) -> None:
+async def sync_queue(queue, dominio: str, todas: list | None = None) -> None:
     """Aplica los cambios de UNA cola sin tocar las demás: borra los tiers
     que ya no correspondan, recarga (o carga por primera vez) solo esa cola
     en mod_callcenter y crea los agentes y tiers que falten."""
@@ -221,7 +237,7 @@ async def sync_queue(queue, dominio: str) -> None:
     result = await _run(f"callcenter_config queue reload {qkey}", tid)
     if "-ERR" in result:
         await _run(f"callcenter_config queue load {qkey}", tid)
-    await _asegurar_agentes(queue, dominio)
+    await _asegurar_agentes(queue, dominio, todas)
 
 
 async def remove_queue(name: str, dominio: str) -> None:
@@ -249,4 +265,4 @@ async def apply_queues(queues: list, dominios: dict[int, str]) -> None:
                 await _run(f"callcenter_config queue load {qkey}", queue.tenant_id)
             # Si FreeSWITCH no se reinició, sus agentes son los de su
             # arranque: se crean los que falten.
-            await _asegurar_agentes(queue, dominios[queue.tenant_id])
+            await _asegurar_agentes(queue, dominios[queue.tenant_id], queues)

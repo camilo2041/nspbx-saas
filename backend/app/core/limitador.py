@@ -109,6 +109,3 @@ def limitar_uso(limite: LimiteIntentos, clave: str, mensaje: str = "Demasiadas s
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, mensaje, headers={"Retry-After": str(espera)})
     limite.fallo(clave)
 
-
-# El simulador de bots consume el modelo de IA (cuesta): tope por usuario.
-POR_SIMULADOR = LimiteIntentos(maximo=40, ventana=60, bloqueo=60)

@@ -56,6 +56,22 @@ espera (`pg_advisory_xact_lock` en `main.migrar`).
 | `webhooks` | Invalidar la caché de suscriptores al crear, editar o borrar un webhook. |
 | `nodos` | Invalidar el directorio de servidores FreeSWITCH al cambiar un servidor o mover una empresa (§4). |
 
+Las sesiones del widget de llamada web están en la tabla `webcall_sesiones`
+(antes, en memoria de un proceso): el directorio de FreeSWITCH las encuentra
+aunque la petición la atienda otra réplica, y el tope de llamadas por empresa
+y el límite por IP son los mismos para todas. El tope de preguntas al
+asistente y de pasos del simulador de bots también está en la base
+(`cupos_uso`, core/cupos.py): uno solo para todas las réplicas. Los intentos
+fallidos de inicio de sesión siguen en memoria de cada réplica (con dos, quien
+prueba claves tiene a lo sumo el doble de intentos antes del bloqueo).
+
+El vigía de los grupos (services/vigia_colas.py: foto en vivo de las filas,
+aviso periódico de la posición, devoluciones de llamada) y la calidad
+automática nocturna (services/calidad_auto.py) corren solo en la líder, como
+el resto de lo que habla con FreeSWITCH o gasta IA por iniciativa propia. La
+foto de los grupos viaja por el bus (mensaje `colas`) para que cualquier
+réplica la muestre.
+
 Las escuchas del supervisor (escuchar, susurrar, intervenir) están en la
 tabla `monitoreos`: la petición la atiende cualquier réplica y los eventos los
 procesa la líder. La regla «un supervisor por agente» la garantiza la base
@@ -156,8 +172,12 @@ Si algún día una sola empresa pasa de 200 agentes, ahí toca B.
   Si se cae la conexión con uno, el tablero en vivo descarta solo sus
   llamadas; los demás siguen.
 - **Lo de la plataforma llega a todos**: recargar la configuración
-  (`reloadxml`), colgar las huérfanas del predictivo al tomar el liderazgo,
-  cortar una extensión. Un servidor caído no impide que los demás lo reciban.
+  (`reloadxml`, también al guardar un grupo de atención), la música de
+  espera, colgar las huérfanas del predictivo al tomar el liderazgo, cortar
+  una extensión.
+- **Lo que corre sin empresa en contexto** (los workers) pasa la empresa a
+  mano: por ejemplo, la alerta de proveedor desconectado pregunta el estado
+  de cada troncal en el servidor de su empresa. Un servidor caído no impide que los demás lo reciban.
 - **El tope de canales de la plataforma** (`MAX_CONCURRENT_CALLS_GLOBAL`)
   protege la troncal compartida, así que se compara con la suma de canales de
   todos los servidores. Si el principal no responde no se marca (como antes);

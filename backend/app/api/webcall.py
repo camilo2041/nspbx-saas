@@ -84,10 +84,18 @@ async def config(
         return {"enabled": False}
     return {
         "enabled": True,
-        "open": webcall.is_open(row.webcall_schedule),
+        "open": await _abierto(row),
         "site_key": row.webcall_turnstile_site_key or "",
         **_textos(row),
     }
+
+
+async def _abierto(row) -> bool:
+    """Su horario, más los festivos y fechas especiales de la empresa."""
+    from app.services import festivos
+
+    await festivos.refrescar()
+    return festivos.abierto(row.webcall_schedule, row.tenant_id)
 
 
 @router.post("/session")
@@ -106,7 +114,7 @@ async def crear_sesion(
     if not await webcall.registry.rate_ok(ip):
         raise HTTPException(status_code=429, detail="Demasiados intentos. Esperá unos minutos.")
 
-    if not webcall.is_open(row.webcall_schedule):
+    if not await _abierto(row):
         raise HTTPException(status_code=403, detail=_textos(row)["offline_text"])
 
     if not await turnstile.verify(row.webcall_turnstile_secret, payload.turnstile_token, ip):

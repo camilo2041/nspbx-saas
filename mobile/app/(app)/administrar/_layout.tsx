@@ -37,6 +37,9 @@ export default function MenuLayout() {
       <Stack.Screen name="usuarios" options={{ title: "Usuarios" }} />
       <Stack.Screen name="bots" options={{ title: "Voizbots" }} />
       <Stack.Screen name="probar-bot" options={{ title: "Probar bot" }} />
+      <Stack.Screen name="buzon" options={{ title: "Buzón de voz" }} />
+      <Stack.Screen name="mis-evaluaciones" options={{ title: "Mis evaluaciones" }} />
+      <Stack.Screen name="agente" options={{ title: "Trabajar" }} />
     </Stack>
   );
 }

@@ -48,6 +48,9 @@ _RECURSO_POR_PARAMETRO = {
     "entrega_id": "entrega_webhook",
     "programado_id": "reporte_programado",
     "mensaje_id": "mensaje_buzon",
+    "devolucion_id": "devolucion",
+    "fecha_id": "fecha_especial",
+    "evaluacion_id": "evaluacion",
 }
 
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por
@@ -56,6 +59,7 @@ _FUERA_DE_ESTA_PRUEBA = {
     "/api/plataforma/nodos/{nodo_id}": "solo plataforma — test_nodos.py",
     "/api/plataforma/nodos/{nodo_id}/probar": "solo plataforma — test_nodos.py",
     "/api/plataforma/nodos/empresas/{tenant_id}": "solo plataforma — test_nodos.py",
+    "/api/plataforma/sin-ruta/{numero_id}": "solo plataforma — test_fase_f.py",
     "/api/tenants/{tenant_id}": "solo plataforma — test_alcance.py",
     "/api/tenants/{tenant_id}/licencia": "solo plataforma — test_alcance.py",
     "/api/tenants/{tenant_id}/salientes/colgar": "solo plataforma — test_emergencia.py",
@@ -105,6 +109,8 @@ _CUERPOS = {
     ("PUT", "/api/integraciones/webhooks/{webhook_id}"): {"nombre": "Pisado"},
     ("PUT", "/api/reportes/programados/{programado_id}"): {"nombre": "Pisado"},
     ("PUT", "/api/buzon/{mensaje_id}"): {"escuchado": True},
+    ("POST", "/api/calidad/llamadas/{call_id}/evaluaciones"): {"puntajes": {}},
+    ("POST", "/api/calidad/evaluaciones/{evaluacion_id}/revisar"): {},
 }
 
 # PUT que, contra un recurso PROPIO, tienen que funcionar. Es el control

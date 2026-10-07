@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useState } from "react";
 
 import { DashboardCalls } from "@/components/dashboard-calls";
 import { LlamadasEnVivo } from "@/components/llamadas-en-vivo";
+import { AvisosRecientes } from "@/components/avisos-recientes";
 import { PuestaEnMarcha } from "@/components/puesta-en-marcha";
 import {
   Card,
@@ -283,6 +284,7 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {puede(PERMISOS.ajustes) && <AvisosRecientes />}
       {puede(PERMISOS.ajustes) && <PuestaEnMarcha />}
 
       {loading ? (

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session, get_session, traer_propio
-from app.models import Queue, Tenant
+from app.models import Queue, Tenant, VoiceBot
 from app.schemas import QueueCreate, QueueUpdate
 from app.services import esl
 from app.services.ajustes import dominios_tenants
@@ -32,6 +32,7 @@ def _out(queue: Queue) -> dict:
         "record": queue.record,
         "failover_extension": queue.failover_extension,
         "announce_position": queue.announce_position,
+        "devolucion": bool(getattr(queue, "devolucion", False)),
         "enabled": queue.enabled,
         "created_at": queue.created_at,
     }
@@ -62,7 +63,8 @@ async def _rewrite_conf_file(session: AsyncSession) -> None:
             dominios = await dominios_tenants(admin)
         write_callcenter_conf(rows, dominios)
         try:
-            await esl.api("reloadxml")
+            # En todos los servidores: el archivo es uno para todas las empresas.
+            await esl.reloadxml()
         except Exception:
             pass
 
@@ -77,6 +79,18 @@ async def _exigir_numeros_libres(
         raise HTTPException(status_code=409, detail=f"El número {numero} ya lo usa {uso}")
     if desborde and desborde == (numero_propio or numero):
         raise HTTPException(status_code=400, detail="El desborde no puede ser la misma cola")
+    if desborde and desborde.startswith("bot_"):
+        # Un voizbot de la empresa (en el dialplan, `bot_<id>` de su contexto).
+        bot_id = desborde[4:]
+        bot = await traer_propio(session, VoiceBot, int(bot_id)) if bot_id.isdigit() else None
+        if bot is None:
+            raise HTTPException(status_code=400, detail="Ese voizbot no existe")
+
+
+async def _todas(session: AsyncSession) -> list[Queue]:
+    """Las colas de la empresa: los parámetros de un agente salen de todos
+    sus grupos (queues_sync.parametros_agente)."""
+    return list((await session.execute(select(Queue))).scalars().all())
 
 
 @router.get("")
@@ -99,7 +113,7 @@ async def create_queue(payload: QueueCreate, session: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail="Nombre o extensión de cola duplicados")
     await session.refresh(queue)
     await _rewrite_conf_file(session)
-    await sync_queue(queue, await _dominio_de(session, queue.tenant_id))
+    await sync_queue(queue, await _dominio_de(session, queue.tenant_id), await _todas(session))
     return _out(queue)
 
 
@@ -140,7 +154,7 @@ async def update_queue(queue_id: int, payload: QueueUpdate, session: AsyncSessio
     if old_name != queue.name:
         # Si cambió el nombre, la cola vieja queda huérfana en mod_callcenter.
         await remove_queue(old_name, await _dominio_de(session, queue.tenant_id))
-    await sync_queue(queue, await _dominio_de(session, queue.tenant_id))
+    await sync_queue(queue, await _dominio_de(session, queue.tenant_id), await _todas(session))
     return _out(queue)
 
 

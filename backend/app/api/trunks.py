@@ -121,6 +121,6 @@ async def trunk_status(trunk_id: int, session: AsyncSession = Depends(get_sessio
     if not trunk:
         raise HTTPException(status_code=404, detail="Troncal no encontrado")
     try:
-        return await gateway_status(nombre_gateway(trunk.name, await _slug_de(session, trunk.tenant_id)))
+        return await gateway_status(nombre_gateway(trunk.name, await _slug_de(session, trunk.tenant_id)), tenant_id=trunk.tenant_id)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"FreeSWITCH no disponible: {exc}")

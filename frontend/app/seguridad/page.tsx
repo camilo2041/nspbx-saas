@@ -15,18 +15,14 @@ import {
   Tr,
 } from "@/components/ui";
 import { AuditTable } from "@/components/audit-table";
+import { AVISOS } from "@/components/avisos-recientes";
 import { ClavesApi } from "@/components/claves-api";
 import { WebhooksCrm } from "@/components/webhooks-crm";
 import { PrivacidadTitular } from "@/components/privacidad-titular";
 import { api } from "@/lib/api";
 import { AlertaTrafico } from "@/lib/types";
 
-const TIPO_ALERTA: Record<string, string> = {
-  pico: "Pico de salientes",
-  madrugada: "Salientes de madrugada",
-  destino_nuevo: "Destino internacional nuevo",
-  cupo: "Cerca del cupo diario",
-};
+const TIPO_ALERTA: Record<string, string> = Object.fromEntries(Object.entries(AVISOS).map(([k, v]) => [k, v.titulo]));
 
 interface Bloqueo {
   jail: string;

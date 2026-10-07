@@ -5,6 +5,7 @@ import secrets
 
 from app.core.auditoria import MiddlewareAuditoria, configurar_logging
 from app.core.cabeceras import MiddlewareCabeceras
+from app.core.metricas import MiddlewareMetricas
 
 # Sin esto, los logger.info() de todo el proyecto se perdían en silencio:
 # uvicorn configura SUS PROPIOS loggers ("uvicorn", "uvicorn.error") pero
@@ -16,11 +17,11 @@ from app.core.cabeceras import MiddlewareCabeceras
 # core/auditoria.py.
 configurar_logging()
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, buzon as buzon_api, calls as calls_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, nodos as nodos_api, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, v1 as api_v1, assistant, auth as auth_api, buzon as buzon_api, calidad as calidad_api, festivos as festivos_api, calls as calls_api, llamada as llamada_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, nodos as nodos_api, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -30,7 +31,7 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, NodoFreeswitch, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import agentes, esl, integraciones, musica_espera, predictivo, reportes_programados, supervision, tiempo_real, voice_prompts, xml_endpoints
+from app.services import agentes, calidad_auto, esl, integraciones, musica_espera, predictivo, reportes_programados, supervision, tiempo_real, vigia_colas, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
 from app.services.bus import bus
 from app.services.lider import lider
@@ -364,6 +365,15 @@ _TABLAS_CON_RLS = _TABLAS_CON_TENANT + [
     "monitoreos",
     # Buzón de voz (revisión 0020)
     "buzon_mensajes",
+    # Widget de llamada web (revisión 0023)
+    "webcall_sesiones",
+    # Calidad de llamadas (revisión 0024)
+    "criterios_calidad",
+    "evaluaciones_llamada",
+    # Devolución de llamada desde la fila (revisión 0026)
+    "devoluciones",
+    # Festivos y fechas especiales (revisión 0028)
+    "fechas_especiales",
 ]
 
 # La empresa activa sale de una variable de sesión que fija la aplicación
@@ -654,8 +664,9 @@ async def lifespan(app: FastAPI):
         demorar el arranque (ver services/musica_espera.py)."""
         try:
             if await asyncio.to_thread(musica_espera.asegurar):
-                # local_stream no vuelve a mirar una carpeta que no existía.
-                await esl.api("reload mod_local_stream")
+                # local_stream no vuelve a mirar una carpeta que no existía. En
+                # todos los servidores: la carpeta de sonidos es compartida.
+                await esl.api_todos("reload mod_local_stream")
         except Exception as exc:
             logger.warning("Música de espera: %s", exc)
 
@@ -700,8 +711,12 @@ async def lifespan(app: FastAPI):
         # al reinicio porque vive en la base.
         integraciones.repartidor.start()
         reportes_programados.programador.start()
+        vigia_colas.vigia.start()
+        calidad_auto.muestreo.start()
 
     async def descender() -> None:
+        await vigia_colas.vigia.stop()
+        await calidad_auto.muestreo.stop()
         await reportes_programados.programador.stop()
         await integraciones.repartidor.stop()
         await predictivo.motor.stop()
@@ -747,6 +762,8 @@ app = FastAPI(
 # Auditoría y request_id. Se agrega antes que CORS para quedar por dentro:
 # las respuestas a preflight de CORS no son acciones de nadie.
 app.add_middleware(MiddlewareAuditoria)
+# Métricas de las peticiones para /metrics (core/metricas.py).
+app.add_middleware(MiddlewareMetricas)
 # Cabeceras de seguridad (nosniff, sin caché, sin iframes): ver core/cabeceras.py.
 app.add_middleware(MiddlewareCabeceras)
 app.add_middleware(
@@ -888,6 +905,8 @@ app.include_router(
 app.include_router(appointments_api.router)  # permisos por endpoint: el agente de IA entra acá
 app.include_router(calls_api.router)  # permisos por endpoint: /fs/cdr lo llama FreeSWITCH
 app.include_router(buzon_api.router)  # permisos por endpoint (los mismos de ver llamadas)
+app.include_router(calidad_api.router)  # permisos por endpoint (supervisión; /mias, llamadas propias)
+app.include_router(llamada_api.router)  # softphone o consola de agente, sobre la llamada propia
 # La lista de exclusión de app/core/auth.py deja pasar /api/webcall/.
 app.include_router(webcall_api.router)
 app.include_router(assistant.router)  # solo lectura; recorta por rol dentro
@@ -905,8 +924,27 @@ app.include_router(api_v1.router)
 app.include_router(csp_api.router)  # abierta: la llaman los navegadores
 app.include_router(system.router, **_con(permissions.AJUSTES_GESTIONAR))
 app.include_router(settings_api.router, **_con(permissions.AJUSTES_GESTIONAR))
+# Festivos y fechas especiales: es parte de los horarios de la empresa.
+app.include_router(festivos_api.router, **_con(permissions.AJUSTES_GESTIONAR))
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "app": settings.app_name}
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metricas_prometheus(authorization: str | None = Header(default=None)):
+    """Para Prometheus (core/metricas.py). Sin METRICS_TOKEN no existe; con él,
+    solo con `Authorization: Bearer <token>`."""
+    import hmac
+
+    from fastapi.responses import PlainTextResponse
+
+    from app.core import metricas
+
+    token = settings.metrics_token
+    dado = (authorization or "")[7:] if (authorization or "").startswith("Bearer ") else ""
+    if not token or not hmac.compare_digest(dado.encode(), token.encode()):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return PlainTextResponse(await metricas.texto(), media_type="text/plain; version=0.0.4")

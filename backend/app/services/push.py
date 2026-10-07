@@ -12,6 +12,7 @@ hacen nada más que avisar por log — así el resto de la app (llamar con la
 app abierta, ver métricas) sigue sirviendo sin esas credenciales.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -181,3 +182,117 @@ async def enviar_push_android(push_token: str, incoming_call_event: dict) -> str
         logger.exception("Error enviando push a Android")
         return "Error de red enviando el aviso a Firebase"
     return None
+
+
+async def avisar_llamada(
+    session, tenant_id: int, slug: str, extension: str, call_uuid: str, numero: str, nombre: str
+) -> int:
+    """Push de llamada entrante a cada teléfono con la app de esa extensión
+    (lo único que despierta la app cerrada o con el teléfono bloqueado).
+    Lo usan el timbrado a una extensión (api/fs_push.py) y las llamadas que
+    entran a un grupo (services/push_colas.py). Devuelve a cuántos se envió."""
+    import uuid as uuidlib
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.models import DeviceToken, Extension
+
+    dispositivos = (
+        await session.execute(
+            select(DeviceToken)
+            .join(Extension, Extension.id == DeviceToken.extension_id)
+            .where(DeviceToken.tenant_id == tenant_id, Extension.number == extension)
+        )
+    ).scalars().all()
+    if not dispositivos:
+        return 0
+
+    # Forma exacta que espera `expo-callkit-telecom` del lado de la app
+    # (IncomingCallEvent, ver mobile/SETUP.md): `serverCallId` es el uuid
+    # de canal de FreeSWITCH, así la app puede correlacionar el push con
+    # el INVITE que le va a llegar por SIP apenas reconecte.
+    evento_llamada = {
+        "eventId": str(uuidlib.uuid4()),
+        "serverCallId": call_uuid or str(uuidlib.uuid4()),
+        "hasVideo": False,
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+        "caller": {
+            "id": numero or "desconocido",
+            "displayName": nombre or numero or "Desconocido",
+            "phoneNumber": numero or None,
+        },
+        "metadata": {"extension": extension, "tenantSlug": slug},
+    }
+
+    async def _enviar(d) -> None:
+        try:
+            if d.token_type == "APNS_VOIP":
+                await asyncio.wait_for(enviar_voip_ios(d.token, evento_llamada), timeout=2)
+            elif d.token_type == "FCM":
+                await asyncio.wait_for(enviar_push_android(d.token, evento_llamada), timeout=2)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout enviando push a dispositivo %s (%s)", d.id, d.platform)
+        except Exception:
+            logger.exception("Error enviando push a dispositivo %s (%s)", d.id, d.platform)
+
+    await asyncio.gather(*(_enviar(d) for d in dispositivos))
+    return len(dispositivos)
+
+
+async def enviar_aviso_android(push_token: str, titulo: str, cuerpo: str, datos: dict | None = None) -> str | None:
+    """Notificación visible (no de llamada) a un Android por FCM, con el mismo
+    token de la app. Con la app en segundo plano la muestra el sistema; en
+    iOS no hay equivalente (el token es de PushKit, solo para llamadas)."""
+    proyecto = settings.fcm_project_id or (_cuenta_servicio() or {}).get("project_id", "")
+    if not proyecto or not _cuenta_servicio():
+        return "FCM sin configurar en el servidor"
+    try:
+        access_token = await _fcm_access_token()
+        if not access_token:
+            return "No se pudo obtener el acceso a Firebase"
+        body = {
+            "message": {
+                "token": push_token,
+                "notification": {"title": titulo[:100], "body": cuerpo[:300]},
+                "data": {k: str(v) for k, v in (datos or {}).items()},
+                "android": {"priority": "high"},
+            }
+        }
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.post(
+                f"https://fcm.googleapis.com/v1/projects/{proyecto}/messages:send",
+                headers={"Authorization": f"Bearer {access_token}"}, json=body,
+            )
+        if resp.status_code != 200:
+            logger.warning("FCM rechazó el aviso (%s): %s", resp.status_code, resp.text[:200])
+            return f"Firebase rechazó el aviso ({resp.status_code})"
+    except Exception:
+        logger.exception("Error enviando un aviso a Android")
+        return "Error de red enviando el aviso a Firebase"
+    return None
+
+
+async def avisar_mensaje_buzon(session, tenant_id: int, mensaje) -> int:
+    """«Nuevo mensaje de voz» a los Android con la app de esa extensión."""
+    from sqlalchemy import select
+
+    from app.models import DeviceToken, Extension
+
+    dispositivos = (
+        await session.execute(
+            select(DeviceToken)
+            .join(Extension, Extension.id == DeviceToken.extension_id)
+            .where(DeviceToken.tenant_id == tenant_id, Extension.number == mensaje.extension, DeviceToken.token_type == "FCM")
+        )
+    ).scalars().all()
+    if not dispositivos:
+        return 0
+    quien = mensaje.caller_name or mensaje.caller_number or "Número oculto"
+    cuerpo = (mensaje.transcripcion or f"Mensaje de {mensaje.duracion} segundos")[:200]
+    datos = {"tipo": "buzon", "mensaje_id": mensaje.id}
+    enviados = 0
+    for d in dispositivos:
+        if await enviar_aviso_android(d.token, f"Mensaje de voz de {quien}", cuerpo, datos) is None:
+            enviados += 1
+    return enviados

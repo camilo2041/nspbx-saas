@@ -90,7 +90,8 @@ async def test_sin_contestar_va_al_buzon_solo_si_la_extension_lo_tiene(cliente, 
     directo = ctx.find("extension[@name='nspbx_buzon_directo']")
     exp = directo.find("condition").get("expression")
     assert exp.startswith(r"^\*99(") and "4701" in exp and "4702" not in exp
-    assert directo.find(".//action[@application='set']").get("data") == "nspbx_buzon_ext=$1"
+    sets = [a.get("data") for a in directo.iter("action") if a.get("application") == "set"]
+    assert f"nspbx_tenant_id={mundo.alfa.id}" in sets and "nspbx_buzon_ext=$1" in sets
 
     # «No molestar» también deja mensaje si hay buzón.
     dnd = ctx.find("extension[@name='nspbx_dnd_cortar']")
@@ -250,11 +251,10 @@ def test_cola_con_aviso_y_posicion(monkeypatch):
     (carpeta / "cola_aviso.wav").write_bytes(b"RIFF")
     xml = ET.fromstring(queues_sync.build_callcenter_xml([_cola()], {1: "a.test"}))
     params = {p.get("name"): p.get("value") for p in xml.iter("param")}
-    assert params["announce-sound"].endswith("/prompts/cola_aviso.wav")
-    assert params["announce-frequency"] == str(queues_sync.FRECUENCIA_AVISO_SEG)
+    # El aviso periódico lo manda services/vigia_colas.py (con la posición),
+    # no el grupo: sonaría dos veces.
+    assert "announce-sound" not in params
     assert params["max-wait-time"] == "60"
-    sin = ET.fromstring(queues_sync.build_callcenter_xml([_cola(announce_position=False)], {1: "a.test"}))
-    assert "announce-sound" not in {p.get("name") for p in sin.iter("param")}
 
     from app.services import config_generator
 

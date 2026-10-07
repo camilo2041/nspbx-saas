@@ -81,11 +81,42 @@ export function TransferNodeView({ data, selected }: { data: FlowNodeData; selec
     >
       <Handle type="target" position={Position.Left} />
       <div>
-        Extensión: <span className="font-mono text-fg">{data.extension || "—"}</span>
+        {data.extension === "ai_agent" ? "Voizbot con IA" : DESTINO[data.destino_tipo || "extension"]}
+        {data.extension !== "ai_agent" && <span className="ml-1 font-mono text-fg">{data.extension || "—"}</span>}
       </div>
       {(data.whisper_audio_path || data.whisper_text) && (
         <div className="mt-1 text-[11px] text-ok-text">🗨 Con aviso previo al agente</div>
       )}
+    </NodeShell>
+  );
+}
+
+const DESTINO: Record<string, string> = { extension: "Extensión", grupo: "Grupo", buzon: "Buzón de", numero: "Número" };
+
+export function HorarioNodeView({ data, selected }: { data: FlowNodeData; selected?: boolean }) {
+  return (
+    <NodeShell
+      color="bg-gradient-to-r from-amber-500 to-orange-500"
+      icon="🕘"
+      title={data.label || "¿Estamos abiertos?"}
+      selected={selected}
+    >
+      <Handle type="target" position={Position.Left} />
+      {data.start && (
+        <div className="mb-1.5 inline-block rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-text">
+          Nodo inicial
+        </div>
+      )}
+      <div className="mb-2">{data.horario ? "Según el horario de atención" : "Sin horario: siempre abierto"}</div>
+      {[
+        { id: "abierto", texto: "Abierto", tono: "bg-ok-soft text-ok-text" },
+        { id: "cerrado", texto: "Cerrado", tono: "bg-danger-soft text-danger-text" },
+      ].map((s) => (
+        <div key={s.id} className={`relative mb-1 rounded-md px-2 py-1 text-[11px] font-medium ${s.tono}`}>
+          {s.texto}
+          <Handle type="source" position={Position.Right} id={s.id} style={{ top: "50%", background: "#f59e0b" }} />
+        </div>
+      ))}
     </NodeShell>
   );
 }
@@ -114,4 +145,5 @@ export const nodeTypes = {
   menu: (p: any) => <MenuNodeView data={p.data} selected={p.selected} />,
   transfer: (p: any) => <TransferNodeView data={p.data} selected={p.selected} />,
   hangup: (p: any) => <HangupNodeView data={p.data} selected={p.selected} />,
+  horario: (p: any) => <HorarioNodeView data={p.data} selected={p.selected} />,
 };

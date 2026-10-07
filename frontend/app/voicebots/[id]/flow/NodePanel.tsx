@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button, Check, IconButton, Input, Note, Select, Textarea } from "@/components/ui";
+import { EditorHorario } from "@/components/editor-horario";
 import { api } from "@/lib/api";
 import { FlowNode, TtsVoice } from "@/lib/types";
 
@@ -113,7 +114,13 @@ export function NodePanel({
     <div className="animate-slide-left flex h-full w-80 shrink-0 flex-col overflow-y-auto border-l border-line bg-surface p-4">
       <div className="mb-4 flex items-center justify-between">
         <h4 className="text-sm font-semibold tracking-tight text-fg">
-          {node.type === "menu" ? "Menú de audio" : node.type === "transfer" ? "Transferir llamada" : "Colgar"}
+          {node.type === "menu"
+            ? "Menú de audio"
+            : node.type === "transfer"
+              ? "Transferir llamada"
+              : node.type === "horario"
+                ? "Horario de atención"
+                : "Colgar"}
         </h4>
         <IconButton label="Cerrar panel" onClick={onClose} className="h-8 w-8">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
@@ -131,7 +138,17 @@ export function NodePanel({
       <div className="space-y-3.5">
         <Input label="Nombre del nodo" value={node.data.label || ""} onChange={(v) => onChange({ label: v })} />
 
-        {node.type === "menu" && (
+        {node.type === "horario" && (
+          <>
+            <Note tone="muted">
+              Une la salida «Abierto» con lo que pasa en horario (por ejemplo, el menú) y «Cerrado» con lo que pasa fuera de él
+              (un mensaje, un buzón o colgar).
+            </Note>
+            <EditorHorario value={node.data.horario} onChange={(v) => onChange({ horario: v })} />
+          </>
+        )}
+
+        {(node.type === "menu" || node.type === "horario") && (
           <Check
             checked={!!node.data.start}
             onChange={(v) => onChange({ start: v })}
@@ -198,13 +215,32 @@ export function NodePanel({
               }
             />
             {node.data.extension !== "ai_agent" && (
-              <Input
-                label="Extensión destino"
-                value={node.data.extension || ""}
-                onChange={(v) => onChange({ extension: v })}
-                placeholder="1000"
-                mono
-              />
+              <>
+                <Select
+                  label="¿A dónde va la llamada?"
+                  value={node.data.destino_tipo || "extension"}
+                  onChange={(v) => onChange({ destino_tipo: v as FlowNode["data"]["destino_tipo"] })}
+                  options={[
+                    { value: "extension", label: "A una persona (su extensión)" },
+                    { value: "grupo", label: "A un grupo de atención" },
+                    { value: "buzon", label: "Al buzón de voz de una persona" },
+                    { value: "numero", label: "A un número externo" },
+                  ]}
+                />
+                <Input
+                  label={
+                    node.data.destino_tipo === "grupo"
+                      ? "Número interno del grupo"
+                      : node.data.destino_tipo === "numero"
+                        ? "Número (sale por tus reglas de salida)"
+                        : "Extensión"
+                  }
+                  value={node.data.extension || ""}
+                  onChange={(v) => onChange({ extension: v })}
+                  placeholder={node.data.destino_tipo === "grupo" ? "8000" : node.data.destino_tipo === "numero" ? "3001234567" : "1000"}
+                  mono
+                />
+              </>
             )}
             {node.data.extension === "ai_agent" && (
               <>
@@ -227,9 +263,10 @@ export function NodePanel({
                 <Note tone="brand">Requiere configurar las API keys de voz y de DeepSeek en Ajustes.</Note>
               </>
             )}
+            {(node.data.destino_tipo || "extension") === "extension" && node.data.extension !== "ai_agent" && (
             <div className="rounded-xl border border-line bg-surface-2 p-3">
               <div className="mb-2 text-xs font-medium text-fg-soft">
-                Aviso al agente antes de conectar (opcional, no aplica si transferís a la IA)
+                Aviso a la persona antes de conectar (opcional)
               </div>
               {node.data.whisper_audio_path && (
                 <p className="mb-2 truncate rounded-lg bg-ok-soft px-2 py-1 text-[11px] text-ok-text">
@@ -260,6 +297,7 @@ export function NodePanel({
                 </Button>
               </div>
             </div>
+            )}
           </>
         )}
       </div>

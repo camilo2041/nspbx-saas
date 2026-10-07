@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.core import validacion
 from app.core.config import settings
+from app.services import voice_prompts
 
 # Ruta que ve FreeSWITCH para los audios de bots.
 FS_SOUNDS_BOTS = "/usr/share/freeswitch/sounds/bots"
@@ -123,6 +124,7 @@ def build_voicebot_flow_routes(
     flow = parse_flow(bot.flow_json)
     if not flow:
         return False
+    flow["_tenant_id"] = tenant_id  # para el calendario de la empresa (festivos) en los nodos «Horario»
     nodes_by_id = {str(n["id"]): n for n in flow["nodes"]}  # parse_flow ya garantiza que todos traen id seguro
     start = _start_node(flow)
     if not start:
@@ -167,7 +169,8 @@ def build_voicebot_flow_routes(
             attrib={"application": "playback", "data": f"{FS_SOUNDS_BOTS}/{SALUDO_INICIAL.name}"},
         )
         ET.SubElement(entry_cond, "action", attrib={"application": "sleep", "data": "1800"})
-    ET.SubElement(entry_cond, "action", attrib={"application": "transfer", "data": f"go XML bot_{bot.id}_n{start['id']}"})
+    contexto_empresa = context.get("name") or ""
+    _append_target_actions(entry_cond, start, bot.id, dominio, tenant_id, flow, nodes_by_id, contexto_empresa)
 
     for node in flow["nodes"]:
         node_id = str(node["id"])
@@ -243,7 +246,7 @@ def build_voicebot_flow_routes(
                 continue
             option_ext = ET.SubElement(route_context, "extension", attrib={"name": f"opcion_{digit}", "continue": "false"})
             option_cond = ET.SubElement(option_ext, "condition", attrib={"field": "destination_number", "expression": f"^opt{_escape_regex_digit(digit)}$"})
-            _append_target_actions(option_cond, target, bot.id, dominio, tenant_id)
+            _append_target_actions(option_cond, target, bot.id, dominio, tenant_id, flow, nodes_by_id, contexto_empresa)
 
         # Sin marcar nada el destino llega como "opt" pelado; se le da una
         # vuelta más al menú antes de rendirse, que es lo que haría una
@@ -263,15 +266,58 @@ def build_voicebot_flow_routes(
 
         fallback_ext = ET.SubElement(route_context, "extension", attrib={"name": "opcion_invalida", "continue": "false"})
         fallback_cond = ET.SubElement(fallback_ext, "condition", attrib={"field": "destination_number", "expression": ".*"})
-        ET.SubElement(fallback_cond, "action", attrib={"application": "speak", "data": "flite|kal|Opcion invalida. Hasta luego."})
+        aviso = voice_prompts.prompt_path("ivr_opcion_invalida")
+        if aviso:
+            ET.SubElement(fallback_cond, "action", attrib={"application": "playback", "data": aviso})
+        else:
+            ET.SubElement(fallback_cond, "action", attrib={"application": "speak", "data": "flite|kal|Opcion invalida. Hasta luego."})
         ET.SubElement(fallback_cond, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
 
     return True
 
 
-def _append_target_actions(cond: ET.Element, target: dict, bot_id: int, dominio: str, tenant_id: int) -> None:
+# Destinos de un nodo «Transferir» además de una extensión. Van por el
+# dialplan de la empresa (su contexto), igual que una llamada que entra por
+# un número: los grupos, los buzones (*99) y las reglas de salida aplican.
+DESTINOS_TRANSFERENCIA = ("extension", "grupo", "buzon", "numero")
+_PROFUNDIDAD_MAX = 8
+
+
+def siguiente_por_horario(nodo: dict, flow: dict, nodes_by_id: dict, ahora=None) -> dict | None:
+    """El nodo al que sigue un nodo «Horario» AHORA: su salida «abierto» o
+    «cerrado». El dialplan se pide en cada llamada (xml_curl), así que basta
+    mirar la hora al generarlo, como las rutas entrantes con horario."""
+    from app.core.clock import now_local
+    from app.services import festivos
+
+    abierto = festivos.abierto(nodo.get("data", {}).get("horario") or None, flow.get("_tenant_id"), ahora or now_local())
+    salida = "abierto" if abierto else "cerrado"
+    for e in flow["edges"]:
+        if str(e.get("source")) == str(nodo["id"]) and str(e.get("sourceHandle", "")) == salida:
+            return nodes_by_id.get(str(e.get("target")))
+    return None
+
+
+def _append_target_actions(
+    cond: ET.Element, target: dict, bot_id: int, dominio: str, tenant_id: int,
+    flow: dict | None = None, nodes_by_id: dict | None = None, contexto: str = "", profundidad: int = 0,
+) -> None:
     data = target.get("data", {})
     ttype = target.get("type", "menu")
+
+    if ttype == "horario":
+        # Horario dentro de horario (o un ciclo): se corta en vez de colgar
+        # el generador.
+        siguiente = (
+            siguiente_por_horario(target, flow, nodes_by_id)
+            if flow is not None and nodes_by_id is not None and profundidad < _PROFUNDIDAD_MAX
+            else None
+        )
+        if siguiente is None:
+            ET.SubElement(cond, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+            return
+        _append_target_actions(cond, siguiente, bot_id, dominio, tenant_id, flow, nodes_by_id, contexto, profundidad + 1)
+        return
 
     if ttype == "menu":
         ET.SubElement(cond, "action", attrib={"application": "transfer", "data": f"go XML bot_{bot_id}_n{target['id']}"})
@@ -286,6 +332,21 @@ def _append_target_actions(cond: ET.Element, target: dict, bot_id: int, dominio:
 
     if ttype == "transfer":
         extension = str(data.get("extension", "")).strip()
+        destino_tipo = str(data.get("destino_tipo") or "extension")
+        if destino_tipo in ("grupo", "buzon", "numero") and extension != "ai_agent":
+            valido = (
+                validacion.EXTENSION_RE.fullmatch(extension)
+                if destino_tipo in ("grupo", "buzon")
+                else validacion.TELEFONO_RE.fullmatch(extension)
+            )
+            if not valido or not contexto:
+                ET.SubElement(cond, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+                return
+            from app.services.config_generator import PREFIJO_BUZON
+
+            destino = f"{PREFIJO_BUZON}{extension}" if destino_tipo == "buzon" else extension
+            ET.SubElement(cond, "action", attrib={"application": "transfer", "data": f"{destino} XML {contexto}"})
+            return
         # Va dentro de `bridge user/<ext>@<dominio-de-la-empresa>`: solo dígitos.
         # Con "1000@otro.dominio" el bridge llamaba a un teléfono de OTRA
         # empresa. "ai_agent" es el único valor especial que se acepta.

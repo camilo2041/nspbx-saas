@@ -26,8 +26,8 @@ from sqlalchemy.engine import make_url
 
 from app.core.config import settings
 from app.core.database import async_session
-from app.models import AuditLog, RefreshToken, SystemSettings
-from app.services import alertas, webcall
+from app.models import AuditLog, MensajeBuzon, NumeroSinRuta, RefreshToken, SystemSettings
+from app.services import alertas, buzon, voice_prompts, webcall
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,13 @@ class MaintenanceWorker:
                             await alertas.revisar(session)
                     except Exception:
                         logger.exception("Error revisando el tráfico saliente")
+                # Avisos de voz que falten (una API key nueva, internet de vuelta).
+                if minuto % 60 == 30:
+                    try:
+                        async with async_session() as session:
+                            await voice_prompts.ensure_prompts(session)
+                    except Exception:
+                        logger.exception("Error generando los avisos de voz")
                 # Libera cupos de sesiones del widget de llamada web que el
                 # navegador nunca cerró (cerró la pestaña sin colgar,
                 # perdió red) — ver app/services/webcall.py.
@@ -137,6 +144,8 @@ class MaintenanceWorker:
         if necesita_backup:
             await self._respaldar_postgres(retencion_backup, tope_backup_gb)
         await self._limpiar_grabaciones(retencion_grabaciones, tope_gb, retencion_por_empresa)
+        await self._purgar_buzones_sin_audio()
+        await self._purgar_tablas_cortas()
 
     async def _purgar_auditoria(self) -> None:
         """Retención del registro de auditoría (AUDITORIA_RETENCION_DIAS).
@@ -150,6 +159,44 @@ class MaintenanceWorker:
             await session.commit()
         if borradas.rowcount:
             logger.info("Auditoría: %d registros de más de %d días borrados", borradas.rowcount, dias)
+
+    async def _purgar_buzones_sin_audio(self) -> int:
+        """Mensajes de buzón cuyo audio ya borró la retención (o el tope de
+        disco): sin esto la lista mostraba mensajes que no se podían oír.
+        Si la carpeta de grabaciones no está montada no se toca nada (si no,
+        se borrarían todos)."""
+        if not Path(settings.recordings_dir).is_dir():
+            return 0
+        async with async_session() as session:
+            filas = (
+                await session.execute(
+                    select(MensajeBuzon.id, MensajeBuzon.ruta, MensajeBuzon.tenant_id)
+                    .where(MensajeBuzon.created_at < datetime.utcnow() - timedelta(hours=1))
+                )
+            ).all()
+            huerfanos = []
+            for mid, ruta, tid in filas:
+                local = buzon.ruta_local(ruta, tid)
+                if local is None or not local.exists():
+                    huerfanos.append(mid)
+            for i in range(0, len(huerfanos), 1000):
+                await session.execute(delete(MensajeBuzon).where(MensajeBuzon.id.in_(huerfanos[i : i + 1000])))
+            await session.commit()
+        if huerfanos:
+            logger.info("Buzón: %d mensaje(s) sin audio eliminados", len(huerfanos))
+        return len(huerfanos)
+
+    async def _purgar_tablas_cortas(self) -> None:
+        """Números sin ruta de hace más de 30 días y ventanas viejas de los
+        cupos de uso (core/cupos.py)."""
+        from app.core import cupos
+
+        async with async_session() as session:
+            await session.execute(
+                delete(NumeroSinRuta).where(NumeroSinRuta.ultima_vez < datetime.utcnow() - timedelta(days=30))
+            )
+            await session.commit()
+        await cupos.purgar()
 
     async def _purgar_refresh_tokens(self) -> None:
         """Borra refresh tokens vencidos o revocados hace más de una semana.

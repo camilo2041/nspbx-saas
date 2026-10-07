@@ -142,6 +142,86 @@ async def alertas_de_todas(session: AsyncSession = Depends(get_admin_session)):
     ]
 
 
+class PruebaHumo(BaseModel):
+    tenant_id: int
+    buzon: str | None = None
+    grupo: str | None = None
+
+
+@router.post("/humo")
+async def prueba_de_humo(datos: PruebaHumo, usuario: User = Depends(usuario_actual)):
+    """Llamadas de prueba dentro de la central de la empresa (services/humo.py).
+    Tarda hasta un par de minutos."""
+    from app.services import humo
+
+    for valor in (datos.buzon, datos.grupo):
+        if valor and not valor.isdigit():
+            raise HTTPException(status_code=422, detail="La extensión y el grupo son números")
+    try:
+        resultado = await humo.probar(datos.tenant_id, datos.buzon, datos.grupo)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    logger.info("Prueba de humo de %s por %s: %s", resultado["empresa"], usuario.username, "ok" if resultado["ok"] else "con fallos")
+    return resultado
+
+
+@router.get("/operacion")
+async def operacion(session: AsyncSession = Depends(get_admin_session)):
+    """Respaldo diario, copia externa cifrada y último simulacro de
+    restauración (services/operacion.py)."""
+    from app.core.config import settings as cfg
+    from app.models import SystemSettings
+    from app.services import operacion as op
+
+    ultimo = (
+        await session.execute(select(SystemSettings.last_backup_at, SystemSettings.last_backup_ok, SystemSettings.last_backup_error)
+                              .order_by(SystemSettings.last_backup_at.desc().nulls_last()).limit(1))
+    ).first()
+    volcado = op.ultimo_volcado()
+    return {
+        "respaldo": {"at": ultimo[0] if ultimo else None, "ok": ultimo[1] if ultimo else None,
+                     "error": ultimo[2] if ultimo else None, "archivo": volcado.name if volcado else None},
+        "externo": op.copia_externa(),
+        "simulacro": op.simulacro(),
+        "metricas": bool(cfg.metrics_token),
+    }
+
+
+@router.get("/sin-ruta")
+async def numeros_sin_ruta(session: AsyncSession = Depends(get_admin_session)):
+    """Números a los que entran llamadas por una troncal sin ninguna ruta de
+    entrada (se cuelgan): falta crearles la ruta, o el proveedor manda el
+    número en otro formato (services/sin_ruta.py)."""
+    from app.models import NumeroSinRuta
+    from app.services import sin_ruta
+
+    empresas = {t.id: t for t in (await session.execute(select(Tenant))).scalars().all()}
+    slugs = {tid: t.slug for tid, t in empresas.items()}
+    filas = (
+        await session.execute(select(NumeroSinRuta).order_by(NumeroSinRuta.ultima_vez.desc()).limit(200))
+    ).scalars().all()
+    salida = []
+    for n in filas:
+        tid = sin_ruta.empresa_de_troncal(n.troncal, slugs)
+        salida.append({
+            "id": n.id, "numero": n.numero, "para": n.para, "origen": n.origen, "troncal": n.troncal,
+            "empresa": empresas[tid].name if tid else None, "tenant_id": tid, "veces": n.veces,
+            "primera_vez": n.primera_vez, "ultima_vez": n.ultima_vez,
+        })
+    return salida
+
+
+@router.delete("/sin-ruta/{numero_id}", status_code=204)
+async def olvidar_sin_ruta(numero_id: int, session: AsyncSession = Depends(get_admin_session)):
+    """Ya se resolvió (o no interesa): sale de la lista hasta que vuelva a llamar."""
+    from sqlalchemy import delete
+
+    from app.models import NumeroSinRuta
+
+    await session.execute(delete(NumeroSinRuta).where(NumeroSinRuta.id == numero_id))
+    await session.commit()
+
+
 @router.get("/auditoria")
 async def auditoria_de_todas(
     accion: str | None = None,
