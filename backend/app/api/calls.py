@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User
 from app.schemas import CallLogOut
-from app.services import buzon, deepgram, humo, llm, sin_ruta, tiempos_llamada
+from app.services import buzon, calidad_audio, deepgram, humo, llm, sin_ruta, tiempos_llamada
 from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
@@ -281,6 +281,7 @@ async def receive_cdr(secret: str, request: Request, session: AsyncSession = Dep
         disposicion_id=disposicion_id,
         abandonada=True if variables.get("nspbx_abandonada") == "true" else None,
         **datos_de_cola(variables),
+        **calidad_audio.de_cdr(variables),
     )
     if variables.get("nspbx_buzon_ext"):
         # La llamada terminó en el buzón: no es una «contestada» aunque el
@@ -439,6 +440,10 @@ def _call_out(call: CallLog) -> dict:
         "ring_ms": call.ring_ms,
         "espera_ms": call.espera_ms,
         "colgo": call.colgo,
+        "audio_mos": call.audio_mos,
+        "audio_calidad": call.audio_calidad,
+        "audio_perdida": call.audio_perdida,
+        "troncal": call.troncal,
     }
 
 

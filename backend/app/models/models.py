@@ -549,6 +549,12 @@ class CallLog(Base):
     # Base del reporte de entrantes (services/reportes.entrantes).
     cola: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cola_espera_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Calidad del audio recibido (services/calidad_audio.py): MOS 1-5, % de
+    # calidad y % de paquetes perdidos, y el proveedor por el que salió/entró.
+    audio_mos: Mapped[float | None] = mapped_column(Float, nullable=True)
+    audio_calidad: Mapped[float | None] = mapped_column(Float, nullable=True)
+    audio_perdida: Mapped[float | None] = mapped_column(Float, nullable=True)
+    troncal: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cola_resultado: Mapped[str | None] = mapped_column(String(12), nullable=True)  # atendida|abandonada|desbordada
     cola_agente: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Transcripción de la grabación ([{rol, texto}]), guardada la primera vez

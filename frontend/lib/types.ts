@@ -435,6 +435,10 @@ export interface CallLog {
   ring_ms: number | null;
   espera_ms: number | null;
   colgo: "llamante" | "llamado" | null;
+  /** Calidad del audio recibido (MOS 1 a 5), si FreeSWITCH la midió. */
+  audio_mos?: number | null;
+  audio_perdida?: number | null;
+  troncal?: string | null;
 }
 
 export interface CallStats {

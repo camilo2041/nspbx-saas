@@ -709,6 +709,13 @@ export default function CallsPage() {
                             </svg>
                             Resumen
                           </button>
+                          {c.audio_mos != null && (
+                            <span
+                              title={`Calidad del audio: MOS ${c.audio_mos.toFixed(2)} de 5${c.audio_perdida != null ? `, ${c.audio_perdida}% de paquetes perdidos` : ""}${c.troncal ? ` · ${c.troncal}` : ""}`}
+                              aria-label={`Calidad del audio ${c.audio_mos.toFixed(1)} de 5`}
+                              className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${c.audio_mos >= 4 ? "bg-ok" : c.audio_mos >= 3.5 ? "bg-warn" : "bg-danger"}`}
+                            />
+                          )}
                           {c.has_recording ? (
                             <Grabacion call={c} />
                           ) : (

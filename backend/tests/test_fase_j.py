@@ -135,3 +135,49 @@ async def test_los_errores_se_agrupan_y_los_ve_la_plataforma(cliente, mundo):
         async with async_session() as s:
             await s.execute(delete(ErrorCliente))
             await s.commit()
+
+
+# --- J2: calidad de audio por llamada ------------------------------------------------------
+
+from app.services import calidad_audio  # noqa: E402
+
+
+def test_calidad_desde_las_variables_del_cdr():
+    d = calidad_audio.de_cdr({"rtp_audio_in_mos": "4.21", "rtp_audio_in_quality_percentage": "98.5",
+                              "rtp_audio_in_packet_count": "990", "rtp_audio_in_skip_packet_count": "10",
+                              "sip_gateway_name": "proveedor_a"})
+    assert d == {"audio_mos": 4.21, "audio_calidad": 98.5, "audio_perdida": 1.0, "troncal": "proveedor_a"}
+    # Sin medir (llamada no contestada) o basura: nada.
+    assert calidad_audio.de_cdr({}) == {"audio_mos": None, "audio_calidad": None, "audio_perdida": None, "troncal": None}
+    assert calidad_audio.de_cdr({"rtp_audio_in_mos": "nan"})["audio_mos"] is None
+    assert calidad_audio.de_cdr({"rtp_audio_in_mos": "0"})["audio_mos"] is None
+
+
+async def test_el_cdr_guarda_el_audio_y_el_reporte_lo_agrupa(cliente, mundo):
+    from .conftest import FS_SECRET
+
+    uuids = [f"j2-{uuidlib.uuid4()}" for _ in range(3)]
+    base = {"nspbx_tenant_id": str(mundo.alfa.id), "direction": "outbound", "billsec": "30", "caller_id_number": "1000",
+            "destination_number": "3001234567", "hangup_cause": "NORMAL_CLEARING"}
+    try:
+        for uuid, mos, gw in zip(uuids, ("4.4", "2.9", "4.1"), ("prov_a", "prov_b", "prov_a")):
+            r = await cliente.post(f"/fs/cdr/{FS_SECRET}", json={"variables": {
+                **base, "uuid": uuid, "rtp_audio_in_mos": mos, "sip_gateway_name": gw,
+                "start_uepoch": str(int(datetime.utcnow().timestamp() * 1_000_000)),
+            }})
+            assert r.status_code == 200
+        admin = mundo.alfa.cabeceras(permissions.ADMIN)
+        hoy = datetime.utcnow().date().isoformat()
+        rep = (await cliente.get(f"/api/reportes/audio?desde={hoy}&hasta={hoy}", headers=admin)).json()
+        por = {f["clave"]: f for f in rep["por_troncal"]}
+        assert por["prov_b"]["malas"] == 1 and por["prov_b"]["mos"] == 2.9
+        assert por["prov_a"]["llamadas"] >= 2 and por["prov_a"]["malas"] == 0
+        # El peor primero.
+        assert rep["por_troncal"][0]["clave"] == "prov_b"
+        # Otra empresa no ve estas llamadas.
+        beta = (await cliente.get(f"/api/reportes/audio?desde={hoy}&hasta={hoy}", headers=mundo.beta.cabeceras(permissions.ADMIN))).json()
+        assert not any(f["clave"] in ("prov_a", "prov_b") for f in beta["por_troncal"])
+    finally:
+        async with async_session() as s:
+            await s.execute(delete(CallLog).where(CallLog.uuid.in_(uuids)))
+            await s.commit()
