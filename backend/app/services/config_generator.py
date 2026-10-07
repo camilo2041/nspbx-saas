@@ -1,6 +1,8 @@
+import hashlib
 import json
 import logging
 import re
+import secrets
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 
@@ -235,6 +237,87 @@ def _append_buzon_escuchar(context: ET.Element, extensions: list, nuevos: dict[s
     ET.SubElement(c, "action", attrib={"application": "answer"})
     ET.SubElement(c, "action", attrib={"application": "sleep", "data": "500"})
     _decir(c, "buzon_sin_nuevos", "You have no new messages.")
+    ET.SubElement(c, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+
+
+# *96: escuchar el buzón desde OTRO teléfono (o desde afuera, con un número
+# entrante de tipo «buzon_remoto»): pide la extensión y su PIN.
+BUZON_REMOTO = "*96"
+BUZON_REMOTO_INTENTOS = 3
+
+
+def _lua_texto(s: str) -> str:
+    """Cadena de Lua entre comillas simples (las rutas ya pasaron RUTA_SEGURA_RE)."""
+    return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _append_buzon_remoto(context: ET.Element, extensions: list, nuevos: dict[str, list], tenant_id: int) -> None:
+    """*96: pide la extensión y el PIN y reproduce sus mensajes nuevos.
+
+    Se resuelve en un Lua en línea porque las teclas llegan durante la
+    llamada. El PIN nunca va en claro: va md5(sal + extensión + ":" + PIN),
+    con una sal nueva en cada dialplan (se arma en cada llamada, xml_curl), y
+    FreeSWITCH calcula lo mismo con su API `md5`. Tres intentos por llamada.
+    Al oír cada mensaje queda `nspbx_buzon_oido`, como en *97."""
+    con_buzon = set(_numeros_con_buzon(extensions))
+    con_pin = sorted(
+        (e.number, e.voicemail_pin)
+        for e in extensions
+        if e.number in con_buzon and validacion.PIN_BUZON_RE.fullmatch(getattr(e, "voicemail_pin", None) or "")
+    )
+    ext = ET.SubElement(context, "extension", attrib={"name": "nspbx_buzon_remoto", "continue": "false"})
+    c = ET.SubElement(ext, "condition", attrib={"field": "destination_number", "expression": f"^{re.escape(BUZON_REMOTO)}$"})
+    ET.SubElement(c, "action", attrib={"application": "answer"})
+    ET.SubElement(c, "action", attrib={"application": "set", "data": f"nspbx_tenant_id={int(tenant_id)}"})
+    ET.SubElement(c, "action", attrib={"application": "sleep", "data": "500"})
+    if not con_pin:
+        _decir(c, "buzon_remoto_sin_pin", "No mailbox has remote access.")
+        ET.SubElement(c, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
+        return
+
+    sal = secrets.token_hex(8)
+    tabla = []
+    for numero, pin in con_pin:
+        huella = hashlib.md5(f"{sal}{numero}:{pin}".encode()).hexdigest()
+        msgs = ",".join(f"{{{int(mid)},{_lua_texto(ruta)}}}" for mid, ruta in (nuevos.get(numero) or []))
+        tabla.append(f"['{numero}']={{h='{huella}',m={{{msgs}}}}}")
+
+    def ruta_aviso(clave: str) -> str:
+        return _lua_texto(voice_prompts.prompt_path(clave) or "")
+
+    avisos = {
+        "ext": ("buzon_remoto_extension", "Dial the extension number and then pound."),
+        "pin": ("buzon_remoto_pin", "Now dial the PIN and then pound."),
+        "mal": ("buzon_remoto_error", "Wrong extension or PIN."),
+        "sin": ("buzon_sin_nuevos", "You have no new messages."),
+        "fin": ("buzon_fin", "No more messages."),
+    }
+    a = ",".join(f"{k}={{{ruta_aviso(clave)},{_lua_texto(texto)}}}" for k, (clave, texto) in avisos.items())
+    nuevos_avisos = ",".join(
+        _lua_texto(voice_prompts.prompt_path(f"buzon_nuevos_{n}") or "") for n in [*range(1, 10), "mas"]
+    )
+    codigo = (
+        "~local t={" + ",".join(tabla) + "}; "
+        "local a={" + a + "}; "
+        "local nn={" + nuevos_avisos + "}; "
+        "local api=freeswitch.API(); "
+        "local function decir(x) if x[1] ~= '' then session:streamFile(x[1]) else session:execute('speak','flite|kal|'..x[2]) end end; "
+        "local function teclas(x) decir(x); return session:playAndGetDigits(1,8,1,6000,'#','silence_stream://200','','^[0-9]+$') or '' end; "
+        f"for i=1,{BUZON_REMOTO_INTENTOS} do "
+        "if not session:ready() then return end; "
+        "local e=teclas(a.ext); local p=teclas(a.pin); local b=t[e]; "
+        f"if b and p ~= '' and ((api:execute('md5','{sal}'..e..':'..p) or ''):gsub('%s','')) == b.h then "
+        "local n=#b.m; "
+        "if n == 0 then decir(a.sin) else "
+        "local f=nn[math.min(n,10)]; if f ~= '' then session:streamFile(f) end; "
+        "for _,m in ipairs(b.m) do if not session:ready() then return end; "
+        "session:streamFile('tone_stream://%(300,0,800)'); session:streamFile(m[2]); "
+        "session:setVariable('nspbx_buzon_oido',tostring(m[1])); session:sleep(700) end; "
+        "decir(a.fin) end; "
+        "return end; "
+        "decir(a.mal) end"
+    )
+    ET.SubElement(c, "action", attrib={"application": "lua", "data": codigo})
     ET.SubElement(c, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
 
 
@@ -971,7 +1054,10 @@ def _append_inbound_routes(
         )
         condition = ET.SubElement(extension, "condition", attrib={"field": campo, "expression": expresion})
         ET.SubElement(condition, "action", attrib={"application": "set", "data": f"domain_name={dominios.get(route.tenant_id, '$${domain}')}"})
-        if tipo == "hangup" or not valor:
+        if tipo == "buzon_remoto":
+            destino_ctx = contextos.get(route.tenant_id) or "default"
+            ET.SubElement(condition, "action", attrib={"application": "transfer", "data": f"{BUZON_REMOTO} XML {destino_ctx}"})
+        elif tipo == "hangup" or not valor:
             ET.SubElement(condition, "action", attrib={"application": "hangup", "data": "NORMAL_CLEARING"})
         else:
             # Buzón: *99<extensión> en el contexto de la empresa (ver PREFIJO_BUZON).
@@ -1164,6 +1250,7 @@ def build_dialplan_xml(
         _append_buzon_directo(context, extensions, t["tenant_id"])
         _append_buzon_grabar_saludo(context, extensions, t["tenant_id"])
         _append_buzon_escuchar(context, extensions, t.get("buzon_nuevos") or {})
+        _append_buzon_remoto(context, extensions, t.get("buzon_nuevos") or {}, t["tenant_id"])
         _append_push_bridge_routes(context, t.get("push_extensions") or set(), extensions, dominio, t["tenant_id"])
         _append_local_extension_route(context, extensions, dominio, t["tenant_id"])
         _append_voicebot_routes(section, context, bots, dominio, t["tenant_id"])

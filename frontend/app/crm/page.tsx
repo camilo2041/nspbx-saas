@@ -67,6 +67,7 @@ export default function CrmPage() {
       />
       <div className="mb-4 max-w-xl">
         <Segmented
+          guia="crm"
           value={pestana}
           onChange={setPestana}
           options={[
@@ -176,7 +177,7 @@ function Contactos({ campos, gestiona, version }: { campos: CampoContacto[]; ges
                 placeholder="Nombre, documento, teléfono…"
                 className="w-64"
               />
-              {gestiona && <Button onClick={() => setNuevo({ ...contactoVacio })}>+ Nuevo</Button>}
+              {gestiona && <Button guia="crm:nuevo" onClick={() => setNuevo({ ...contactoVacio })}>+ Nuevo</Button>}
             </div>
           }
         />

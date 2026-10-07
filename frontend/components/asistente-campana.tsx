@@ -63,7 +63,7 @@ export function AsistenteCampana({
             </Button>
           )}
           {!ultimo ? (
-            <Button onClick={() => setPaso(paso + 1)}>
+            <Button guia="asistente:siguiente" onClick={() => setPaso(paso + 1)}>
               {paso === 0 && !cargados ? "Saltar por ahora" : "Siguiente"}
             </Button>
           ) : (
@@ -72,7 +72,7 @@ export function AsistenteCampana({
                 Dejarla lista sin iniciar
               </Button>
               {campana.metodo !== "manual" && (
-                <Button variant="success" onClick={iniciar} loading={iniciando}>
+                <Button guia="asistente:iniciar" variant="success" onClick={iniciar} loading={iniciando}>
                   Iniciar campaña
                 </Button>
               )}

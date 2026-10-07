@@ -237,6 +237,7 @@ export default function SoftphonePage() {
               <>
                 <div className="relative">
                   <input
+                    data-guia="softphone:numero"
                     value={destination}
                     onChange={(e) => setDestination(e.target.value)}
                     placeholder="Ej. 1002 o 5551234567"
@@ -261,6 +262,7 @@ export default function SoftphonePage() {
                 </div>
                 {renderDialpad()}
                 <Button
+                  guia="softphone:llamar"
                   variant="success"
                   onClick={call}
                   disabled={connState !== "registered" || !destination}

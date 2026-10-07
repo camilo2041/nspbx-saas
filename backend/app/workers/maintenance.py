@@ -188,8 +188,8 @@ class MaintenanceWorker:
 
     async def _purgar_tablas_cortas(self) -> None:
         """Números sin ruta de hace más de 30 días y ventanas viejas de los
-        cupos de uso (core/cupos.py)."""
-        from app.core import cupos
+        cupos de uso (core/cupos.py) y de los intentos de acceso (core/limitador.py)."""
+        from app.core import cupos, limitador
 
         async with async_session() as session:
             await session.execute(
@@ -197,6 +197,7 @@ class MaintenanceWorker:
             )
             await session.commit()
         await cupos.purgar()
+        await limitador.purgar()
 
     async def _purgar_refresh_tokens(self) -> None:
         """Borra refresh tokens vencidos o revocados hace más de una semana.

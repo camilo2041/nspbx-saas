@@ -82,6 +82,10 @@ class Tarifas:
 _DIAS = Query(default=30, ge=1, le=366)
 
 
+def es_del_voizbot(fila) -> bool:
+    return (getattr(fila, "origen", None) or "voizbot") == "voizbot"
+
+
 async def _tarifas(session: AsyncSession) -> Tarifas:
     return Tarifas(await ajustes_de(session))
 
@@ -101,7 +105,7 @@ async def agregado(session, *condiciones, por_dia: bool = False, de_la_sesion: b
     `de_la_sesion=False` solo para quien ya filtra por una empresa explícita
     (el consumo mensual, que la plataforma pide con la sesión del dueño)."""
     columnas = [
-        AiCallUsage.tts_provider, AiCallUsage.stt_provider,
+        AiCallUsage.tts_provider, AiCallUsage.stt_provider, AiCallUsage.origen,
         func.count(AiCallUsage.id).label("calls"),
         func.count(case((AiCallUsage.resolved.is_(True), 1))).label("resolved"),
         *(func.coalesce(func.sum(getattr(AiCallUsage, c)), 0).label(c) for c in (
@@ -109,7 +113,7 @@ async def agregado(session, *condiciones, por_dia: bool = False, de_la_sesion: b
             "llm_prompt_tokens", "llm_completion_tokens",
         )),
     ]
-    grupo = [AiCallUsage.tts_provider, AiCallUsage.stt_provider]
+    grupo = [AiCallUsage.tts_provider, AiCallUsage.stt_provider, AiCallUsage.origen]
     if por_dia:
         dia = func.date(AiCallUsage.started_at).label("dia")
         columnas.insert(0, dia)
@@ -175,13 +179,17 @@ async def summary(days: int = _DIAS, session: AsyncSession = Depends(get_session
     desde = now_local() - timedelta(days=days)
     t = await _tarifas(session)
     filas = await agregado(session, AiCallUsage.started_at >= desde)
-
-    llamadas = sum(f.calls for f in filas)
-    resueltas = sum(f.resolved for f in filas)
-    turnos = sum(f.turns for f in filas)
-    dur_s = sum(f.duration_seconds for f in filas)
+    # Las métricas por llamada son del voizbot; la calidad con IA suma al
+    # gasto (por proveedor y total) y se muestra aparte.
+    bot = [f for f in filas if es_del_voizbot(f)]
+    llamadas = sum(f.calls for f in bot)
+    resueltas = sum(f.resolved for f in bot)
+    turnos = sum(f.turns for f in bot)
+    dur_s = sum(f.duration_seconds for f in bot)
     proveedores = _agrupar_por_proveedor(filas, t)
-    costo = round(sum(b["cost_usd"] for b in proveedores), 4)
+    costo_total = round(sum(b["cost_usd"] for b in proveedores), 4)
+    costo = round(sum(t.costo_llamada(f) for f in bot), 4)
+    de_calidad = [f for f in filas if not es_del_voizbot(f)]
 
     return {
         "days": days,
@@ -192,7 +200,13 @@ async def summary(days: int = _DIAS, session: AsyncSession = Depends(get_session
         "containment_rate": round(resueltas / llamadas, 3) if llamadas else 0,
         "talk_seconds": dur_s,
         "turns": turnos,
-        "cost_usd": costo,
+        "cost_usd": costo_total,
+        "cost_voicebot_usd": costo,
+        "calidad": {
+            "evaluaciones": sum(f.llm_calls for f in de_calidad),
+            "stt_seconds": sum(f.stt_seconds for f in de_calidad),
+            "cost_usd": round(sum(t.costo_llamada(f) for f in de_calidad), 4),
+        },
         "cost_per_call": round(costo / llamadas, 4) if llamadas else 0,
         "cost_per_resolved": round(costo / resueltas, 4) if resueltas else 0,
         "cost_per_minute": round(costo / (dur_s / 60), 4) if dur_s else 0,
@@ -217,7 +231,7 @@ async def daily(days: int = Query(default=14, ge=1, le=366), session: AsyncSessi
     for f in filas:
         d = f.dia.isoformat()
         b = por_dia.setdefault(d, {"calls": 0, "tts_chars": 0, "stt_seconds": 0, "tokens": 0, "cost_voz": 0.0, "cost_modelo": 0.0})
-        b["calls"] += f.calls
+        b["calls"] += f.calls if es_del_voizbot(f) else 0
         b["tts_chars"] += f.tts_chars
         b["stt_seconds"] += f.stt_seconds
         b["tokens"] += (f.llm_prompt_tokens or 0) + (f.llm_completion_tokens or 0)
@@ -250,7 +264,7 @@ async def calls(
     antes el tope era fijo y no había manera de llegar al consumo de una
     llamada anterior desde la interfaz."""
     t = await _tarifas(session)
-    query = select(AiCallUsage)
+    query = select(AiCallUsage).where(AiCallUsage.origen == "voizbot")
     if search:
         query = query.where(AiCallUsage.phone.ilike(f"%{search.strip()}%"))
     query = query.order_by(AiCallUsage.started_at.desc()).limit(min(limit, 500)).offset(max(0, offset))

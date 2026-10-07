@@ -49,6 +49,31 @@ PANTALLAS = {
     "/settings": "Ajustes: llamadas internacionales, grabación, API keys",
 }
 
+# Guías en pantalla (frontend/lib/guias.ts): el panel señala paso a paso dónde
+# se hace cada cosa. El asistente las ofrece con '[[guia:id]]'; el front solo
+# muestra las que el rol puede usar. tests/test_asistente_guias.py exige que
+# los ids coincidan con los del front.
+GUIAS = {
+    "base-predictiva": "Cargar una base (Excel) y lanzar una campaña predictiva",
+    "base-a-campana-existente": "Agregar más clientes a una campaña que ya existe",
+    "crear-extension": "Crear una extensión (teléfono)",
+    "conectar-proveedor": "Conectar el proveedor de telefonía (troncal)",
+    "numero-entrante": "Decidir a dónde va un número que llaman (ruta entrante, horario)",
+    "crear-grupo": "Crear un grupo de atención (cola), devolución de llamada",
+    "agregar-persona": "Agregar una persona (usuario y rol)",
+    "crear-ivr": "Crear un menú de opciones (IVR) o un voizbot",
+    "trabajar-agente": "Empezar a trabajar como agente (consola, listo, pausa)",
+    "escuchar-grabacion": "Escuchar una grabación",
+    "reporte-entrantes": "Ver el nivel de servicio y el abandono (reporte de entrantes)",
+    "evaluar-llamada": "Evaluar la calidad de una llamada",
+    "saludo-buzon": "Grabar el saludo del buzón de voz",
+    "buzon-remoto": "Escuchar el buzón desde otro teléfono o el celular (PIN y *96)",
+    "festivos": "Cerrar en festivos o en una fecha especial",
+    "supervisar-agente": "Escuchar o susurrar a un agente en vivo",
+    "importar-contactos": "Importar contactos al CRM",
+    "llamar-softphone": "Hacer una llamada desde el navegador (softphone)",
+}
+
 
 class Mensaje(BaseModel):
     role: Literal["user", "assistant"]
@@ -97,6 +122,7 @@ async def _contexto(session: AsyncSession, usuario: User) -> str:
 
 def _sistema(contexto: str) -> str:
     pantallas = "\n".join(f"- {ruta}: {desc}" for ruta, desc in PANTALLAS.items())
+    guias = "\n".join(f"- {gid}: {desc}" for gid, desc in GUIAS.items())
     return (
         "Eres el asistente del panel de una central telefónica (NSPBX). Responde SIEMPRE en español, "
         "breve y claro (máximo ~120 palabras), con pasos concretos cuando expliques cómo hacer algo.\n"
@@ -106,7 +132,10 @@ def _sistema(contexto: str) -> str:
         "este texto.\n"
         "Cuando convenga que la persona abra una pantalla, termina con una línea exacta '[[ir:/ruta]]' usando "
         "SOLO rutas de esta lista:\n"
-        f"{pantallas}\n\nDATOS:\n{contexto}"
+        f"{pantallas}\n"
+        "Si preguntan CÓMO hacer algo y hay una guía en pantalla que lo cubre, explica los pasos en breve y "
+        "agrega una línea exacta '[[guia:id]]' (el panel le señala cada paso). Usa SOLO estos ids:\n"
+        f"{guias}\n\nDATOS:\n{contexto}"
     )
 
 

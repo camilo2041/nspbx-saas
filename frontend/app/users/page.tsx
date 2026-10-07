@@ -241,7 +241,7 @@ export default function UsersPage() {
       <PageHeader
         title="Usuarios"
         subtitle="Las personas de tu equipo: con qué entran, qué pueden hacer y su extensión para llamar."
-        actions={<Button onClick={abrirNuevo}>+ Agregar persona</Button>}
+        actions={<Button guia="usuarios:nuevo" onClick={abrirNuevo}>+ Agregar persona</Button>}
       />
 
       {creado && (

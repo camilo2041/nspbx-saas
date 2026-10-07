@@ -225,14 +225,14 @@ export interface InboundRoute {
   id: number;
   name: string;
   did_pattern: string;
-  destination_type: "extension" | "voicemail" | "queue" | "voicebot" | "hangup";
+  destination_type: "extension" | "voicemail" | "queue" | "voicebot" | "buzon_remoto" | "hangup";
   destination_value: string | null;
   priority: number;
   enabled: boolean;
   /** Horario de atención (JSON por día); null = siempre. */
   horario?: string | null;
   /** Fuera de horario, la llamada va a esto (null = colgar). */
-  fuera_horario_tipo?: "extension" | "voicemail" | "queue" | "voicebot" | "hangup" | null;
+  fuera_horario_tipo?: "extension" | "voicemail" | "queue" | "voicebot" | "buzon_remoto" | "hangup" | null;
   fuera_horario_valor?: string | null;
   created_at: string;
 }

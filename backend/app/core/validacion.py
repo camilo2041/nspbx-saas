@@ -94,9 +94,17 @@ def expresion_did(did: str) -> str:
     return f"^{re.escape(v)}$"
 
 
+# PIN del buzón (escucharlo desde otro teléfono): solo dígitos.
+PIN_BUZON_RE = re.compile(r"[0-9]{4,8}")
+
+# Destinos que no apuntan a nada concreto: colgar, y escuchar el buzón desde
+# afuera (pide extensión y PIN; config_generator._append_buzon_remoto).
+DESTINOS_SIN_VALOR = ("hangup", "buzon_remoto")
+
+
 def destino_valido(tipo: str, valor: str | None) -> bool:
     """¿El destino de una ruta entrante es coherente con su tipo?"""
-    if tipo == "hangup":
+    if tipo in DESTINOS_SIN_VALOR:
         return True
     if not valor:
         return False

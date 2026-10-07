@@ -60,7 +60,7 @@ def bytes_de_grabaciones(tenant_id: int) -> int:
 
 
 async def resumen(session, tenant_id: int, mes: str | None) -> dict:
-    from app.api.ai_usage import Tarifas, agregado
+    from app.api.ai_usage import Tarifas, agregado, es_del_voizbot
 
     etiqueta, inicio, fin = rango_del_mes(mes)
     llamadas = (
@@ -89,7 +89,7 @@ async def resumen(session, tenant_id: int, mes: str | None) -> dict:
         "minutos_hablados": round(llamadas[2] / 60, 1),
         "llamadas_por_troncal": llamadas[3],
         "minutos_por_troncal": round(llamadas[4] / 60, 1),
-        "conversaciones_ia": sum(c.calls for c in conversaciones),
+        "conversaciones_ia": sum(c.calls for c in conversaciones if es_del_voizbot(c)),
         "minutos_ia": round(sum(c.duration_seconds or 0 for c in conversaciones) / 60, 1),
         "tts_caracteres": sum(c.tts_chars or 0 for c in conversaciones),
         "stt_segundos": sum(c.stt_seconds or 0 for c in conversaciones),

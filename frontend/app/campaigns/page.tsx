@@ -553,7 +553,7 @@ export default function CampaignsPage() {
       <PageHeader
         title="Campañas"
         subtitle="Marcación masiva con autodialer"
-        actions={<Button onClick={openCreate}>+ Nueva campaña</Button>}
+        actions={<Button guia="campanas:nueva" onClick={openCreate}>+ Nueva campaña</Button>}
       />
       <AvisoHorarioCampanas />
 
@@ -598,7 +598,7 @@ export default function CampaignsPage() {
                   </Td>
                   <Td align="right">
                     <RowActions>
-                      <Button size="sm" variant="secondary" onClick={() => openDetail(c)}>
+                      <Button size="sm" variant="secondary" guia="campana:ver" onClick={() => openDetail(c)}>
                         Ver
                       </Button>
                       <Button size="sm" variant="secondary" onClick={() => openEdit(c)}>
@@ -618,7 +618,7 @@ export default function CampaignsPage() {
                               Reintentar
                             </Button>
                           )}
-                          <Button size="sm" variant="success" onClick={() => start(c)} disabled={busy}>
+                          <Button size="sm" variant="success" guia="campana:iniciar" onClick={() => start(c)} disabled={busy}>
                             Iniciar
                           </Button>
                         </>
@@ -641,14 +641,14 @@ export default function CampaignsPage() {
             <Button variant="secondary" onClick={() => setModal(false)}>
               Cancelar
             </Button>
-            <Button onClick={save} loading={saving}>
+            <Button guia="campana:crear" onClick={save} loading={saving}>
               {editing ? "Guardar" : "Crear"}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          <Input label="Nombre" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
+          <Input guia="campana:nombre" label="Nombre" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
 
           <div>
             <span className="mb-1.5 block text-xs font-medium text-fg-soft">¿Quién habla con los clientes?</span>
@@ -662,6 +662,7 @@ export default function CampaignsPage() {
                   <button
                     key={o.titulo}
                     type="button"
+                    data-guia={o.conAgentes ? "campana:con-agentes" : "campana:con-voizbot"}
                     aria-pressed={activo}
                     onClick={() =>
                       setForm({ ...form, metodo: o.conAgentes ? (form.metodo === "voizbot" ? "predictivo" : form.metodo) : "voizbot" })
@@ -685,6 +686,7 @@ export default function CampaignsPage() {
                 {METODOS_AGENTE.map((m) => (
                   <label
                     key={m.value}
+                    data-guia={`campana:metodo-${m.value}`}
                     className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-2.5 transition-colors ${
                       form.metodo === m.value ? "border-brand bg-brand-soft" : "border-line hover:bg-surface-2"
                     }`}
@@ -1094,7 +1096,7 @@ export default function CampaignsPage() {
                 <Button size="sm" variant="secondary" onClick={descargarPlantilla}>
                   Descargar plantilla
                 </Button>
-                <Button size="sm" onClick={() => setCargarExcel(true)}>
+                <Button size="sm" guia="campana:cargar-excel" onClick={() => setCargarExcel(true)}>
                   Cargar clientes desde Excel
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => archivoRef.current?.click()}>

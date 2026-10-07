@@ -203,7 +203,7 @@ export default function QueuesPage() {
       <PageHeader
         title="Grupos de atención"
         subtitle="Varias personas que atienden las mismas llamadas (ventas, soporte…): la llamada suena en el grupo y la toma quien esté libre. Término técnico: colas."
-        actions={<Button onClick={openCreate}>+ Nuevo grupo</Button>}
+        actions={<Button guia="grupos:nuevo" onClick={openCreate}>+ Nuevo grupo</Button>}
       />
 
       {error && (
@@ -411,7 +411,7 @@ export default function QueuesPage() {
                 central lo llama apenas haya un agente libre y le toque, y lo pone de primero.
               </span>
             </span>
-            <Toggle checked={!!form.devolucion} onChange={(v) => setForm({ ...form, devolucion: v })} />
+            <Toggle guia="grupo:devolucion" checked={!!form.devolucion} onChange={(v) => setForm({ ...form, devolucion: v })} />
           </div>
           <div className="flex items-center justify-between rounded-xl border border-line bg-surface-2 px-3.5 py-2.5">
             <span className="text-sm text-fg-soft">Grabar las llamadas del grupo</span>

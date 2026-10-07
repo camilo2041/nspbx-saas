@@ -217,7 +217,7 @@ export default function TrunksPage() {
       <PageHeader
         title="Proveedor de telefonía"
         subtitle="La línea por la que entran y salen tus llamadas (Claro, Tigo, ETB, Movistar…). Término técnico: troncal SIP."
-        actions={<Button onClick={openCreate}>+ Conectar proveedor</Button>}
+        actions={<Button guia="proveedores:nuevo" onClick={openCreate}>+ Conectar proveedor</Button>}
       />
 
       {error && (

@@ -5,6 +5,7 @@ import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { buscarGuias, Guia, GUIAS, guiaPorId, iniciarGuia } from "@/lib/guias";
 import { PERMISOS } from "@/lib/types";
 
 interface Msg {
@@ -44,6 +45,26 @@ const SUGERENCIAS_POR_PANTALLA: Record<string, string[]> = {
   "/campaigns": ["¿Cómo lanzo una campaña?", "¿Cuántas campañas hay activas?"],
 };
 const SUGERENCIAS_BASE = ["¿Cómo hago una llamada?", "Resume el estado de mi central"];
+
+/** Botón que arranca una guía en pantalla. */
+function BotonGuia({ guia, onIniciar }: { guia: Guia; onIniciar: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        iniciarGuia(guia.id);
+        onIniciar();
+      }}
+      className="press flex w-full items-start gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-left transition-colors hover:border-brand"
+    >
+      <span className="mt-0.5 text-brand">▶</span>
+      <span className="min-w-0">
+        <span className="block text-[12.5px] font-medium text-fg">Muéstrame: {guia.titulo}</span>
+        <span className="block text-[11.5px] text-muted">{guia.descripcion}</span>
+      </span>
+    </button>
+  );
+}
 
 /** Markdown mínimo y seguro: negrita, código, listas y saltos, sin HTML crudo. */
 function Texto({ texto }: { texto: string }) {
@@ -99,6 +120,8 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
   const [texto, setTexto] = useState("");
   const [pensando, setPensando] = useState(false);
   const [sinLeer, setSinLeer] = useState(false);
+  const [verGuias, setVerGuias] = useState(false);
+  const [filtroGuias, setFiltroGuias] = useState("");
   const fin = useRef<HTMLDivElement>(null);
   const entrada = useRef<HTMLTextAreaElement>(null);
 
@@ -140,6 +163,7 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
       if (!limpio || pensando) return;
       const historial: Msg[] = [...msgs.filter((m) => !m.error), { role: "user", content: limpio }];
       setMsgs([...msgs, { role: "user", content: limpio }]);
+      setVerGuias(false);
       setTexto("");
       setPensando(true);
       try {
@@ -174,16 +198,36 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
 
   const sugerencias = SUGERENCIAS_POR_PANTALLA[pathname] ?? SUGERENCIAS_BASE;
 
-  /** Separa el texto de los marcadores [[ir:/ruta]] y los vuelve botones permitidos. */
+  const permitida = (g: Guia | undefined): g is Guia => !!g && (g.permiso === null || puede(g.permiso));
+
+  /** Separa el texto de los marcadores [[ir:/ruta]] y [[guia:id]] y los vuelve botones permitidos. */
   const partir = (contenido: string) => {
     const rutas: string[] = [];
-    const limpio = contenido.replace(/\[\[ir:(\/[a-z-]*)\]\]/g, (_, r: string) => {
-      const def = RUTAS[r];
-      if (def && (def.permiso === null || puede(def.permiso)) && !rutas.includes(r)) rutas.push(r);
-      return "";
-    });
-    return { limpio: limpio.trim(), rutas };
+    const guias: Guia[] = [];
+    const limpio = contenido
+      .replace(/\[\[ir:(\/[a-z-]*)\]\]/g, (_, r: string) => {
+        const def = RUTAS[r];
+        if (def && (def.permiso === null || puede(def.permiso)) && !rutas.includes(r)) rutas.push(r);
+        return "";
+      })
+      .replace(/\[\[guia:([a-z0-9-]+)\]\]/g, (_, id: string) => {
+        const g = guiaPorId(id);
+        if (permitida(g) && !guias.includes(g)) guias.push(g);
+        return "";
+      });
+    return { limpio: limpio.trim(), rutas, guias };
   };
+
+  // Guías que encajan con lo que se preguntó, sin esperar a la IA (y aunque no haya IA configurada).
+  const guiasLocales = (i: number): Guia[] => {
+    const pregunta = msgs[i];
+    if (pregunta?.role !== "user") return [];
+    const respuesta = msgs[i + 1];
+    if (respuesta?.role === "assistant" && !respuesta.error && partir(respuesta.content).guias.length) return [];
+    return buscarGuias(pregunta.content, puede, 2);
+  };
+  const cerrarYGuiar = () => setAbierto(false);
+  const listaGuias = (filtroGuias.trim() ? buscarGuias(filtroGuias, puede, 20) : GUIAS.filter(permitida));
 
   return (
     <>
@@ -206,6 +250,17 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
                 <span className="h-1.5 w-1.5 rounded-full bg-ok" /> Pregunta sobre tu central · Ctrl+J
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setVerGuias((v) => !v)}
+              aria-pressed={verGuias}
+              title="Guías paso a paso en pantalla"
+              className={`press rounded-lg px-2 py-1 text-[12px] font-medium transition-colors ${
+                verGuias ? "bg-brand text-on-brand" : "text-brand-text hover:bg-surface-2"
+              }`}
+            >
+              Guías
+            </button>
             {msgs.length > 0 && (
               <button
                 type="button"
@@ -242,6 +297,24 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
             </button>
           </header>
 
+          {verGuias ? (
+            <div className="no-scrollbar flex-1 space-y-2 overflow-y-auto px-4 py-4">
+              <p className="text-[12.5px] text-muted">
+                Elige una y te señalo en la pantalla dónde se hace cada paso. Tú haces los cambios; puedes salir cuando quieras.
+              </p>
+              <input
+                value={filtroGuias}
+                onChange={(e) => setFiltroGuias(e.target.value)}
+                placeholder="Buscar: base, extensión, grabación…"
+                aria-label="Buscar guía"
+                className="w-full rounded-xl border border-line bg-surface-2 px-3 py-2 text-[13px] text-fg outline-none placeholder:text-faint focus:border-brand"
+              />
+              {listaGuias.map((g) => (
+                <BotonGuia key={g.id} guia={g} onIniciar={cerrarYGuiar} />
+              ))}
+              {listaGuias.length === 0 && <p className="py-4 text-center text-[12.5px] text-muted">No hay una guía para eso. Pregúntale al asistente.</p>}
+            </div>
+          ) : (
           <div className="no-scrollbar flex-1 space-y-3 overflow-y-auto px-4 py-4">
             {msgs.length === 0 && (
               <div className="animate-fade-up space-y-3 py-2 text-center">
@@ -249,12 +322,22 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
                 <p className="text-[13px] leading-relaxed text-muted">
                   Puedo explicarte el panel y contarte cómo van tus llamadas. Solo consulto; los cambios los haces tú.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setVerGuias(true)}
+                  className="press text-[12.5px] font-medium text-brand-text hover:underline"
+                >
+                  O mira una guía paso a paso en pantalla →
+                </button>
               </div>
             )}
             {msgs.map((m, i) => {
-              const { limpio, rutas } = m.role === "assistant" ? partir(m.content) : { limpio: m.content, rutas: [] };
+              const { limpio, rutas, guias } =
+                m.role === "assistant" ? partir(m.content) : { limpio: m.content, rutas: [] as string[], guias: [] as Guia[] };
+              const locales = m.role === "user" ? guiasLocales(i) : [];
               return (
-                <div key={i} className={`animate-fade-up flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div key={i} className="space-y-2">
+                <div className={`animate-fade-up flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                   <div
                     className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
                       m.role === "user"
@@ -282,7 +365,22 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
                         ))}
                       </div>
                     )}
+                    {guias.length > 0 && (
+                      <div className="mt-2 space-y-1.5">
+                        {guias.map((g) => (
+                          <BotonGuia key={g.id} guia={g} onIniciar={cerrarYGuiar} />
+                        ))}
+                      </div>
+                    )}
                   </div>
+                </div>
+                {locales.length > 0 && (
+                  <div className="animate-fade-up max-w-[88%] space-y-1.5">
+                    {locales.map((g) => (
+                      <BotonGuia key={g.id} guia={g} onIniciar={cerrarYGuiar} />
+                    ))}
+                  </div>
+                )}
                 </div>
               );
             })}
@@ -297,8 +395,9 @@ function Chat({ uid, nombre }: { uid: number; nombre: string }) {
             )}
             <div ref={fin} />
           </div>
+          )}
 
-          {msgs.length === 0 && (
+          {msgs.length === 0 && !verGuias && (
             <div className="flex flex-wrap gap-1.5 px-4 pb-2">
               {sugerencias.map((s) => (
                 <button

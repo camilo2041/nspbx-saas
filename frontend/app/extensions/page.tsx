@@ -157,7 +157,7 @@ export default function ExtensionsPage() {
             <Button variant="secondary" onClick={reload} loading={reloading}>
               {reloading ? "Recargando…" : "Recargar en FreeSWITCH"}
             </Button>
-            <Button onClick={openCreate}>+ Nueva extensión</Button>
+            <Button guia="extensiones:nueva" onClick={openCreate}>+ Nueva extensión</Button>
           </>
         }
       />

@@ -302,7 +302,7 @@ export default function SettingsPage() {
                 Guardado
               </span>
             )}
-            <Button onClick={save} loading={saving}>
+            <Button guia="ajustes:guardar" onClick={save} loading={saving}>
               {saving ? "Guardando…" : "Guardar cambios"}
             </Button>
           </div>

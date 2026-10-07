@@ -56,7 +56,7 @@ export function CalendarioFestivos() {
   };
 
   return (
-    <Card className="mb-4">
+    <Card className="mb-4" guia="ajustes:festivos">
       <CardHeader
         title="Festivos y fechas especiales"
         subtitle="Para lo que tiene horario de atención: números entrantes, el bloque «Horario» del IVR y el botón de llamada web. Lo que atiende 24 horas no se cierra."
@@ -70,6 +70,7 @@ export function CalendarioFestivos() {
             </span>
           </span>
           <Toggle
+            guia="festivos:cerrar"
             checked={cal.cerrar_festivos}
             onChange={async (v) => {
               setCal({ ...cal, cerrar_festivos: v });

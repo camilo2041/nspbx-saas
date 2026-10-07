@@ -240,7 +240,7 @@ export default function VoicebotsPage() {
             <Button variant="secondary" onClick={reload} loading={reloading}>
               {reloading ? "Recargando…" : "Recargar en FreeSWITCH"}
             </Button>
-            <Button onClick={openCreate}>+ Nuevo voizbot</Button>
+            <Button guia="voizbots:nuevo" onClick={openCreate}>+ Nuevo voizbot</Button>
           </>
         }
       />
@@ -298,7 +298,7 @@ export default function VoicebotsPage() {
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
-                <Button onClick={() => router.push(`/voicebots/${bot.id}/flow`)}>Editar flujo</Button>
+                <Button guia="voizbot:flujo" onClick={() => router.push(`/voicebots/${bot.id}/flow`)}>Editar flujo</Button>
                 <Button variant="secondary" onClick={() => openEdit(bot)}>
                   Editar
                 </Button>

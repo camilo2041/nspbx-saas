@@ -22,6 +22,7 @@ from app.core import validacion
 from app.core.config import settings
 from app.models import Extension, MensajeBuzon, User
 from app.services import buzon
+from app.services.config_generator import BUZON_REMOTO
 
 router = APIRouter(prefix="/api/buzon", tags=["buzon"])
 
@@ -151,6 +152,59 @@ async def quitar_saludo(extension: str | None = None, session: AsyncSession = De
         _ruta_saludo(usuario.tenant_id, ext).unlink(missing_ok=True)
     except OSError:
         pass
+
+
+# --- PIN para escuchar el buzón desde otro teléfono -----------------------------------------
+# *96 (o un número entrante «Escuchar el buzón») pide la extensión y este PIN
+# (config_generator._append_buzon_remoto). Nunca se devuelve: solo si hay uno.
+
+
+class PinIn(BaseModel):
+    pin: str
+    extension: str | None = None
+
+
+def _pin_debil(pin: str, ext: str) -> bool:
+    """Lo primero que probaría alguien: repetidos, escaleras o la propia extensión."""
+    digitos = [int(c) for c in pin]
+    pasos = {b - a for a, b in zip(digitos, digitos[1:])}
+    return len(set(pin)) == 1 or pasos in ({1}, {-1}) or pin == ext or ext.endswith(pin)
+
+
+async def _extension_fila(ext: str, session: AsyncSession) -> Extension:
+    fila = (await session.execute(select(Extension).where(Extension.number == ext))).scalar_one_or_none()
+    if fila is None:
+        raise HTTPException(status_code=404, detail="Extensión no encontrada")
+    return fila
+
+
+@router.get("/pin")
+async def ver_pin(extension: str | None = None, session: AsyncSession = Depends(get_session), usuario: User = _VER):
+    ext = await _extension_del_saludo(extension, session, usuario)
+    fila = await _extension_fila(ext, session)
+    return {"extension": ext, "tiene_pin": bool(fila.voicemail_pin), "marcar": BUZON_REMOTO}
+
+
+@router.put("/pin")
+async def poner_pin(datos: PinIn, session: AsyncSession = Depends(get_session), usuario: User = _VER):
+    ext = await _extension_del_saludo(datos.extension, session, usuario)
+    if not validacion.PIN_BUZON_RE.fullmatch(datos.pin or ""):
+        raise HTTPException(status_code=422, detail="El PIN son de 4 a 8 números")
+    if _pin_debil(datos.pin, ext):
+        raise HTTPException(status_code=422, detail="Ese PIN es fácil de adivinar: evita repetidos, escaleras y tu extensión")
+    fila = await _extension_fila(ext, session)
+    fila.voicemail_pin = datos.pin
+    await session.commit()
+    return {"extension": ext, "tiene_pin": True, "marcar": BUZON_REMOTO}
+
+
+@router.delete("/pin", status_code=status.HTTP_204_NO_CONTENT)
+async def quitar_pin(extension: str | None = None, session: AsyncSession = Depends(get_session), usuario: User = _VER):
+    """Sin PIN, el buzón solo se escucha desde el propio teléfono (*97) o el panel."""
+    ext = await _extension_del_saludo(extension, session, usuario)
+    fila = await _extension_fila(ext, session)
+    fila.voicemail_pin = None
+    await session.commit()
 
 
 @router.get("/{mensaje_id}/audio")

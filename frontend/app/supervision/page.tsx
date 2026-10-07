@@ -321,6 +321,7 @@ export default function SupervisionPage() {
                         {MODOS.map((m) => (
                           <Button
                             key={m.value}
+                            guia={`supervision:${m.value}`}
                             size="sm"
                             variant={monitor?.agente_id === a.user_id && monitor.modo === m.value ? "primary" : "ghost"}
                             disabled={!a.audio || (!!a.monitoreo && monitor?.agente_id !== a.user_id)}

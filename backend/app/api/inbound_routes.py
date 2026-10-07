@@ -43,7 +43,7 @@ async def _guardar(session: AsyncSession) -> None:
 def _fuera_de_horario(cambios: dict, tipo: str | None, valor: str | None) -> None:
     """A dónde va la llamada fuera del horario: coherente con su tipo, o
     nada (= colgar)."""
-    if not tipo or tipo == "hangup":
+    if not tipo or tipo in validacion.DESTINOS_SIN_VALOR:
         cambios["fuera_horario_valor"] = None
         return
     if not validacion.destino_valido(tipo, valor):
@@ -88,7 +88,7 @@ async def update_route(route_id: int, payload: InboundRouteUpdate, session: Asyn
     # dejando un "bot_3" de voizbot).
     tipo_final = cambios.get("destination_type", route.destination_type)
     valor_final = cambios.get("destination_value", route.destination_value)
-    if tipo_final == "hangup":
+    if tipo_final in validacion.DESTINOS_SIN_VALOR:
         cambios["destination_value"] = None
     elif not validacion.destino_valido(tipo_final, valor_final):
         raise HTTPException(

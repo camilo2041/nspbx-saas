@@ -56,6 +56,11 @@ _TEXTOS = {
     **{f"buzon_nuevos_{n}": f"Tienes {numero_a_palabras(n)} mensajes nuevos." for n in range(2, 10)},
     "buzon_nuevos_mas": "Tienes más de nueve mensajes nuevos.",
     "buzon_fin": "No hay más mensajes nuevos. Hasta luego.",
+    # *96: el buzón desde otro teléfono (config_generator._append_buzon_remoto).
+    "buzon_remoto_extension": "Marca el número de la extensión y luego numeral.",
+    "buzon_remoto_pin": "Ahora marca el PIN del buzón y luego numeral.",
+    "buzon_remoto_error": "La extensión o el PIN no son correctos.",
+    "buzon_remoto_sin_pin": "Ningún buzón tiene un PIN para escucharlo desde otro teléfono.",
     # Grupos de atención (services/queues_sync.py y config_generator._append_queue_routes).
     "cola_aviso": "Gracias por esperar. En un momento te atendemos.",
     "cola_delante_0": "Eres el siguiente en ser atendido.",

@@ -152,6 +152,9 @@ class Extension(Base):
     password: Mapped[str] = mapped_column(TextoCifrado())
     caller_id_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     voicemail: Mapped[bool] = mapped_column(Boolean, default=True)
+    # PIN para escuchar el buzón desde otro teléfono (*96 o un número
+    # entrante «buzon_remoto»). Cifrado como la clave SIP; None = sin acceso remoto.
+    voicemail_pin: Mapped[str | None] = mapped_column(TextoCifrado(), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Puede llamar afuera fuera del horario laboral de la empresa (guardias).
     # Solo cuenta si la empresa limita las salientes al horario (Ajustes).
@@ -587,6 +590,10 @@ class AiCallUsage(Base):
 
     # completed | no_speech | max_turns | hangup | error
     outcome: Mapped[str] = mapped_column(String(20), default="completed")
+    # voizbot: una conversación. calidad: una evaluación de la IA (transcribir
+    # la grabación y/o calificarla, services/calidad.py): cuesta, pero no es
+    # una llamada del bot y no entra en sus métricas.
+    origen: Mapped[str] = mapped_column(String(20), default="voizbot", server_default="voizbot")
     # Si la conversación terminó con una gestión hecha sobre la agenda:
     # es el numerador de la tasa de contención.
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -1628,6 +1635,19 @@ class CupoUso(Base):
     clave: Mapped[str] = mapped_column(String(120), primary_key=True)
     ventana: Mapped[int] = mapped_column(BigInteger)  # epoch // duración de la ventana
     conteo: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class IntentoAcceso(Base):
+    """Intentos fallidos de inicio de sesión (o de un código de verificación)
+    por IP, por cuenta y por ambas. En la base para que el bloqueo sea uno
+    solo entre réplicas (core/limitador.py). Tiempos en epoch."""
+
+    __tablename__ = "intentos_acceso"
+
+    clave: Mapped[str] = mapped_column(String(200), primary_key=True)
+    fallos: Mapped[int] = mapped_column(Integer, default=0)
+    inicio: Mapped[float] = mapped_column(Float, default=0)
+    hasta: Mapped[float] = mapped_column(Float, default=0)
 
 
 class Devolucion(Base):
