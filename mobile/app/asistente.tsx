@@ -6,6 +6,7 @@ import { ApiError, peticion } from "@/src/api/client";
 import { useAuth } from "@/src/auth/AuthContext";
 import { conversacionAsistente } from "@/src/datos";
 import { Aviso } from "@/src/gestion";
+import { buscarGuias, guia, Guia, GUIAS, guiaPorId } from "@/src/guias";
 import { fallo, impacto, toque } from "@/src/haptico";
 import { Icono } from "@/src/Icono";
 import { radios, useColores } from "@/src/tema";
@@ -103,15 +104,53 @@ export default function Asistente() {
     [mensajes, pensando]
   );
 
+  const permitida = (g: Guia | undefined): g is Guia => !!g && (g.permiso === null || puede(g.permiso));
+
   const partir = (contenido: string) => {
     const rutas: string[] = [];
-    const limpio = contenido.replace(/\[\[ir:(\/[a-z-]*)\]\]/g, (_, r: string) => {
-      const d = DESTINOS[r];
-      if (d && (d.permiso === null || puede(d.permiso)) && !rutas.includes(r)) rutas.push(r);
-      return "";
-    });
-    return { limpio: limpio.trim(), rutas };
+    const guias: Guia[] = [];
+    const limpio = contenido
+      .replace(/\[\[ir:(\/[a-z-]*)\]\]/g, (_, r: string) => {
+        const d = DESTINOS[r];
+        if (d && (d.permiso === null || puede(d.permiso)) && !rutas.includes(r)) rutas.push(r);
+        return "";
+      })
+      .replace(/\[\[guia:([a-z0-9-]+)\]\]/g, (_, id: string) => {
+        const g = guiaPorId(id);
+        if (permitida(g) && !guias.includes(g)) guias.push(g);
+        return "";
+      });
+    return { limpio: limpio.trim(), rutas, guias };
   };
+
+  /** Arranca la guía: cierra el asistente y lleva a la pantalla del primer paso. */
+  const mostrar = (g: Guia) => {
+    toque();
+    guia.iniciar(g.id);
+    router.dismiss();
+    router.navigate(g.pasos[0].ruta as never);
+  };
+
+  // Guías que encajan con la pregunta, sin esperar a la IA (y aunque no haya IA).
+  const locales = (i: number): Guia[] => {
+    const respuesta = mensajes[i + 1];
+    if (mensajes[i]?.role !== "user") return [];
+    if (respuesta?.role === "assistant" && !respuesta.error && partir(respuesta.content).guias.length) return [];
+    return buscarGuias(mensajes[i].content, puede);
+  };
+
+  const BotonGuia = ({ g }: { g: Guia }) => (
+    <Pressable
+      onPress={() => mostrar(g)}
+      style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: col.superficie, borderWidth: 1, borderColor: col.marca, borderRadius: radios.medio, paddingVertical: 10, paddingHorizontal: 12 }}
+    >
+      <Icono nombre="reproducir" tam={16} color={col.marca} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: col.texto, fontWeight: "700", fontSize: 14 }}>Muéstrame: {g.titulo}</Text>
+        <Text style={{ color: col.textoSecundario, fontSize: 12.5 }}>{g.descripcion}</Text>
+      </View>
+    </Pressable>
+  );
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: col.fondo }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -135,11 +174,21 @@ export default function Asistente() {
                 </Pressable>
               ))}
             </View>
+            {GUIAS.some(permitida) ? (
+              <View style={{ gap: 8, alignSelf: "stretch", marginTop: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: "700", color: col.textoSecundario }}>Guías paso a paso</Text>
+                {GUIAS.filter(permitida).map((g) => (
+                  <BotonGuia key={g.id} g={g} />
+                ))}
+              </View>
+            ) : null}
           </View>
         ) : null}
 
         {mensajes.map((m, i) => {
-          const { limpio, rutas } = m.role === "assistant" ? partir(m.content) : { limpio: m.content, rutas: [] };
+          const { limpio, rutas, guias } =
+            m.role === "assistant" ? partir(m.content) : { limpio: m.content, rutas: [] as string[], guias: [] as Guia[] };
+          const sugeridas = m.role === "user" ? locales(i) : [];
           const mio = m.role === "user";
           return (
             <View key={i} style={{ alignSelf: mio ? "flex-end" : "flex-start", maxWidth: "88%", gap: 8 }}>
@@ -179,6 +228,9 @@ export default function Asistente() {
                   ))}
                 </View>
               ) : null}
+              {[...guias, ...sugeridas].map((g) => (
+                <BotonGuia key={g.id} g={g} />
+              ))}
             </View>
           );
         })}

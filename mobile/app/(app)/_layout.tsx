@@ -3,6 +3,7 @@ import { ColorValue, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "@/src/auth/AuthContext";
+import { GuiaFlotante } from "@/src/GuiaFlotante";
 import { impacto } from "@/src/haptico";
 import { Icono, NombreIcono } from "@/src/Icono";
 import { useSoftphone } from "@/src/softphone/SoftphoneContext";
@@ -87,6 +88,7 @@ export default function AppLayout() {
         <Tabs.Screen name="administrar" options={{ title: "Menú", headerShown: false, tabBarIcon: icono("mas") }} />
       </Tabs>
       <BotonAsistente />
+      <GuiaFlotante />
     </View>
   );
 }
