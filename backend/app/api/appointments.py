@@ -1,5 +1,5 @@
 import hmac
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
@@ -18,7 +18,6 @@ from app.schemas import (
     AppointmentOut,
     AppointmentUpdate,
 )
-from app.services.ajustes import ajustes_de
 from app.services.appointments import (
     available_slots,
     find_next_appointment,

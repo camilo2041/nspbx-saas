@@ -52,7 +52,7 @@ _OCUPADO = {"In a queue call", "Receiving", "Idle"}
 
 def agentes_de(salida: str) -> dict:
     """Libres, ocupados y en pausa de `callcenter_config queue list agents`."""
-    lineas = [l for l in (salida or "").splitlines() if "|" in l]
+    lineas = [r for r in (salida or "").splitlines() if "|" in r]
     cuenta = {"libres": 0, "ocupados": 0, "pausa": 0, "total": 0}
     if not lineas:
         return cuenta

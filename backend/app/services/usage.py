@@ -10,7 +10,6 @@ son hechos; el costo depende del plan contratado y se calcula al
 consultar, con las tarifas de Ajustes.
 """
 
-import json
 import logging
 
 from app.core.clock import now_local

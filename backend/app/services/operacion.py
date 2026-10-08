@@ -53,7 +53,7 @@ def simulacro(ahora: datetime | None = None) -> dict:
     registro = _carpeta() / "simulacros.log"
     vacio = {"hay": False, "ok": None, "at": None, "dias": None, "detalle": None, "al_dia": False}
     try:
-        lineas = [l for l in registro.read_text(errors="replace").splitlines() if l.strip()]
+        lineas = [r for r in registro.read_text(errors="replace").splitlines() if r.strip()]
     except OSError:
         return vacio
     if not lineas:

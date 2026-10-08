@@ -16,7 +16,7 @@ _UUID_RE = re.compile(r"^[0-9a-fA-F-]{8,64}$")
 
 def esperando(salida: str) -> list[dict]:
     """Los que esperan, en orden de llegada, de `callcenter_config queue list members`."""
-    lineas = [l for l in (salida or "").splitlines() if "|" in l]
+    lineas = [r for r in (salida or "").splitlines() if "|" in r]
     if not lineas:
         return []
     campos = lineas[0].split("|")

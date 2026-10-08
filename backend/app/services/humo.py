@@ -229,7 +229,7 @@ async def _grupo(empresa: Tenant, contexto: str, dominio: str, cola: Queue) -> P
     if not salida:
         return Paso("grupo", titulo, "fallo",
                     "La llamada no apareció esperando en el grupo: revisa que el grupo esté cargado en mod_callcenter")
-    libres = sum(1 for l in agentes.splitlines() if "|Available|" in l and "|Waiting|" in l)
+    libres = sum(1 for fila in agentes.splitlines() if "|Available|" in fila and "|Waiting|" in fila)
     esperando = len(posicion_colas.esperando(salida))
     return Paso("grupo", titulo, "ok", f"Entró a la fila ({esperando} esperando); {libres} agente(s) libre(s)")
 

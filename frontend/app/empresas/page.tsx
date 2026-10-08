@@ -28,6 +28,7 @@ import { PreguntasSinGuia } from "@/components/preguntas-sin-guia";
 import { VerificacionVivo } from "@/components/verificacion-vivo";
 import { PruebaHumo } from "@/components/prueba-humo";
 import { AvisosCsp } from "@/components/avisos-csp";
+import { InstalacionesLocales } from "@/components/instalaciones-locales";
 import { ConsumoMensual } from "@/components/consumo-mensual";
 import { MoverEmpresa, ServidoresFreeswitch, nombreServidor } from "@/components/servidores-freeswitch";
 import { api } from "@/lib/api";
@@ -491,6 +492,7 @@ export default function EmpresasPage() {
       <DesbloqueosPlataforma />
 
       {nodos.length > 0 && <ServidoresFreeswitch nodos={nodos} onCambio={load} />}
+      <InstalacionesLocales empresas={items} />
 
       <Card>
         <CardHeader title="Empresas" subtitle={`${items.length} en la plataforma`} />
@@ -744,7 +746,7 @@ export default function EmpresasPage() {
           </div>
         </div>
       </Modal>
-      <PruebaHumo empresa={probarEmpresa} onCerrar={() => setProbarEmpresa(null)} />
+      <PruebaHumo key={probarEmpresa?.id ?? "ninguna"} empresa={probarEmpresa} onCerrar={() => setProbarEmpresa(null)} />
       <MoverEmpresa empresa={moverEmpresa} nodos={nodos} onCerrar={() => setMoverEmpresa(null)} onCambio={load} />
       <ConsumoMensual plataforma />
       <AvisosCsp />

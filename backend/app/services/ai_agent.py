@@ -14,7 +14,6 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -25,10 +24,9 @@ from sqlalchemy.exc import IntegrityError
 from app.core.clock import calendario, fecha_en_palabras, hora_en_palabras, now_local
 from app.core.config import settings
 from app.core.database import async_session
-from app.models import Appointment, Debt, PaymentPromise, SystemSettings, Tenant
+from app.models import Appointment, Debt, PaymentPromise, Tenant
 from app.services import ai_intents, ambience, deepgram, llm, tts, tts_elevenlabs
 from app.services.ajustes import ajustes_de
-from app.services.numeros import numero_a_palabras
 from app.services.usage import UsageMeter
 from app.services.appointments import (
     available_slots,

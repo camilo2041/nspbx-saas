@@ -12,7 +12,7 @@ se reparte bien sin tener que tocar código.
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import Integer, case, func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import now_local

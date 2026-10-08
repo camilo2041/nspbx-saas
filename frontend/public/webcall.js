@@ -39,7 +39,7 @@
   if (!host && script) {
     try {
       host = new URL(script.src).origin;
-    } catch (e) {
+    } catch {
       host = "";
     }
   }
@@ -56,11 +56,11 @@
     .then(function (r) { return r.json(); })
     .then(function (cfg) {
       if (!cfg || !cfg.enabled) return;
-      build(cfg);
+      build();
     })
     .catch(function () { /* PBX inalcanzable: no se dibuja nada */ });
 
-  function build(cfg) {
+  function build() {
     var style = document.createElement("style");
     style.textContent = [
       ".nspbx-wc-btn{position:fixed;bottom:20px;" + side + ":20px;z-index:2147483000;",

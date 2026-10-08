@@ -159,7 +159,7 @@ import xml.etree.ElementTree as ET  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
 from app.models import Devolucion  # noqa: E402
-from app.services import config_generator, vigia_colas, voice_prompts  # noqa: E402
+from app.services import config_generator, vigia_colas  # noqa: E402
 
 
 def test_dialplan_de_un_grupo_con_devolucion():
@@ -327,7 +327,6 @@ async def test_supervision_ve_grupos_y_devoluciones(cliente, mundo, monkeypatch)
 import io  # noqa: E402
 import uuid as uuidlib  # noqa: E402
 import wave  # noqa: E402
-from pathlib import Path  # noqa: E402
 
 from app.models import DeviceToken  # noqa: E402
 from app.services import buzon, deepgram, push, reportes_programados  # noqa: E402
@@ -549,7 +548,6 @@ async def test_festivos_y_fechas_especiales(cliente, mundo, calendario):
 
 
 async def test_ruta_entrante_cerrada_por_fecha_especial(cliente, mundo, calendario, monkeypatch):
-    from app.models import InboundRoute
     from app.services import config_generator as cg
 
     async with async_session() as s:

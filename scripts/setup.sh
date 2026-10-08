@@ -14,6 +14,10 @@
 #   bash scripts/setup.sh
 #
 # Es idempotente en lo que importa: si ya existe .env, NO lo pisa.
+#
+# Sin preguntas (lo usa instalador/instalar.sh): con PBX_HOST definido no
+# lo pide, y también toma ACME_RESOLVER, IP_PUBLICA y ADMIN_PASSWORD del
+# entorno si vienen.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -71,7 +75,8 @@ generar_vars_xml() {
     echo "  vars.xml ya existe — no se toca."
     return
   fi
-  IP_PUB="$(curl -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)"
+  IP_PUB="${IP_PUBLICA:-}"
+  [ -n "$IP_PUB" ] || IP_PUB="$(curl -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)"
   if [ -z "$IP_PUB" ]; then
     read -rp "  No pude detectar la IP pública. Escribila a mano: " IP_PUB
   fi
@@ -154,6 +159,9 @@ DATA_ENCRYPTION_KEY="$(nueva_clave_datos)"
 # normaliza acá en vez de confiar en cómo lo escriba cada uno.
 pedir_host() {
   local v
+  if [ -n "${PBX_HOST:-}" ]; then
+    return
+  fi
   while true; do
     read -rp "Subdominio del panel (ej. pbx.nspbxdevelop.com): " v
     v="${v#http://}"; v="${v#https://}"   # fuera el esquema
@@ -170,7 +178,7 @@ pedir_host() {
 pedir_host
 echo "  Se usará: ${PBX_HOST}"
 
-read -rp "Nombre del certificatesResolver del Traefik existente [mi-resuelves-ssl]: " ACME_RESOLVER
+[ -n "${ACME_RESOLVER:-}" ] || read -rp "Nombre del certificatesResolver del Traefik existente [mi-resuelves-ssl]: " ACME_RESOLVER
 ACME_RESOLVER="$(printf '%s' "${ACME_RESOLVER:-mi-resuelves-ssl}" | tr -d '[:space:]')"
 
 cat > .env <<EOF
@@ -201,7 +209,7 @@ TURN_HOST=turn.${PBX_HOST}
 
 # Vacío: la contraseña del admin se genera en el primer arranque y sale
 # en el log --> docker compose logs backend | grep -A5 "Usuario inicial"
-ADMIN_PASSWORD=
+ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
 EOF
 chmod 600 .env
 

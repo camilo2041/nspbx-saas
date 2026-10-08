@@ -55,6 +55,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const stored = (localStorage.getItem(STORAGE_KEY) as ThemeMode | null) ?? "system";
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- lee localStorage después de montar (no existe en el servidor)
     setModeState(stored);
     setResolved(applyMode(stored));
     setMounted(true);

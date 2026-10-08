@@ -12,7 +12,6 @@ medio. Corren con la sesión del dueño, como el voizbot real.
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import select
 
 from app.core.database import async_session
 from app.models import Appointment, PaymentPromise

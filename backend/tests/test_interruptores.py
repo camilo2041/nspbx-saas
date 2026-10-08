@@ -6,13 +6,13 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import delete, update
+from sqlalchemy import delete
 
 from app.api.calls import _salio_por_troncal
 from app.core import permissions
 from app.core.database import async_session
 from app.core.security import crear_token, hash_password
-from app.models import CallLog, Extension, License, PlatformState, SystemSettings, Tenant, Trunk, User
+from app.models import CallLog, Extension, License, Tenant, Trunk, User
 from app.services import salientes
 from app.services.ajustes import get_or_create_settings
 

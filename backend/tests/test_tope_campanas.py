@@ -10,7 +10,7 @@ from app.core import permissions
 from app.core.clock import now_local
 from app.core.database import async_session, engine
 from app.core.security import crear_token, hash_password
-from app.models import CallLog, Campaign, CampaignNumber, License, SystemSettings, Tenant, Trunk, User
+from app.models import CallLog, Campaign, CampaignNumber, License, Tenant, Trunk, User
 from app.services import esl, tope_campanas
 from app.services.ajustes import get_or_create_settings
 

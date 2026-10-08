@@ -265,7 +265,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   // aunque el viejo tarde en terminar de apagarse.
   const generacionRef = useRef(0);
 
-  if (!ringerRef.current) ringerRef.current = new Ringer();
+  if (ringerRef.current == null) ringerRef.current = new Ringer();
 
   // Desbloquea el audio sintetizado con el primer gesto del usuario en
   // cualquier parte de la app — para cuando entre una llamada real, ya
@@ -380,6 +380,17 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // connect() se reprograma a sí mismo tras una caída: la referencia
+  // apunta siempre a la versión más reciente de connect.
+  const connectRef = useRef<() => void>(() => {});
+  const programarReconexion = () => {
+    if (reconnectTimerRef.current) return;
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (!intentionalUnregisterRef.current) connectRef.current();
+    }, 4000);
+  };
+
   const connect = useCallback(async () => {
     const ext = entorno?.extension;
     const settings = entorno;
@@ -492,25 +503,16 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
       await registerer.register();
     } catch (e) {
       if (!esVigente()) return;
-      // eslint-disable-next-line no-console
       console.error("[softphone] connect() failed", e);
       setConnState("error");
       setConnError(e instanceof Error ? e.message : "Error al conectar");
       if (!intentionalUnregisterRef.current) programarReconexion();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entorno, bindSession]);
 
-  const connectRef = useRef<() => void>(() => {});
-  connectRef.current = connect;
-
-  const programarReconexion = () => {
-    if (reconnectTimerRef.current) return;
-    reconnectTimerRef.current = setTimeout(() => {
-      reconnectTimerRef.current = null;
-      if (!intentionalUnregisterRef.current) connectRef.current();
-    }, 4000);
-  };
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const hangup = useCallback(async () => {
     const session = sessionRef.current;
@@ -591,8 +593,8 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return () => {
       disconnect();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // No hay nada que elegir: la extensión es la del usuario que inició
@@ -601,6 +603,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (autoIntentadoRef.current || !entorno) return;
     autoIntentadoRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- registro automático: connect() habla con la central y avisa su estado
     if (entorno.extension?.enabled) connect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entorno]);

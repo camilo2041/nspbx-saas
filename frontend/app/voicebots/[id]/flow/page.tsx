@@ -26,6 +26,13 @@ import { NodePanel } from "./NodePanel";
 let idCounter = 1;
 const newId = () => `n${Date.now()}_${idCounter++}`;
 
+const defaultStartNode = (): Node => ({
+  id: newId(),
+  type: "menu",
+  position: { x: 80, y: 200 },
+  data: { label: "Saludo", start: true },
+});
+
 export default function VoiceBotFlowPage() {
   const params = useParams();
   const router = useRouter();
@@ -65,13 +72,6 @@ export default function VoiceBotFlowPage() {
       }
     })();
   }, [botId]);
-
-  const defaultStartNode = (): Node => ({
-    id: newId(),
-    type: "menu",
-    position: { x: 80, y: 200 },
-    data: { label: "Saludo", start: true },
-  });
 
   const onNodesChange = useCallback((changes: NodeChange[]) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes: EdgeChange[]) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);

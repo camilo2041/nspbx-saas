@@ -164,6 +164,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | PUT | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/instalacion/licencia` | sesión (sesión) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/integraciones/entregas/{entrega_id}/reintentar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/integraciones/eventos` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/integraciones/webhooks` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
@@ -173,6 +174,9 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/integraciones/webhooks/{webhook_id}/entregas` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/integraciones/webhooks/{webhook_id}/probar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/integraciones/webhooks/{webhook_id}/rotar-secreto` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| POST | `/api/licencia/activar` | sesión (servidores de los clientes) | ✓ | ✓ | ✓ | ✓ |
+| GET | `/api/licencia/instalar.sh` | sesión (servidores de los clientes) | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/licencia/latido` | sesión (servidores de los clientes) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/llamada/destinos` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
 | POST | `/api/llamada/espera` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
 | GET | `/api/llamada/ficha` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |
@@ -197,6 +201,13 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | GET | `/api/plataforma/errores` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/errores/{error_id}/resuelto` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/humo` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| GET | `/api/plataforma/instalaciones` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/instalaciones` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| DELETE | `/api/plataforma/instalaciones/{inst_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/instalaciones/{inst_id}/codigo` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/instalaciones/{inst_id}/reactivar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/instalaciones/{inst_id}/revocar` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
+| POST | `/api/plataforma/instalaciones/{inst_id}/suspender` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | GET | `/api/plataforma/nodos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | POST | `/api/plataforma/nodos` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |
 | PUT | `/api/plataforma/nodos/empresas/{tenant_id}` | `empresas:gestionar` | ✗ | ✗ | ✗ | ✗ |

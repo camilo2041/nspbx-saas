@@ -20,6 +20,7 @@ import {
 import { ConsumoMensual } from "@/components/consumo-mensual";
 import { WebcallEmbed } from "@/components/webcall-embed";
 import { CalendarioFestivos } from "@/components/calendario-festivos";
+import { TarjetaLicenciaLocal } from "@/components/licencia-local";
 import { api } from "@/lib/api";
 import { DetectedIp, Diagnostics, EstadoSalientes, MaintenanceStatus, Queue, SystemSettings, TtsVoice } from "@/lib/types";
 
@@ -180,6 +181,7 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     load();
   }, [load]);
 
@@ -196,6 +198,7 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     if (!loading && form.puede_infraestructura !== false) cargarDiagnostico();
   }, [cargarDiagnostico, loading, form.puede_infraestructura]);
 
@@ -258,7 +261,6 @@ export default function SettingsPage() {
             : "No se pudieron cargar las voces."
         );
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.ai_voice_provider, loading]);
 
   const save = async () => {
@@ -314,6 +316,8 @@ export default function SettingsPage() {
           <ErrorBanner message={error} onClose={() => setError("")} />
         </div>
       )}
+
+      <TarjetaLicenciaLocal />
 
       <CalendarioFestivos />
 
@@ -398,9 +402,9 @@ export default function SettingsPage() {
           {diag?.trunks.some((t) => t.contact_no_alcanzable) && (
             <Note tone="warn">
               Al menos un troncal le está anunciando al proveedor una IP privada, loopback o de CGNAT como
-              dirección de contacto — el registro se ve bien ("REGED") porque el proveedor no valida esa
-              dirección, pero ninguna llamada entrante real va a poder completarse. Compará contra la "IP
-              pública actual" de arriba y corregí la configuración del lado de FreeSWITCH.
+              dirección de contacto — el registro se ve bien («REGED») porque el proveedor no valida esa
+              dirección, pero ninguna llamada entrante real va a poder completarse. Compará contra la «IP
+              pública actual» de arriba y corregí la configuración del lado de FreeSWITCH.
             </Note>
           )}
         </CardBody>
@@ -596,7 +600,7 @@ export default function SettingsPage() {
                 <span className="font-mono">
                   https://{form.sip_ws_url.replace("wss://", "").split(":")[0]}:7443
                 </span>
-                , aceptá la advertencia de "conexión no segura" una vez, y desde ahí el softphone conecta solo. Sin
+                , aceptá la advertencia de «conexión no segura» una vez, y desde ahí el softphone conecta solo. Sin
                 este paso, la conexión falla en silencio sin ningún mensaje de error claro.
               </Note>
             )}
@@ -766,53 +770,6 @@ export default function SettingsPage() {
           </CardBody>
         </Card>
 
-        {infra && (
-        <Card delay={340} className="lg:col-span-2">
-          <CardHeader
-            title="Conector Issabel (ARI)"
-            subtitle="Issabel como motor telefónico externo: NSPBX se conecta como app Stasis para recibir y originar llamadas y streamear el audio por WebSocket"
-          />
-          <CardBody className="space-y-4">
-            <Note tone={form.ari_base_url ? "brand" : "muted"}>
-              {form.ari_base_url
-                ? "El conector ARI está configurado. Las llamadas que Issabel enrute a la app Stasis llegarán al voicebot."
-                : "Vacío = desactivado: NSPBX usa su propio FreeSWITCH. Para conectar Issabel, completá la URL base, las credenciales de ARI y el nombre de la app Stasis que habilite el proveedor."}
-            </Note>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Input
-                label="URL base de ARI"
-                value={form.ari_base_url ?? ""}
-                onChange={(v) => set("ari_base_url", v)}
-                placeholder="http://issabel.proveedor.com:8088"
-                hint="Sin la barra final. El puerto típico de ARI es 8088."
-                mono
-              />
-              <Input
-                label="Nombre de la app Stasis"
-                value={form.ari_app}
-                onChange={(v) => set("ari_app", v)}
-                placeholder="nspbx"
-                hint="La app que Issabel debe habilitar y enrutar hacia este panel."
-                mono
-              />
-              <Input
-                label="Usuario ARI"
-                value={form.ari_user ?? ""}
-                onChange={(v) => set("ari_user", v)}
-                placeholder="nspbx"
-                mono
-              />
-              <Input
-                label="Contraseña ARI"
-                type="password"
-                value={form.ari_password ?? ""}
-                onChange={(v) => set("ari_password", v)}
-                placeholder="••••••••"
-              />
-            </div>
-          </CardBody>
-        </Card>
-        )}
 
         <Card delay={360}>
           <CardHeader
@@ -853,7 +810,7 @@ export default function SettingsPage() {
           />
           <CardBody className="space-y-4">
             <Note tone="muted">
-              No hay una perilla de "% de CPU" o "GB de RAM" real de por medio — eso lo administra Docker,
+              No hay una perilla de «% de CPU» o «GB de RAM» real de por medio — eso lo administra Docker,
               no esta pantalla. Lo que sí controla de verdad cuánto se consume es <strong>cuántas llamadas
               corren a la vez</strong> y <strong>cuánto puede durar cada una</strong>: son los dos factores
               que multiplican el uso real. Mirá el consumo en vivo en el{" "}

@@ -94,6 +94,7 @@ export default function SeguridadPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga datos de la API al montar o al cambiar los filtros
     load();
     // Un ataque en curso cambia la lista cada pocos segundos; sin esto hay
     // que recargar a mano para ver si la defensa está reaccionando.

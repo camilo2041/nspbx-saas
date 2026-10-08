@@ -25,6 +25,10 @@ _ABIERTAS = {
     "/api/csp-report",
     # Wallboard sin usuario: token de solo lectura propio (test_supervision.py).
     "/api/wallboard",
+    # Instalaciones locales: código de activación o token propio (test_instalaciones.py).
+    "/api/licencia/activar",
+    "/api/licencia/latido",
+    "/api/licencia/instalar.sh",
 }
 _ABIERTAS_PREFIJO = (
     # Agente de IA: secreto compartido en cabecera (X-Agent-Secret).

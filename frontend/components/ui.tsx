@@ -611,6 +611,7 @@ export function Modal({
   // aparecía al final de la página (medido: 2181 px abajo, fuera de vista),
   // dejando solo el fondo borroso. Con el portal queda fuera de su alcance.
   const [montado, setMontado] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- el portal necesita document: se monta después de hidratar
   useEffect(() => setMontado(true), []);
 
   const huecoErrores = useCallback((el: HTMLDivElement | null) => {

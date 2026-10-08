@@ -238,7 +238,7 @@ async def test_cargar_numeros_crea_contactos_y_una_lista(cliente, oscar):
     assert marta.nombre == "Marta" and len(filas) == 2 and filas[0].contacto_id == filas[1].contacto_id
 
     listas = (await cliente.get(f"/api/campaigns/{oscar['campaign']}/listas", headers=cab)).json()
-    assert [l["total"] for l in listas] == [2, 1]
+    assert [lista["total"] for lista in listas] == [2, 1]
     r = await cliente.put(f"/api/campaigns/{oscar['campaign']}/listas/{listas[0]['id']}", headers=cab,
                           json={"activa": False, "prioridad": 3})
     assert r.status_code == 200 and r.json()["activa"] is False
@@ -408,7 +408,7 @@ async def test_importar_a_una_campana(cliente, oscar):
     assert r.status_code == 200, r.text
     assert r.json()["campana"]["added"] == 2
     listas = (await cliente.get(f"/api/campaigns/{oscar['campaign']}/listas", headers=cab)).json()
-    octubre = next(l for l in listas if l["nombre"] == "Octubre")
+    octubre = next(lista for lista in listas if lista["nombre"] == "Octubre")
     assert octubre["origen"] == "csv" and octubre["total"] == 2
     async with async_session() as s:
         n = (await s.execute(select(CampaignNumber).where(CampaignNumber.phone == "3005550060"))).scalar_one()

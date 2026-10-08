@@ -19,7 +19,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import permissions
-from app.core.auth import requiere, usuario_actual, verificar_secreto_fs
+from app.core.auth import requiere, verificar_secreto_fs
 from app.core.config import settings
 from app.core.database import get_admin_session, get_session, traer_propio
 from app.models import AiCallUsage, CallLog, Tenant, User

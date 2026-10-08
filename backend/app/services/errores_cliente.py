@@ -39,7 +39,7 @@ def limpiar(texto: str | None, maximo: int) -> str:
 
 def firma(origen: str, mensaje: str, pila: str | None) -> str:
     """Igual para el mismo fallo aunque cambien ids, líneas o números."""
-    primera = next((l.strip() for l in (pila or "").splitlines() if l.strip() and l.strip() != mensaje.strip()), "")
+    primera = next((r.strip() for r in (pila or "").splitlines() if r.strip() and r.strip() != mensaje.strip()), "")
     base = f"{origen}|{_NUMEROS.sub('#', mensaje)}|{_NUMEROS.sub('#', primera)}"
     return hashlib.sha256(base.encode()).hexdigest()
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Badge, Button, Input, Modal } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -37,13 +37,6 @@ export function PruebaHumo({ empresa, onCerrar }: { empresa: { id: number; name:
   const [corriendo, setCorriendo] = useState(false);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (empresa) {
-      setResultado(null);
-      setError("");
-    }
-  }, [empresa]);
 
   const probar = async () => {
     if (!empresa) return;

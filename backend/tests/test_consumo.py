@@ -86,7 +86,7 @@ async def test_csv_de_la_empresa(mundo, cliente):
     lineas = resp.text.strip().splitlines()
     assert lineas[0].startswith("mes,tenant_id,llamadas")
     assert len(lineas) == 4
-    assert all(f",{mundo.alfa.id}," in l for l in lineas[1:])
+    assert all(f",{mundo.alfa.id}," in fila for fila in lineas[1:])
 
 
 async def test_plataforma_ve_todas_y_la_empresa_no_entra(mundo, cliente, mes_con_trafico):

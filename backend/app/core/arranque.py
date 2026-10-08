@@ -74,6 +74,21 @@ def problemas_de_configuracion(cfg: Settings | None = None, auth_secret: str | N
             _clave_de(clave_datos)
         except RuntimeError as e:
             problemas.append(str(e))
+    modo = (cfg.modo_instalacion or "").strip().lower()
+    if modo not in ("nube", "local"):
+        problemas.append(f"MODO_INSTALACION={cfg.modo_instalacion!r} no existe: es «nube» o «local».")
+    elif modo == "local":
+        if not cfg.licencia_clave_publica:
+            problemas.append("Instalación local sin LICENCIA_CLAVE_PUBLICA: no hay con qué verificar la licencia.")
+        if not cfg.central_url.startswith("https://"):
+            problemas.append("Instalación local sin CENTRAL_URL (https://…): no podría renovar su licencia.")
+    if cfg.licencia_clave_privada:
+        from app.services.licencia_firmada import LicenciaInvalida, publica_de
+
+        try:
+            publica_de(cfg.licencia_clave_privada)
+        except LicenciaInvalida as e:
+            problemas.append(str(e))
     if not cfg.fs_xml_secret:
         problemas.append(
             "FS_XML_SECRET no está definida: FreeSWITCH no podría pedir el directorio "

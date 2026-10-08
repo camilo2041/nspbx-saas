@@ -93,3 +93,6 @@ mobile/google-services.json
 
 # Mediciones de scripts/medir-recursos.sh
 recursos-*.csv
+
+# Paquete de instalación: lo arma el workflow de publicación.
+instalador/paquete.tar.gz

@@ -29,7 +29,7 @@ export function AvisosCsp() {
     <Card className="mt-4">
       <CardHeader
         title="Política de contenido (CSP): qué bloquearía"
-        subtitle="Avisos de los navegadores desde el último reinicio del backend. Cuando quede vacía (o solo con extensiones del navegador), la política se puede aplicar."
+        subtitle="Avisos de los navegadores desde el último reinicio del backend. Cuando quede vacía (o solo con extensiones del navegador), la política se puede aplicar con CSP_APLICADA=1 en el .env."
       />
       {avisos.length === 0 ? (
         <EmptyState title="Sin avisos" hint="Ningún navegador reportó algo que la política completa bloquearía." />

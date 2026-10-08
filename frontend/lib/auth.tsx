@@ -85,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     })();
     if (!guardado) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- comprobación inicial de la sesión guardada
       setCargando(false);
       return;
     }

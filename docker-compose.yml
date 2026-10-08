@@ -291,6 +291,14 @@ services:
       # Alternativa cómoda al JSON en una variable: la ruta DENTRO del contenedor del archivo de la
       # cuenta de servicio (se monta abajo desde ./secrets). Ej.: FCM_SERVICE_ACCOUNT_FILE=/run/secrets/fcm.json
       FCM_SERVICE_ACCOUNT_FILE: ${FCM_SERVICE_ACCOUNT_FILE:-}
+      # Central de las instalaciones locales (docs/plan-fase-k.md). Vacías =
+      # esta central no emite licencias.
+      LICENCIA_CLAVE_PRIVADA: ${LICENCIA_CLAVE_PRIVADA:-}
+      LICENCIA_GRACIA_HORAS: ${LICENCIA_GRACIA_HORAS:-72}
+      REGISTRO: ${REGISTRO:-ghcr.io/camilo2041}
+      REGISTRO_USUARIO: ${REGISTRO_USUARIO:-}
+      REGISTRO_TOKEN: ${REGISTRO_TOKEN:-}
+      VERSION_PUBLICADA: ${VERSION_PUBLICADA:-}
     volumes:
       - ./freeswitch/conf:/freeswitch-conf
       - ./freeswitch/sounds:/freeswitch-sounds
@@ -427,7 +435,12 @@ services:
       - nspbx_net
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # 1 = la CSP completa se aplica; vacío = solo reporte (ver
+        # frontend/next.config.ts). Cambiarlo exige reconstruir el panel.
+        CSP_APLICADA: ${CSP_APLICADA:-}
     container_name: nspbx_frontend
     logging: *logging
     security_opt:

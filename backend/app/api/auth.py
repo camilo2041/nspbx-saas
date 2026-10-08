@@ -41,10 +41,11 @@ from app.schemas import (
 from app.services import esl, push, turn
 from app.services.sesiones import revocar_sesiones
 
+from app.services.ajustes import ajustes_de
+
 # Un refresh token recién rotado puede llegar dos veces por una carrera legítima
 # (doble toque, reintento de red); pasado este margen se considera robo.
 REUSO_TOLERANCIA_S = 30
-from app.services.ajustes import ajustes_de
 
 logger = logging.getLogger(__name__)
 
