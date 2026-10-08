@@ -8,6 +8,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# CSP completa aplicada (1) o solo reporte (vacío); ver next.config.ts.
+ARG CSP_APLICADA=""
+ENV CSP_APLICADA=$CSP_APLICADA
 RUN npm run build
 
 FROM node:22-alpine AS runner

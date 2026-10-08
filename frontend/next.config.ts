@@ -13,8 +13,9 @@ import type { NextConfig } from "next";
 //   y al relay TURN, que dependen de cada instalación; aplicarla sin haber
 //   mirado esos avisos en producción podía dejar el softphone mudo.
 //   Los avisos llegan al backend (/api/csp-report) y la plataforma los ve
-//   en Empresas. Cuando esa lista quede vacía, se pasa a
-//   Content-Security-Policy.
+//   en Empresas. Cuando esa lista quede vacía, se aplica poniendo
+//   CSP_APLICADA=1 en el .env y reconstruyendo el panel
+//   (docker compose up -d --build frontend). Se lee al compilar.
 
 const POLITICA_COMPLETA = [
   "default-src 'self'",
@@ -36,6 +37,8 @@ const POLITICA_COMPLETA = [
   "report-uri /api/csp-report",
 ].join("; ");
 
+const CSP_APLICADA = process.env.CSP_APLICADA === "1";
+
 const comunes = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -43,7 +46,7 @@ const comunes = [
   { key: "Permissions-Policy", value: "camera=(), geolocation=(), payment=(), usb=(), microphone=(self)" },
   // Solo tiene efecto por HTTPS (Traefik); por HTTP el navegador lo ignora.
   { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
-  { key: "Content-Security-Policy-Report-Only", value: POLITICA_COMPLETA },
+  { key: CSP_APLICADA ? "Content-Security-Policy" : "Content-Security-Policy-Report-Only", value: POLITICA_COMPLETA },
 ];
 
 const nextConfig: NextConfig = {

@@ -427,7 +427,12 @@ services:
       - nspbx_net
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        # 1 = la CSP completa se aplica; vacío = solo reporte (ver
+        # frontend/next.config.ts). Cambiarlo exige reconstruir el panel.
+        CSP_APLICADA: ${CSP_APLICADA:-}
     container_name: nspbx_frontend
     logging: *logging
     security_opt:
