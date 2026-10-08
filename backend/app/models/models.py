@@ -1661,6 +1661,53 @@ class PreguntaSinGuia(Base):
     ultima_vez: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
+class Instalacion(Base):
+    """El servidor de un cliente que corre el sistema completo con UNA empresa
+    nuestra (docs/plan-fase-k.md). Vive en la CENTRAL y es de la plataforma:
+    sin RLS. La empresa (`empresa_id`) es la ficha comercial: su nombre, tipo,
+    módulos y licencia se mandan firmados en cada latido.
+
+    El código de activación y el token se guardan como hash: ni la central
+    puede volver a mostrarlos."""
+
+    __tablename__ = "instalaciones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    nombre: Mapped[str] = mapped_column(String(80))
+    # pendiente (código sin usar) | activa | suspendida | revocada
+    estado: Mapped[str] = mapped_column(String(12), default="pendiente")
+    codigo_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    codigo_vence: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    activada_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ultimo_latido: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Resumen de uso del último latido: solo cantidades (extensiones, minutos…).
+    uso: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LicenciaLocal(Base):
+    """En una instalación LOCAL: la última licencia firmada que mandó la
+    central y cómo va el contacto con ella. Una sola fila (id = 1). Sin RLS:
+    la lee el arranque y el latido con la sesión del dueño."""
+
+    __tablename__ = "licencia_local"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instalacion_id: Mapped[int] = mapped_column(Integer)
+    token: Mapped[str] = mapped_column(TextoCifrado())
+    # El documento tal como vino (JSON) y su firma (base64): se vuelven a
+    # verificar antes de usarse, nunca se confía en lo ya aplicado.
+    documento: Mapped[str] = mapped_column(Text)
+    firma: Mapped[str] = mapped_column(String(200))
+    recibida_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ultimo_intento_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ultimo_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
 class ErrorCliente(Base):
     """Un error del panel (navegador) o de la app, agrupado por firma: el
     mismo fallo en cien navegadores es una fila con veces=100

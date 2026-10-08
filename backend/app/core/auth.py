@@ -72,6 +72,10 @@ _ABIERTAS = (
     # Wallboard de una TV sin usuario: token de solo lectura en la cabecera
     # X-Wallboard-Token, que vence y se revoca (ver app/api/supervision.py).
     "/api/wallboard",
+    # Servidores de los clientes (instalación local): código de activación o
+    # token propio, con tope por IP (ver app/api/instalaciones.py).
+    "/api/licencia/activar",
+    "/api/licencia/latido",
 )
 
 # Lo único que puede hacer una sesión de un rol que exige MFA y todavía no

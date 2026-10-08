@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text, update
 
-from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, errores as errores_api, v1 as api_v1, assistant, auth as auth_api, buzon as buzon_api, calidad as calidad_api, festivos as festivos_api, calls as calls_api, llamada as llamada_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, nodos as nodos_api, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
+from app.api import ai_usage, appointments as appointments_api, claves_api as claves_api_api, consumo as consumo_api, crm as crm_api, agente as agente_api, contact_center as contact_center_api, supervision as supervision_api, reportes as reportes_api, integraciones as integraciones_api, csp as csp_api, errores as errores_api, instalaciones as instalaciones_api, v1 as api_v1, assistant, auth as auth_api, buzon as buzon_api, calidad as calidad_api, festivos as festivos_api, calls as calls_api, llamada as llamada_api, campaigns, cobranza, extensions, fs_push, inbound_routes, logs_ws, nodos as nodos_api, tiempo_real_ws, outbound_routes, plataforma as plataforma_api, privacidad as privacidad_api, role_permissions, security as security_api, queues as queues_api, settings as settings_api, system, tenants as tenants_api, trunks, users as users_api, voicebots, webcall as webcall_api
 from app.core import cifrado, permissions
 from app.core.arranque import exigir_configuracion_segura
 from app.core.auth import escribir_requiere, licencia_operativa, requiere, requiere_modulo, sesion_obligatoria
@@ -902,6 +902,12 @@ app.include_router(
     nodos_api.router,
     dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
 )
+# Instalaciones locales con licencia de la central (docs/plan-fase-k.md).
+app.include_router(
+    instalaciones_api.router,
+    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
+)
+app.include_router(instalaciones_api.publico)  # abierta: la llaman los servidores de los clientes, con su token
 app.include_router(appointments_api.router)  # permisos por endpoint: el agente de IA entra acá
 app.include_router(calls_api.router)  # permisos por endpoint: /fs/cdr lo llama FreeSWITCH
 app.include_router(buzon_api.router)  # permisos por endpoint (los mismos de ver llamadas)

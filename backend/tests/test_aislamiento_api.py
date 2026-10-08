@@ -56,6 +56,11 @@ _RECURSO_POR_PARAMETRO = {
 # Rutas con parámetro que NO son recursos de una empresa. Cada una dice por
 # qué y dónde se prueba en cambio.
 _FUERA_DE_ESTA_PRUEBA = {
+    "/api/plataforma/instalaciones/{inst_id}": "solo plataforma — test_instalaciones.py",
+    "/api/plataforma/instalaciones/{inst_id}/codigo": "solo plataforma — test_instalaciones.py",
+    "/api/plataforma/instalaciones/{inst_id}/suspender": "solo plataforma — test_instalaciones.py",
+    "/api/plataforma/instalaciones/{inst_id}/reactivar": "solo plataforma — test_instalaciones.py",
+    "/api/plataforma/instalaciones/{inst_id}/revocar": "solo plataforma — test_instalaciones.py",
     "/api/plataforma/nodos/{nodo_id}": "solo plataforma — test_nodos.py",
     "/api/plataforma/nodos/{nodo_id}/probar": "solo plataforma — test_nodos.py",
     "/api/plataforma/nodos/empresas/{tenant_id}": "solo plataforma — test_nodos.py",

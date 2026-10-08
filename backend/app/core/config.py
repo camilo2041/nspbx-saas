@@ -116,6 +116,21 @@ class Settings(BaseSettings):
     # sin importar en qué zona corra el contenedor. Ver app/core/clock.py.
     timezone: str = "America/Bogota"
 
+    # --- Instalación local con licencia de la central (docs/plan-fase-k.md) ---
+    # "nube" = esta es la central (o una instalación normal). "local" = el
+    # servidor de un cliente: una sola empresa, cuya licencia llega firmada
+    # desde la central.
+    modo_instalacion: str = "nube"
+    # Central: clave PRIVADA Ed25519 (32 bytes en base64) con la que se
+    # firman las licencias. Vacía = la central no emite licencias.
+    licencia_clave_privada: str = ""
+    # Central: horas que una licencia sigue valiendo sin un latido nuevo.
+    licencia_gracia_horas: int = 72
+    # Local: clave PÚBLICA con la que se verifican (va dentro de la imagen).
+    licencia_clave_publica: str = ""
+    # Local: dirección de la central (https://pbx.ejemplo.com).
+    central_url: str = ""
+
     sip_ws_url: str = "wss://localhost:7443"
 
     # URL que usa mod_audio_fork (desde el contenedor de FreeSWITCH) para
