@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import get_admin_session
+from app.core.database import async_session, get_admin_session
 from app.core.limitador import LimiteIntentos, ip_cliente, limitar_uso
 from app.models import Instalacion, Tenant
 from app.services import licencia_firmada as lf
@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/plataforma/instalaciones", tags=["plataforma"])
 publico = APIRouter(prefix="/api/licencia", tags=["licencia"])
+local = APIRouter(prefix="/api/instalacion", tags=["licencia"])
 
 _POR_IP_ACTIVAR = LimiteIntentos(maximo=10, ventana=600, bloqueo=900)
 _POR_IP_LATIDO = LimiteIntentos(maximo=60, ventana=600, bloqueo=600)
@@ -244,3 +245,18 @@ async def latido(payload: LatidoIn, request: Request, session: AsyncSession = De
     firmada = await emitir(session, inst)
     await session.commit()
     return firmada
+
+
+# --- En la instalación local ----------------------------------------------------------
+
+
+@local.get("/licencia")
+async def licencia_de_esta_instalacion():
+    """Para el aviso del panel: cualquiera con sesión lo ve (si no hay
+    conexión con la central, todos tienen que saber por qué se detuvo)."""
+    from app.services import licencia_local
+
+    if not licencia_local.es_local():
+        return {"modo": "nube"}
+    async with async_session() as session:
+        return await licencia_local.estado(session)

@@ -31,7 +31,7 @@ from app.core.security import hash_password
 from app.models import CampaignNumber, NodoFreeswitch, Queue, Tenant, Trunk, User
 
 logger = logging.getLogger(__name__)
-from app.services import agentes, calidad_auto, esl, integraciones, musica_espera, predictivo, reportes_programados, supervision, tiempo_real, vigia_colas, voice_prompts, xml_endpoints
+from app.services import agentes, calidad_auto, esl, licencia_local, integraciones, musica_espera, predictivo, reportes_programados, supervision, tiempo_real, vigia_colas, voice_prompts, xml_endpoints
 from app.services.gateways import sync_gateways
 from app.services.bus import bus
 from app.services.lider import lider
@@ -615,6 +615,10 @@ async def lifespan(app: FastAPI):
     # aislamiento, en producción no se arranca (ver core/arranque.py).
     exigir_configuracion_segura()
     await migrar()
+    # Instalación local: la empresa y su licencia llegan firmadas de la
+    # central (services/licencia_local.py). Antes de sembrar los ajustes,
+    # que toman el dominio SIP de la empresa.
+    await licencia_local.al_arrancar()
     async with async_session() as session:
         # Ajustes y ESL por empresa. Los ajustes se siembran desde cada
         # tenant (fs_domain sale de Tenant.sip_domain) y la config de
@@ -657,7 +661,10 @@ async def lifespan(app: FastAPI):
         await apply_queues(queues_rows, dominios)
         await session.commit()
         await _asegurar_admin(session)
-        await _asegurar_plataforma(session)
+        # En una instalación local no hay plataforma: las empresas y sus
+        # licencias se administran desde la central.
+        if not licencia_local.es_local():
+            await _asegurar_plataforma(session)
 
     async def _musica_de_espera() -> None:
         """Se sintetiza una sola vez (unos segundos): en segundo plano para no
@@ -713,8 +720,10 @@ async def lifespan(app: FastAPI):
         reportes_programados.programador.start()
         vigia_colas.vigia.start()
         calidad_auto.muestreo.start()
+        licencia_local.latido.start()
 
     async def descender() -> None:
+        await licencia_local.latido.stop()
         await vigia_colas.vigia.stop()
         await calidad_auto.muestreo.stop()
         await reportes_programados.programador.stop()
@@ -886,10 +895,17 @@ app.include_router(
     ai_usage.router,
     dependencies=[Depends(requiere(permissions.CONSUMO_IA_VER)), *_VOICEBOT],
 )
+def _solo_en_la_nube() -> None:
+    """En una instalación local las empresas, sus licencias y los servidores
+    se administran desde la central (docs/plan-fase-k.md)."""
+    if licencia_local.es_local():
+        raise HTTPException(status_code=403, detail="En esta instalación, la empresa y su licencia las administra la central")
+
+
 # Empresas: SOLO el rol de plataforma (usa la sesión del dueño).
 app.include_router(
     tenants_api.router,
-    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
+    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR)), Depends(_solo_en_la_nube)],
 )
 # Controles de emergencia de toda la plataforma (interruptor global de
 # salientes). Mismo permiso y misma sesión del dueño.
@@ -900,14 +916,15 @@ app.include_router(
 # Servidores FreeSWITCH y en cuál vive cada empresa (docs/escala.md §4).
 app.include_router(
     nodos_api.router,
-    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
+    dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR)), Depends(_solo_en_la_nube)],
 )
 # Instalaciones locales con licencia de la central (docs/plan-fase-k.md).
 app.include_router(
     instalaciones_api.router,
     dependencies=[Depends(requiere(permissions.EMPRESAS_GESTIONAR))],
 )
-app.include_router(instalaciones_api.publico)  # abierta: la llaman los servidores de los clientes, con su token
+app.include_router(instalaciones_api.publico)
+app.include_router(instalaciones_api.local)  # con sesión, cualquier rol: el estado de la licencia de esta instalación  # abierta: la llaman los servidores de los clientes, con su token
 app.include_router(appointments_api.router)  # permisos por endpoint: el agente de IA entra acá
 app.include_router(calls_api.router)  # permisos por endpoint: /fs/cdr lo llama FreeSWITCH
 app.include_router(buzon_api.router)  # permisos por endpoint (los mismos de ver llamadas)

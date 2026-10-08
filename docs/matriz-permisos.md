@@ -164,6 +164,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | DELETE | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | PUT | `/api/inbound-routes/{route_id}` | `telefonia:gestionar` | ✓ | ✗ | ✗ | ✗ |
+| GET | `/api/instalacion/licencia` | sesión (sesión) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/integraciones/entregas/{entrega_id}/reintentar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/integraciones/eventos` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | GET | `/api/integraciones/webhooks` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |

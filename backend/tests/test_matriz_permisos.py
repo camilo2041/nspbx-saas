@@ -32,6 +32,7 @@ _SIN_PERMISO = {
     "/api/assistant/chat": "asistente: solo consulta, y responde con los datos que el rol puede ver",
     "/api/assistant/sin-guia": "asistente: anota una pregunta de «cómo hago» sin guía (sin datos de la empresa)",
     "/api/csp-report": "avisos de CSP del navegador, sin sesión",
+    "/api/instalacion/licencia": "sesión: cualquier usuario ve el estado de la licencia de su instalación (test_instalaciones.py)",
     "/api/licencia/": "servidores de los clientes: código de activación o token propio, tope por IP (test_instalaciones.py)",
     "/api/errores": "con sesión, cualquier rol: los errores de su propio panel o app (test_fase_j.py)",
     "/api/wallboard": "TV sin usuario: token de solo lectura que vence y se revoca (test_supervision.py)",

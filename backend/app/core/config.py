@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     licencia_clave_publica: str = ""
     # Local: dirección de la central (https://pbx.ejemplo.com).
     central_url: str = ""
+    # Local: dominio SIP de la empresa (el del panel o la IP del servidor).
+    # Lo fija el instalador; vacío = no se toca.
+    dominio_local: str = ""
 
     sip_ws_url: str = "wss://localhost:7443"
 
