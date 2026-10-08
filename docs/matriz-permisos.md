@@ -175,6 +175,7 @@ Son los permisos por omisión de cada rol; cada empresa puede ajustarlos en Role
 | POST | `/api/integraciones/webhooks/{webhook_id}/probar` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/integraciones/webhooks/{webhook_id}/rotar-secreto` | `ajustes:gestionar` | ✓ | ✗ | ✗ | ✗ |
 | POST | `/api/licencia/activar` | sesión (servidores de los clientes) | ✓ | ✓ | ✓ | ✓ |
+| POST | `/api/licencia/certificado` | sesión (servidores de los clientes) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/licencia/instalar.sh` | sesión (servidores de los clientes) | ✓ | ✓ | ✓ | ✓ |
 | POST | `/api/licencia/latido` | sesión (servidores de los clientes) | ✓ | ✓ | ✓ | ✓ |
 | GET | `/api/llamada/destinos` | `softphone:usar` | ✓ | ✓ | ✗ | ✓ |

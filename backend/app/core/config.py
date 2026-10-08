@@ -133,6 +133,15 @@ class Settings(BaseSettings):
     registro_usuario: str = ""
     registro_token: str = ""
     version_publicada: str = ""
+    # Central: certificado real para instalaciones en red local. Cada una
+    # recibe <empresa>-<id>.<DOMINIO_LOCAL_SUFIJO>, con su A en Cloudflare y
+    # un certificado de Let's Encrypt por DNS-01. El token solo necesita
+    # editar el DNS de esa zona. Vacíos = solo certificado propio.
+    dns_cloudflare_token: str = ""
+    dns_cloudflare_zona_id: str = ""
+    dominio_local_sufijo: str = ""
+    acme_directorio: str = "https://acme-v02.api.letsencrypt.org/directory"
+    acme_correo: str = ""
     # Local: clave PÚBLICA con la que se verifican (va dentro de la imagen).
     licencia_clave_publica: str = ""
     # Local: dirección de la central (https://pbx.ejemplo.com).
@@ -140,6 +149,13 @@ class Settings(BaseSettings):
     # Local: dominio SIP de la empresa (el del panel o la IP del servidor).
     # Lo fija el instalador; vacío = no se toca.
     dominio_local: str = ""
+    # Local: IP de este servidor en la red del cliente (la escribe el
+    # instalador); se informa a la central para el registro A del subdominio.
+    ip_local: str = ""
+    # Local: dónde lee Traefik el certificado y su configuración (montados
+    # desde /opt/nspbx/certs y /opt/nspbx/traefik).
+    certs_dir: str = "/certs-traefik"
+    traefik_dir: str = "/traefik-dinamico"
 
     sip_ws_url: str = "wss://localhost:7443"
 

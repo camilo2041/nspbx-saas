@@ -22,11 +22,16 @@ interface Instalacion {
   version: string | null;
   ip: string | null;
   uso: Record<string, number>;
+  subdominio: string | null;
+  ip_local: string | null;
+  cert_vence: string | null;
+  cert_error: string | null;
   codigo?: string;
 }
 
 interface Listado {
   central_lista: boolean;
+  dns_listo: boolean;
   gracia_horas: number;
   instalaciones: Instalacion[];
 }
@@ -138,6 +143,15 @@ export function InstalacionesLocales({ empresas }: { empresas: { id: number; nam
           </Note>
         </div>
       )}
+      {datos.central_lista && !datos.dns_listo && (
+        <div className="px-4 pt-3">
+          <Note tone="muted">
+            Las instalaciones «solo red local» usan un certificado propio (el navegador pide aceptarlo una vez). Para darles una
+            dirección segura sin advertencias, configura <span className="font-mono">DNS_CLOUDFLARE_TOKEN</span>,{" "}
+            <span className="font-mono">DNS_CLOUDFLARE_ZONA_ID</span> y <span className="font-mono">DOMINIO_LOCAL_SUFIJO</span> en el .env.
+          </Note>
+        </div>
+      )}
       {error && (
         <div className="px-4 pt-3">
           <ErrorBanner message={error} onClose={() => setError("")} />
@@ -146,7 +160,7 @@ export function InstalacionesLocales({ empresas }: { empresas: { id: number; nam
       {datos.instalaciones.length === 0 ? (
         <EmptyState title="Sin instalaciones locales" hint="Crea una para darle a un cliente su código de activación." />
       ) : (
-        <Table head={["Instalación", "Estado", "Contacto", "Uso", ""]}>
+        <Table head={["Instalación", "Estado", "Contacto", "Red local", "Uso", ""]}>
           {datos.instalaciones.map((i) => (
             <Tr key={i.id}>
               <Td strong>
@@ -175,6 +189,23 @@ export function InstalacionesLocales({ empresas }: { empresas: { id: number; nam
                   </>
                 ) : (
                   <span className="text-xs text-faint">Sin activar</span>
+                )}
+              </Td>
+              <Td>
+                {i.subdominio && i.cert_vence ? (
+                  <>
+                    <span className="break-all font-mono text-xs text-fg">{i.subdominio}</span>
+                    <div className="mt-0.5 text-[11px] text-faint">
+                      {i.ip_local} · certificado hasta {new Date(i.cert_vence + "Z").toLocaleDateString()}
+                    </div>
+                  </>
+                ) : (
+                  <span className="text-xs text-faint">—</span>
+                )}
+                {i.cert_error && (
+                  <div className="mt-0.5 text-[11px] text-danger-text" title={i.cert_error}>
+                    Certificado: {i.cert_error.slice(0, 80)}
+                  </div>
                 )}
               </Td>
               <Td muted>

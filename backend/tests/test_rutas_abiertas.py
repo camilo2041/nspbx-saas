@@ -29,6 +29,7 @@ _ABIERTAS = {
     "/api/licencia/activar",
     "/api/licencia/latido",
     "/api/licencia/instalar.sh",
+    "/api/licencia/certificado",
 }
 _ABIERTAS_PREFIJO = (
     # Agente de IA: secreto compartido en cabecera (X-Agent-Secret).

@@ -299,6 +299,12 @@ services:
       REGISTRO_USUARIO: ${REGISTRO_USUARIO:-}
       REGISTRO_TOKEN: ${REGISTRO_TOKEN:-}
       VERSION_PUBLICADA: ${VERSION_PUBLICADA:-}
+      # Certificado real para las instalaciones en red local (subdominio
+      # nuestro + Let's Encrypt por DNS). Vacías = certificado propio.
+      DNS_CLOUDFLARE_TOKEN: ${DNS_CLOUDFLARE_TOKEN:-}
+      DNS_CLOUDFLARE_ZONA_ID: ${DNS_CLOUDFLARE_ZONA_ID:-}
+      DOMINIO_LOCAL_SUFIJO: ${DOMINIO_LOCAL_SUFIJO:-}
+      ACME_CORREO: ${ACME_CORREO:-}
     volumes:
       - ./freeswitch/conf:/freeswitch-conf
       - ./freeswitch/sounds:/freeswitch-sounds

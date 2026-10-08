@@ -79,6 +79,7 @@ firma, el latido y las imágenes cerradas impiden el uso casual y dejan rastro
 | K1. Central | `api/instalaciones.py`, `services/licencia_firmada.py`, revisión 0039, Plataforma › Empresas › Instalaciones locales | Alta con código `NSPBX-XXXX-XXXX-XXXX` (solo su hash, vence en 7 días, se dicta sin confundir letras). Nuevo código (invalida el token anterior al usarse), suspender, reactivar, revocar, borrar. `activar` y `latido` abiertos con tope por IP. La central sirve el instalador en `/api/licencia/instalar.sh` con su dirección puesta. |
 | K2. Modo local | `services/licencia_local.py`, `app/cli/licencia.py`, Ajustes › Licencia, franja de aviso | Importa `secrets/licencia.json` al arrancar; sin licencia válida, suspendida. Latido cada hora; sin central, reaplica la guardada (deshace cambios a mano). No acepta licencias viejas, de otra instalación o con otra firma. Sin usuario plataforma; empresas y servidores, 403. El arranque exige clave pública y `CENTRAL_URL`. |
 | K3. Instalador | `backend/app/recursos/instalar.sh` (enlazado en `instalador/`), `instalador/nspbx`, `instalador/docker-compose.instalacion.yml`, `.github/workflows/publicar.yml` | Asistente con pantallas, revisión del equipo, activación, dominio o red local, barra de progreso y pantalla final; retoma si se corta. Hoja de recuperación con la clave de cifrado. Comando `nspbx` para el día a día. El workflow publica las imágenes (con la clave pública y la versión) y el paquete de instalación en ghcr.io. |
+| K5. Red local con certificado real | `services/certificados_locales.py`, `services/acme.py`, `services/dns_cloudflare.py`, `POST /api/licencia/certificado`, revisión 0040 | En «solo red local», cada instalación recibe `<empresa>-<id>.<DOMINIO_LOCAL_SUFIJO>` apuntando a su IP privada. La clave privada se genera en el servidor del cliente y nunca sale; la central publica el desafío DNS y saca el certificado de Let's Encrypt. Se renueva 30 días antes y llega en el latido; si cambia la IP, el latido corrige el registro. Solo IP privadas (10/8, 172.16/12, 192.168/16). Sin DNS configurado, sigue el certificado propio. Cliente ACME probado contra Pebble. |
 | K4. Panel y pruebas | `components/instalaciones-locales.tsx`, `components/licencia-local.tsx`, `tests/test_instalaciones.py` | Firma, código, activación, latido, suspensión, revocación, reinstalación, gracia, licencias alteradas o viejas, arranque. |
 
 ## Para desplegar
@@ -94,6 +95,20 @@ firma, el latido y las imágenes cerradas impiden el uso casual y dejan rastro
    `REGISTRO_TOKEN` con un token de GitHub de solo lectura de paquetes
    (`read:packages`). Si los paquetes de ghcr.io se hacen públicos, se dejan vacíos.
 5. Reiniciar el backend de la central.
+
+**Red local sin advertencias (opcional, recomendado):**
+
+1. El DNS del dominio en Cloudflare. Un token con permiso **Zone › DNS › Edit**
+   solo para esa zona, y el ID de la zona (página de resumen en Cloudflare).
+2. En el `.env` de la central: `DNS_CLOUDFLARE_TOKEN`, `DNS_CLOUDFLARE_ZONA_ID`,
+   `DOMINIO_LOCAL_SUFIJO` (por ejemplo `local.nspbxdevelop.com`) y `ACME_CORREO`.
+3. Límite de Let's Encrypt: 50 certificados nuevos por semana para todo el
+   dominio (las renovaciones no cuentan). Alcanza de sobra para instalar
+   clientes; si algún día no, se pide un aumento o se usa otro dominio.
+4. Algunos routers bloquean nombres públicos que apuntan a IP privadas
+   («protección contra DNS rebinding»). El instalador lo detecta y lo avisa
+   en la pantalla final: se agrega una excepción para el sufijo en el router
+   o se entra por la IP mientras tanto.
 
 **Por cada cliente:**
 

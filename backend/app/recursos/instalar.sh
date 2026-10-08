@@ -160,6 +160,9 @@ PLAN=$(json 'json.loads(d["documento"])["licencia"]["plan"]' < "$ACTIVACION")
 VENCE=$(json '(json.loads(d["documento"])["licencia"].get("expires_at") or "sin vencimiento")[:10]' < "$ACTIVACION")
 VERSION=$(json 'd["descarga"]["version"]' < "$ACTIVACION")
 REGISTRO=$(json 'd["descarga"]["registro"]' < "$ACTIVACION")
+# Dirección segura para red local (services/certificados_locales.py en la
+# central). Vacía = esa central no la ofrece: red local con certificado propio.
+SUBDOMINIO=$(json 'd.get("subdominio") or ""' < "$ACTIVACION")
 [ -n "$VERSION" ] || morir "La central todavía no tiene una versión publicada para instalar. Avisa a tu proveedor."
 whiptail --title "$TITULO · Activación" --yes-button "Es correcto" --no-button "Salir" --yesno "\
 Código aceptado. Vas a instalar:\n
@@ -172,11 +175,13 @@ Código aceptado. Vas a instalar:\n
 
 IP_PUB=$(curl -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)
 IP_LAN=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')
+ETIQUETA_LOCAL="Solo dentro de esta red, por la IP ${IP_LAN:-local}"
+[ -n "$SUBDOMINIO" ] && ETIQUETA_LOCAL="Solo dentro de esta red, con dirección segura (sin dominio propio)"
 MODO=$(leido modo)
 if [ -z "$MODO" ]; then
   MODO=$(whiptail --title "$TITULO · Acceso" --menu "¿Cómo van a entrar al panel y los teléfonos?" 16 76 2 \
     "dominio" "Con un dominio, desde cualquier lugar (recomendado)" \
-    "local"   "Solo dentro de esta red, por la IP ${IP_LAN:-local}" 3>&1 1>&2 2>&3) || exit 0
+    "local"   "$ETIQUETA_LOCAL" 3>&1 1>&2 2>&3) || exit 0
 fi
 if [ "$MODO" = "dominio" ]; then
   HOST=$(leido host)
@@ -197,14 +202,21 @@ Si usas Cloudflare, apaga el proxy (nube gris) para este registro." 14 72 || { H
   CORREO=$(leido correo)
   [ -n "$CORREO" ] || CORREO=$(whiptail --title "$TITULO · Certificado" --inputbox "Correo para el certificado de seguridad (Let's Encrypt avisa ahí si hay problemas al renovarlo):" 11 70 3>&1 1>&2 2>&3) || exit 0
 else
-  HOST="$IP_LAN"; CORREO=""
-  [ -n "$HOST" ] || morir "No pude detectar la IP de este servidor en la red local."
+  CORREO=""
+  [ -n "$IP_LAN" ] || morir "No pude detectar la IP de este servidor en la red local."
+  case "$IP_LAN" in
+    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) ;;
+    *) SUBDOMINIO="" ;;  # la central solo publica IP privadas
+  esac
+  HOST="${SUBDOMINIO:-$IP_LAN}"
 fi
 guardar modo "$MODO"; guardar host "$HOST"; guardar correo "$CORREO"
 
 # --- 5. Resumen --------------------------------------------------------------------------
 
-if [ "$MODO" = "dominio" ]; then ACCESO="https://$HOST (certificado de Let's Encrypt)"; else ACCESO="https://$HOST (solo en esta red, certificado propio)"; fi
+if [ "$MODO" = "dominio" ]; then ACCESO="https://$HOST (certificado de Let's Encrypt)"
+elif [ -n "$SUBDOMINIO" ]; then ACCESO="https://$HOST (solo en esta red, $IP_LAN)"
+else ACCESO="https://$HOST (solo en esta red, certificado propio)"; fi
 whiptail --title "$TITULO · Resumen" --yes-button "Instalar" --no-button "Salir" --yesno "\
 Todo listo. Se va a instalar:\n
     Empresa:     $EMPRESA ($PLAN)
@@ -265,8 +277,12 @@ paso_configurar() {
       echo "ACME_EMAIL=$CORREO"
       echo "TZ=$(timedatectl show -p Timezone --value 2>/dev/null || echo America/Bogota)"
     } >> .env
-    # En red local no hay relay de audio público.
-    [ "$MODO" = "local" ] && sed -i 's/^TURN_HOST=.*/TURN_HOST=/' .env
+    # En red local no hay relay de audio público, y Traefik no pide
+    # certificados por HTTP (nadie de afuera llega): usa el de certs/.
+    if [ "$MODO" = "local" ]; then
+      sed -i -e 's/^TURN_HOST=.*/TURN_HOST=/' -e 's/^ACME_RESOLVER=.*/ACME_RESOLVER=/' .env
+      echo "IP_LOCAL=$IP_LAN" >> .env
+    fi
   fi
   # La licencia que importa el backend al arrancar (services/licencia_local.py).
   mkdir -p secrets
@@ -287,11 +303,41 @@ paso_configurar() {
   chmod 600 RECUPERACION.txt
 }
 
+# Red local con dirección segura: la clave se genera AQUÍ y nunca sale; a la
+# central solo va el CSR. Ella publica el nombre y saca el certificado de
+# Let's Encrypt por DNS (tarda hasta un par de minutos).
+certificado_real() {
+  local token resp
+  token=$(json 'd["token"]' < "$ACTIVACION")
+  [ -f certs/panel.key ] || openssl ecparam -name prime256v1 -genkey -noout -out certs/panel.key || return 1
+  chmod 600 certs/panel.key
+  openssl req -new -key certs/panel.key -subj "/CN=$SUBDOMINIO" -addext "subjectAltName=DNS:$SUBDOMINIO" -out certs/panel.csr || return 1
+  resp=$(python3 -c 'import json,sys; print(json.dumps({"ip_local": sys.argv[1], "csr": open(sys.argv[2]).read()}))' "$IP_LAN" certs/panel.csr \
+    | curl -sS --max-time 300 -H 'Content-Type: application/json' -H "Authorization: Bearer $token" \
+        -w '\n%{http_code}' -d @- "$CENTRAL/api/licencia/certificado") || return 1
+  if [ "$(printf '%s' "$resp" | tail -1)" != "200" ]; then
+    echo "La central no pudo emitir el certificado: $(printf '%s' "$resp" | sed '$d')"
+    return 1
+  fi
+  printf '%s' "$resp" | sed '$d' | json 'd["cadena"]' > certs/panel.crt && [ -s certs/panel.crt ]
+}
+
 paso_certificado() {
   cd "$DIR" && mkdir -p traefik certs letsencrypt && chmod 700 letsencrypt
   if [ "$MODO" = "local" ] && [ ! -f certs/panel.crt ]; then
-    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$HOST" \
-      -addext "subjectAltName=IP:$HOST" -keyout certs/panel.key -out certs/panel.crt || return 1
+    if [ -n "$SUBDOMINIO" ] && certificado_real; then
+      guardar certificado real
+      # Algunos routers bloquean nombres públicos que apuntan a IP privadas
+      # («protección contra DNS rebinding»): se avisa al final.
+      sleep 5
+      [ "$(getent ahostsv4 "$SUBDOMINIO" | awk 'NR==1 {print $1}')" = "$IP_LAN" ] || guardar dns_bloqueado si
+    else
+      [ -n "$SUBDOMINIO" ] && echo "Sin certificado real: se usa uno propio para seguir."
+      rm -f certs/panel.crt certs/panel.csr
+      openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$HOST" \
+        -addext "subjectAltName=IP:$IP_LAN${SUBDOMINIO:+,DNS:$SUBDOMINIO}" -keyout certs/panel.key -out certs/panel.crt || return 1
+      guardar certificado propio
+    fi
     chmod 600 certs/panel.key
     cat > traefik/certificado.yml <<EOC
 tls:
@@ -352,7 +398,12 @@ FALLO=$(cat "$ESTADO/fallo" 2>/dev/null); rm -f "$ESTADO/fallo"
 
 registrar "Instalación terminada"
 NOTA_LOCAL=""
-[ "$MODO" = "local" ] && NOTA_LOCAL="\nEl navegador avisará que el certificado es propio: es esperado en una\nred local. Acéptalo una vez en cada equipo."
+if [ "$MODO" = "local" ] && [ "$(leido certificado)" = "propio" ]; then
+  NOTA_LOCAL="\nEl navegador avisará que el certificado es propio: es esperado en una\nred local. Acéptalo una vez en cada equipo."
+elif [ "$MODO" = "local" ]; then
+  NOTA_LOCAL="\nFunciona solo dentro de esta red, con certificado de seguridad real."
+  [ "$(leido dns_bloqueado)" = "si" ] && NOTA_LOCAL="$NOTA_LOCAL\n¡Ojo! El DNS de esta red no resuelve $HOST: el router tiene\n«protección contra DNS rebinding». Agrega una excepción para\n${HOST#*.} o usa https://$IP_LAN mientras tanto."
+fi
 whiptail --title "$TITULO · ¡Listo!" --msgbox "\
 NSPBX quedó instalado y funcionando.\n
     Panel:        https://$HOST
