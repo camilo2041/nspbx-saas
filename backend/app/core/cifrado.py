@@ -152,6 +152,7 @@ COLUMNAS = [
     ("campaigns", "crm_secreto"),
     ("nodos_freeswitch", "esl_password"),
     ("licencia_local", "token"),
+    ("acme_cuenta", "clave"),
 ]
 
 

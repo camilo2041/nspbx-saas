@@ -25,6 +25,7 @@ from app.core.config import settings
 from app.core.database import async_session, get_admin_session
 from app.core.limitador import LimiteIntentos, ip_cliente, limitar_uso
 from app.models import Instalacion, Tenant
+from app.services import certificados_locales
 from app.services import licencia_firmada as lf
 from app.services import licensing
 
@@ -70,6 +71,10 @@ def _salida(inst: Instalacion, empresa: Tenant | None) -> dict:
         "ip": inst.ip,
         "uso": inst.uso or {},
         "created_at": inst.created_at,
+        "subdominio": inst.subdominio,
+        "ip_local": inst.ip_local,
+        "cert_vence": inst.cert_vence,
+        "cert_error": inst.cert_error,
     }
 
 
@@ -95,6 +100,8 @@ async def listar(session: AsyncSession = Depends(get_admin_session)):
     return {
         # Sin clave privada la central no puede emitir licencias: el panel lo avisa.
         "central_lista": bool(settings.licencia_clave_privada),
+        # Sin DNS configurado, las de red local usan certificado propio.
+        "dns_listo": certificados_locales.disponible(),
         "gracia_horas": settings.licencia_gracia_horas,
         "instalaciones": [_salida(i, t) for i, t in filas],
     }
@@ -160,7 +167,9 @@ async def revocar(inst_id: int, session: AsyncSession = Depends(get_admin_sessio
     """Para siempre. Conserva el token a propósito: así su próximo latido
     recibe la licencia suspendida en vez de quedarse con la última buena
     hasta que venza la gracia."""
-    return await _cambiar_estado(session, inst_id, ("pendiente", "activa", "suspendida"), "revocada")
+    salida = await _cambiar_estado(session, inst_id, ("pendiente", "activa", "suspendida"), "revocada")
+    await certificados_locales.retirar(await _traer(session, inst_id))
+    return salida
 
 
 @router.delete("/{inst_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -169,6 +178,7 @@ async def borrar(inst_id: int, session: AsyncSession = Depends(get_admin_session
     inst = await _traer(session, inst_id)
     if inst.estado not in ("pendiente", "revocada"):
         raise HTTPException(status_code=400, detail="Primero revócala: una instalación en uso no se borra")
+    await certificados_locales.retirar(inst)
     await session.delete(inst)
     await session.commit()
 
@@ -185,6 +195,15 @@ class LatidoIn(BaseModel):
     version: str | None = Field(default=None, max_length=40)
     # Solo cantidades: {"extensiones": 12, "minutos_salientes_mes": 3400, …}.
     uso: dict[str, int] = Field(default_factory=dict)
+    # Red local con certificado real: su IP (por si cambió) y hasta cuándo
+    # vale el certificado que tiene (para mandarle uno renovado).
+    ip_local: str | None = Field(default=None, max_length=45)
+    cert_vence: datetime | None = None
+
+
+class CertificadoIn(BaseModel):
+    ip_local: str = Field(..., max_length=45)
+    csr: str = Field(..., max_length=8000)
 
 
 async def emitir(session: AsyncSession, inst: Instalacion) -> dict:
@@ -250,10 +269,13 @@ async def activar(payload: ActivarIn, request: Request, session: AsyncSession = 
     inst.activada_at = inst.ultimo_latido = datetime.utcnow()
     inst.version = payload.version
     inst.ip = ip[:64]
+    if certificados_locales.disponible() and not inst.subdominio:
+        inst.subdominio = certificados_locales.subdominio_para(await session.get(Tenant, inst.empresa_id), inst)
     firmada = await emitir(session, inst)
     await session.commit()
     logger.warning("Instalación local %s activada desde %s", inst.id, ip)
-    return {"instalacion_id": inst.id, "token": token, "descarga": _descarga(), **firmada}
+    # `subdominio` vacío = esta central no da certificados reales en red local.
+    return {"instalacion_id": inst.id, "token": token, "descarga": _descarga(), "subdominio": inst.subdominio, **firmada}
 
 
 @publico.post("/latido")
@@ -261,6 +283,23 @@ async def latido(payload: LatidoIn, request: Request, session: AsyncSession = De
     _solo_central()
     ip = ip_cliente(request)
     limitar_uso(_POR_IP_LATIDO, ip)
+    inst = await _por_token(session, request)
+    inst.ultimo_latido = datetime.utcnow()
+    inst.version = payload.version
+    inst.ip = ip[:64]
+    inst.uso = {str(k)[:40]: int(v) for k, v in list(payload.uso.items())[:_MAX_USO]}
+    firmada = await emitir(session, inst)
+    await session.commit()
+    await certificados_locales.actualizar_ip(session, inst, payload.ip_local)
+    respuesta = {**firmada, "version_disponible": settings.version_publicada or None}
+    # Un certificado más nuevo que el que tiene (renovado por la central).
+    if inst.certificado and inst.cert_vence and (payload.cert_vence is None or
+                                                 payload.cert_vence.replace(tzinfo=None) < inst.cert_vence):
+        respuesta["certificado"] = {"dominio": inst.subdominio, "cadena": inst.certificado, "vence": inst.cert_vence}
+    return respuesta
+
+
+async def _por_token(session: AsyncSession, request: Request) -> Instalacion:
     cabecera = request.headers.get("Authorization", "")
     token = cabecera[7:].strip() if cabecera.startswith("Bearer ") else ""
     inst = None
@@ -270,13 +309,25 @@ async def latido(payload: LatidoIn, request: Request, session: AsyncSession = De
         ).scalar_one_or_none()
     if not inst:
         raise HTTPException(status_code=401, detail="Instalación no reconocida")
-    inst.ultimo_latido = datetime.utcnow()
-    inst.version = payload.version
-    inst.ip = ip[:64]
-    inst.uso = {str(k)[:40]: int(v) for k, v in list(payload.uso.items())[:_MAX_USO]}
-    firmada = await emitir(session, inst)
-    await session.commit()
-    return {**firmada, "version_disponible": settings.version_publicada or None}
+    return inst
+
+
+@publico.post("/certificado")
+async def certificado(payload: CertificadoIn, request: Request, session: AsyncSession = Depends(get_admin_session)):
+    """Certificado real para una instalación en red local. Manda su IP privada
+    y el CSR de SU clave (la clave nunca viaja). Tarda hasta un par de
+    minutos: la central publica el desafío en el DNS y espera a Let's
+    Encrypt."""
+    _solo_central()
+    limitar_uso(_POR_IP_ACTIVAR, ip_cliente(request), "Demasiados pedidos de certificado; espera unos minutos")
+    inst = await _por_token(session, request)
+    if inst.estado != "activa":
+        raise HTTPException(status_code=403, detail="La instalación no está activa")
+    try:
+        cadena = await certificados_locales.emitir(session, inst, payload.csr, payload.ip_local)
+    except certificados_locales.ErrorCertificado as exc:
+        raise HTTPException(status_code=502 if "No se pudo emitir" in str(exc) else 422, detail=str(exc))
+    return {"dominio": inst.subdominio, "cadena": cadena, "vence": inst.cert_vence}
 
 
 # --- En la instalación local ----------------------------------------------------------

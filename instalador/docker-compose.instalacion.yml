@@ -58,6 +58,17 @@ services:
       MODO_INSTALACION: local
       CENTRAL_URL: ${CENTRAL_URL:?Falta CENTRAL_URL en .env (lo escribe el instalador)}
       DOMINIO_LOCAL: ${PBX_HOST:-}
+      # Red local: la IP que se informa a la central para el subdominio.
+      IP_LOCAL: ${IP_LOCAL:-}
+      # Las de docker-compose.yml más las del certificado, que el backend
+      # renueva cuando la central le manda uno nuevo en el latido.
+      NSPBX_CARPETAS_PROPIAS: >-
+        /freeswitch-conf /freeswitch-recordings /backups
+        /freeswitch-sounds/bots /freeswitch-sounds/prompts
+        /certs-traefik /traefik-dinamico
+    volumes:
+      - ./certs:/certs-traefik
+      - ./traefik:/traefik-dinamico
 
   voicebot:
     build: !reset null

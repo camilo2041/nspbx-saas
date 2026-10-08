@@ -189,6 +189,11 @@ async def latir(cliente: httpx.AsyncClient | None = None) -> bool:
             return False
         fila.ultimo_intento_at = datetime.utcnow()
         cuerpo = {"version": VERSION, "uso": await uso(session)}
+        if settings.ip_local:
+            cuerpo["ip_local"] = settings.ip_local
+        vence_actual = vence_certificado()
+        if vence_actual:
+            cuerpo["cert_vence"] = vence_actual.isoformat()
         token = fila.token
         await session.commit()
     error = None
@@ -208,6 +213,8 @@ async def latir(cliente: httpx.AsyncClient | None = None) -> bool:
                 fila = await _fila(session)
                 fila.version_disponible = (datos.get("version_disponible") or None) and str(datos["version_disponible"])[:40]
                 await session.commit()
+            if isinstance(datos.get("certificado"), dict):
+                instalar_certificado(datos["certificado"].get("cadena") or "")
             return True
         error = f"La central respondió {r.status_code}"
         if r.status_code == 401:
@@ -284,3 +291,66 @@ class Latido:
 
 
 latido = Latido()
+
+
+# --- Certificado real en red local (lo emite la central, ver
+# services/certificados_locales.py; acá solo se instala) -----------------------------
+
+_TRAEFIK_YML = """# Lo escribe el backend (services/licencia_local.py) al instalar un certificado.
+# Cambia en cada instalación para que Traefik lo vuelva a leer.
+# {marca}
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/panel.crt
+        keyFile: /certs/panel.key
+"""
+
+
+def _archivos() -> tuple[Path, Path]:
+    base = Path(settings.certs_dir)
+    return base / "panel.crt", base / "panel.key"
+
+
+def vence_certificado() -> datetime | None:
+    """Hasta cuándo vale el certificado instalado (UTC), o None si no hay."""
+    from cryptography import x509
+
+    crt, _ = _archivos()
+    try:
+        return x509.load_pem_x509_certificate(crt.read_bytes()).not_valid_after_utc.replace(tzinfo=None)
+    except (OSError, ValueError):
+        return None
+
+
+def instalar_certificado(cadena: str) -> bool:
+    """Instala una cadena renovada si corresponde a NUESTRA clave privada
+    (una cadena para otra clave dejaría el panel sin HTTPS). Escritura
+    atómica: Traefik nunca lee un archivo a medias."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+
+    crt, key = _archivos()
+    try:
+        cert = x509.load_pem_x509_certificate(cadena.encode())
+        clave = serialization.load_pem_private_key(key.read_bytes(), password=None)
+    except (OSError, ValueError) as exc:
+        logger.error("No se instaló el certificado nuevo: %s", exc)
+        return False
+    formato = (serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+    if cert.public_key().public_bytes(*formato) != clave.public_key().public_bytes(*formato):
+        logger.error("El certificado que mandó la central no corresponde a la clave de este servidor")
+        return False
+    tmp = crt.with_suffix(".tmp")
+    tmp.write_text(cadena)
+    tmp.replace(crt)
+    yml = Path(settings.traefik_dir) / "certificado.yml"
+    try:
+        tmp = yml.with_suffix(".tmp")
+        tmp.write_text(_TRAEFIK_YML.format(marca=datetime.utcnow().isoformat()))
+        tmp.replace(yml)
+    except OSError as exc:
+        logger.error("No se pudo avisar a Traefik del certificado nuevo: %s", exc)
+    logger.warning("Certificado renovado instalado (vence %s)", cert.not_valid_after_utc)
+    return True

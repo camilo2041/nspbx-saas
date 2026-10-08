@@ -77,6 +77,7 @@ _ABIERTAS = (
     "/api/licencia/activar",
     "/api/licencia/latido",
     "/api/licencia/instalar.sh",
+    "/api/licencia/certificado",
 )
 
 # Lo único que puede hacer una sesión de un rol que exige MFA y todavía no

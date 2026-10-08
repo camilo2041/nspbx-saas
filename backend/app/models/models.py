@@ -1687,6 +1687,28 @@ class Instalacion(Base):
     # Resumen de uso del último latido: solo cantidades (extensiones, minutos…).
     uso: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Red local con certificado real (services/certificados_locales.py): el
+    # subdominio que le dimos, la IP privada a la que apunta, el CSR que
+    # mandó (su clave privada nunca sale de su servidor) y la cadena emitida.
+    subdominio: Mapped[str | None] = mapped_column(String(120), nullable=True, unique=True)
+    ip_local: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    csr: Mapped[str | None] = mapped_column(Text, nullable=True)
+    certificado: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cert_vence: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cert_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class AcmeCuenta(Base):
+    """La cuenta de la central en Let's Encrypt (una fila). Su clave va
+    cifrada: con ella se pueden pedir y revocar certificados de los
+    subdominios."""
+
+    __tablename__ = "acme_cuenta"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    clave: Mapped[str] = mapped_column(TextoCifrado())
+    kid: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    directorio: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class LicenciaLocal(Base):
