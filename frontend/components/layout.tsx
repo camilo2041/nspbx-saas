@@ -11,6 +11,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { FichaCliente } from "@/components/ficha-cliente";
 import { FloatingCallWidget } from "@/components/floating-call-widget";
 import { IncomingCallBanner } from "@/components/incoming-call-banner";
+import { AvisoLicenciaLocal } from "@/components/licencia-local";
 import { ThemeToggle } from "@/components/theme";
 import { api } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -797,6 +798,7 @@ function Marco({ children }: { children: ReactNode }) {
           </div>
         </header>
 
+        <AvisoLicenciaLocal />
         <main className="flex-1 overflow-auto">
           <div
             key={pathname}
