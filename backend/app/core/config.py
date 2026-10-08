@@ -126,6 +126,13 @@ class Settings(BaseSettings):
     licencia_clave_privada: str = ""
     # Central: horas que una licencia sigue valiendo sin un latido nuevo.
     licencia_gracia_horas: int = 72
+    # Central: de dónde bajan las instalaciones sus imágenes y qué versión
+    # instalar (.github/workflows/publicar.yml). Se le entregan al activarse.
+    # El token es de SOLO LECTURA de paquetes (GitHub: read:packages).
+    registro: str = "ghcr.io/camilo2041"
+    registro_usuario: str = ""
+    registro_token: str = ""
+    version_publicada: str = ""
     # Local: clave PÚBLICA con la que se verifican (va dentro de la imagen).
     licencia_clave_publica: str = ""
     # Local: dirección de la central (https://pbx.ejemplo.com).

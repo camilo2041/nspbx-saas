@@ -31,6 +31,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
+# Clave pública con la que una instalación local verifica su licencia
+# (docs/plan-fase-k.md). La pone el workflow que publica las imágenes; en
+# un build normal queda vacía y no se usa (MODO_INSTALACION=nube).
+ARG LICENCIA_CLAVE_PUBLICA=""
+ARG NSPBX_VERSION="dev"
+ENV LICENCIA_CLAVE_PUBLICA=${LICENCIA_CLAVE_PUBLICA} \
+    NSPBX_VERSION=${NSPBX_VERSION}
+
 # Usuario sin privilegios para el voicebot (ver entrypoint.sh). Sin shell
 # ni home: no hace falta para correr Python.
 RUN groupadd --system --gid 10001 nspbx \

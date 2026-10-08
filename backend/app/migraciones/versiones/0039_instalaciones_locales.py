@@ -42,7 +42,8 @@ def upgrade() -> None:
         "firma VARCHAR(200) NOT NULL, "
         "recibida_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT now(), "
         "ultimo_intento_at TIMESTAMP WITHOUT TIME ZONE, "
-        "ultimo_error VARCHAR(300))"
+        "ultimo_error VARCHAR(300), "
+        "version_disponible VARCHAR(40))"
     )
 
 

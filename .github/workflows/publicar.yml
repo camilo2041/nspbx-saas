@@ -1,0 +1,106 @@
+# Publica una versión para las instalaciones locales (docs/plan-fase-k.md):
+# las imágenes del backend, el panel y FreeSWITCH, más el paquete de
+# instalación, en el registro de GitHub (ghcr.io).
+#
+# Se dispara con una etiqueta v1.2.3 o a mano. Necesita el secreto del
+# repositorio LICENCIA_CLAVE_PUBLICA (la pública del par de la central:
+# `python -m app.cli.claves_licencia`): va dentro de la imagen del backend
+# y es con lo que cada instalación verifica su licencia.
+
+name: Publicar versión
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión (sin la v), ej. 1.2.0"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRO: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  imagenes:
+    name: Imagen ${{ matrix.nombre }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - nombre: backend
+            contexto: backend
+          - nombre: frontend
+            contexto: frontend
+          - nombre: freeswitch
+            contexto: freeswitch
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versión
+        id: v
+        run: echo "version=${INPUT_VERSION:-${GITHUB_REF_NAME#v}}" >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+      - name: La clave pública está
+        if: matrix.nombre == 'backend'
+        env:
+          CLAVE: ${{ secrets.LICENCIA_CLAVE_PUBLICA }}
+        run: |
+          if [ -z "$CLAVE" ]; then
+            echo "::error::Falta el secreto LICENCIA_CLAVE_PUBLICA: sin él ninguna instalación local podría verificar su licencia."
+            exit 1
+          fi
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.contexto }}
+          push: true
+          build-args: |
+            LICENCIA_CLAVE_PUBLICA=${{ matrix.nombre == 'backend' && secrets.LICENCIA_CLAVE_PUBLICA || '' }}
+            NSPBX_VERSION=${{ steps.v.outputs.version }}
+          tags: |
+            ${{ env.REGISTRO }}/nspbx-${{ matrix.nombre }}:${{ steps.v.outputs.version }}
+            ${{ env.REGISTRO }}/nspbx-${{ matrix.nombre }}:latest
+          cache-from: type=gha,scope=${{ matrix.nombre }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.nombre }}
+
+  paquete:
+    name: Paquete de instalación
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versión
+        id: v
+        run: echo "version=${INPUT_VERSION:-${GITHUB_REF_NAME#v}}" >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+      - name: Revisar el instalador
+        run: |
+          bash -n instalador/instalar.sh
+          bash -n instalador/nspbx
+          bash -n scripts/setup.sh
+      - name: Armar el paquete
+        run: bash instalador/armar-paquete.sh "${{ steps.v.outputs.version }}"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: instalador
+          file: instalador/Dockerfile.paquete
+          push: true
+          tags: |
+            ${{ env.REGISTRO }}/nspbx-paquete:${{ steps.v.outputs.version }}
+            ${{ env.REGISTRO }}/nspbx-paquete:latest

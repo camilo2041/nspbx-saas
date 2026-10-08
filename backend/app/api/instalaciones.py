@@ -11,9 +11,12 @@
 """
 
 import logging
+import re
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -197,6 +200,35 @@ async def emitir(session: AsyncSession, inst: Instalacion) -> dict:
         raise HTTPException(status_code=503, detail="La central no puede emitir licencias todavía. Avisa a soporte.")
 
 
+def _descarga() -> dict:
+    """Con qué baja el instalador las imágenes (no va firmado: no decide nada
+    de la licencia). Sin versión publicada, el instalador no puede seguir."""
+    return {
+        "registro": settings.registro,
+        "usuario": settings.registro_usuario,
+        "token": settings.registro_token,
+        "version": settings.version_publicada,
+    }
+
+
+_INSTALADOR = Path(__file__).resolve().parent.parent / "recursos" / "instalar.sh"
+
+
+@publico.get("/instalar.sh", response_class=PlainTextResponse)
+async def instalador(request: Request):
+    """El asistente de instalación, con la dirección de esta central puesta:
+
+        curl -fsSL https://<central>/api/licencia/instalar.sh | sudo bash
+    """
+    _solo_central()
+    limitar_uso(_POR_IP_LATIDO, ip_cliente(request))
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    if not re.fullmatch(r"[A-Za-z0-9.-]+(:\d+)?", host):
+        raise HTTPException(status_code=400, detail="Host inválido")
+    return PlainTextResponse(_INSTALADOR.read_text().replace("__CENTRAL__", f"https://{host}", 1),
+                             media_type="text/x-shellscript")
+
+
 @publico.post("/activar")
 async def activar(payload: ActivarIn, request: Request, session: AsyncSession = Depends(get_admin_session)):
     _solo_central()
@@ -221,7 +253,7 @@ async def activar(payload: ActivarIn, request: Request, session: AsyncSession = 
     firmada = await emitir(session, inst)
     await session.commit()
     logger.warning("Instalación local %s activada desde %s", inst.id, ip)
-    return {"instalacion_id": inst.id, "token": token, **firmada}
+    return {"instalacion_id": inst.id, "token": token, "descarga": _descarga(), **firmada}
 
 
 @publico.post("/latido")
@@ -244,7 +276,7 @@ async def latido(payload: LatidoIn, request: Request, session: AsyncSession = De
     inst.uso = {str(k)[:40]: int(v) for k, v in list(payload.uso.items())[:_MAX_USO]}
     firmada = await emitir(session, inst)
     await session.commit()
-    return firmada
+    return {**firmada, "version_disponible": settings.version_publicada or None}
 
 
 # --- En la instalación local ----------------------------------------------------------

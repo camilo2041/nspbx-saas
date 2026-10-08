@@ -1,0 +1,6 @@
+# El paquete de instalación (compose, configuración de FreeSWITCH, scripts y
+# el comando nspbx) viaja como una imagen más del registro: queda versionado
+# junto con las demás y el instalador lo baja con el mismo acceso.
+FROM busybox:1.36
+COPY paquete.tar.gz /paquete.tar.gz
+CMD ["cat", "/paquete.tar.gz"]

@@ -18,6 +18,7 @@ central y se aplican tal cual.
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -35,7 +36,9 @@ logger = logging.getLogger(__name__)
 EMPRESA_LOCAL = 1
 ARCHIVO_INSTALADOR = Path("/run/secrets/licencia.json")
 CADA_S = 3600
-VERSION = "1.0.0"
+# La versión instalada: la escribe el workflow de publicación en la imagen
+# (variable NSPBX_VERSION); en desarrollo, "dev".
+VERSION = os.getenv("NSPBX_VERSION", "dev")
 _ESTADOS = {"active", "trial", "suspended"}
 
 
@@ -202,6 +205,9 @@ async def latir(cliente: httpx.AsyncClient | None = None) -> bool:
             datos = r.json()
             async with async_session() as session:
                 await aplicar(session, datos["documento"], datos["firma"])
+                fila = await _fila(session)
+                fila.version_disponible = (datos.get("version_disponible") or None) and str(datos["version_disponible"])[:40]
+                await session.commit()
             return True
         error = f"La central respondió {r.status_code}"
         if r.status_code == 401:
@@ -243,6 +249,8 @@ async def estado(session) -> dict:
         "ultimo_intento": fila.ultimo_intento_at,
         "ultimo_error": fila.ultimo_error,
         "horas_sin_contacto": round(sin_contacto_h, 1),
+        "version": VERSION,
+        "version_disponible": fila.version_disponible,
     }
 
 

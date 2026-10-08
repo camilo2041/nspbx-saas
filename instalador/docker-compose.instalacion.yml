@@ -1,0 +1,73 @@
+# Instalación local en el servidor de un cliente (docs/plan-fase-k.md).
+#
+# Se usa encima del docker-compose.yml de siempre:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.instalacion.yml up -d
+#
+# (el comando `nspbx` ya lo hace). Cambia tres cosas:
+#
+# - Imágenes publicadas en vez de compilar: en el servidor del cliente no
+#   hay código fuente, solo las imágenes de la versión instalada.
+# - Su propio Traefik (en el servidor de producción se usa el de Dokploy):
+#   con dominio, certificado de Let's Encrypt; en red local, el
+#   certificado propio que genera el instalador.
+# - El backend en modo local: la empresa y su licencia llegan firmadas de
+#   la central.
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: nspbx_traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=traefik-public
+      - --providers.file.directory=/etc/traefik/dinamico
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --log.level=WARN
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+      # Red local: el certificado propio como certificado por omisión.
+      - ./traefik:/etc/traefik/dinamico:ro
+      - ./certs:/certs:ro
+    networks:
+      - traefik-public
+
+  freeswitch:
+    build: !reset null
+    image: ${NSPBX_REGISTRO}/nspbx-freeswitch:${NSPBX_VERSION}
+
+  backend:
+    build: !reset null
+    image: ${NSPBX_REGISTRO}/nspbx-backend:${NSPBX_VERSION}
+    environment:
+      MODO_INSTALACION: local
+      CENTRAL_URL: ${CENTRAL_URL:?Falta CENTRAL_URL en .env (lo escribe el instalador)}
+      DOMINIO_LOCAL: ${PBX_HOST:-}
+
+  voicebot:
+    build: !reset null
+    image: ${NSPBX_REGISTRO}/nspbx-backend:${NSPBX_VERSION}
+
+  frontend:
+    build: !reset null
+    image: ${NSPBX_REGISTRO}/nspbx-frontend:${NSPBX_VERSION}
+
+networks:
+  traefik-public:
+    external: false
+    name: traefik-public

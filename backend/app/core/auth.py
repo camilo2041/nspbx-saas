@@ -76,6 +76,7 @@ _ABIERTAS = (
     # token propio, con tope por IP (ver app/api/instalaciones.py).
     "/api/licencia/activar",
     "/api/licencia/latido",
+    "/api/licencia/instalar.sh",
 )
 
 # Lo único que puede hacer una sesión de un rol que exige MFA y todavía no

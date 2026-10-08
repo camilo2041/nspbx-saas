@@ -96,6 +96,7 @@ async def test_alta_activacion_y_latido(cliente, mundo):
         r = await cliente.post("/api/licencia/activar", json={"codigo": codigo.lower(), "version": "1.0.0"})
         assert r.status_code == 200, r.text
         act = r.json()
+        assert act["descarga"]["registro"] and "version" in act["descarga"]
         doc = lf.verificar(act["documento"], act["firma"], _PUBLICA)
         assert doc["instalacion_id"] == inst["id"]
         assert doc["empresa"]["nombre"] == "Empresa alfa" and set(doc["empresa"]["modules"]) == {"voicebot", "pbx"}
@@ -341,3 +342,10 @@ def test_el_arranque_revisa_la_configuracion_local():
         if "LICENCIA" in p or "CENTRAL" in p]
     assert any("MODO_INSTALACION" in p for p in problemas_de_configuracion(Settings(**base, modo_instalacion="otro"), "x" * 40))
     assert any("Ed25519" in p for p in problemas_de_configuracion(Settings(**base, licencia_clave_privada="mala"), "x" * 40))
+
+
+async def test_la_central_sirve_el_instalador_con_su_direccion(cliente):
+    r = await cliente.get("/api/licencia/instalar.sh", headers={"X-Forwarded-Host": "pbx.central.test"})
+    assert r.status_code == 200 and r.text.startswith("#!/usr/bin/env bash")
+    assert 'CENTRAL="${NSPBX_CENTRAL:-https://pbx.central.test}"' in r.text and "__CENTRAL__" not in r.text
+    assert (await cliente.get("/api/licencia/instalar.sh", headers={"X-Forwarded-Host": "x;rm -rf /"})).status_code == 400

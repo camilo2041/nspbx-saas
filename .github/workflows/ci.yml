@@ -57,6 +57,9 @@ jobs:
       # Importaciones sin usar, nombres ambiguos, errores de sintaxis (backend/ruff.toml).
       - name: Lint (ruff)
         run: ruff check app tests
+      # El instalador de los servidores de clientes y el comando nspbx (docs/plan-fase-k.md).
+      - name: Sintaxis del instalador
+        run: bash -n app/recursos/instalar.sh ../instalador/nspbx ../instalador/armar-paquete.sh ../scripts/setup.sh
       - name: Pruebas con RLS (como en producción)
         run: python -m pytest -q
       # La misma suite con la API usando el rol dueño, que se saltea RLS:

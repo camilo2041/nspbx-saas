@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+#
+# nspbx — la central en el servidor del cliente, después de instalarla.
+#
+#   nspbx estado          contenedores, licencia y contacto con la central
+#   nspbx logs [servicio] los últimos registros (backend, freeswitch…)
+#   nspbx reiniciar       reinicia todo
+#   nspbx licencia        renueva la licencia con la central ahora mismo
+#   nspbx respaldo        respaldo de la base ahora mismo
+#   nspbx actualizar [v]  respaldo + versión nueva (la que ofrece la central)
+#   nspbx verificar       revisión completa de la instalación
+#   nspbx soporte         arma un paquete de diagnóstico SIN secretos
+#   nspbx desinstalar     apaga y quita los contenedores (los datos quedan)
+#
+# Vive en /opt/nspbx/nspbx y se enlaza como /usr/local/bin/nspbx.
+
+set -uo pipefail
+
+DIR="${NSPBX_DIR:-/opt/nspbx}"
+cd "$DIR" 2>/dev/null || { echo "No encuentro la instalación en $DIR"; exit 1; }
+
+V='\033[32m'; R='\033[31m'; A='\033[33m'; N='\033[1m'; G='\033[2m'; X='\033[0m'
+ok()    { printf "  ${V}✓${X} %s\n" "$1"; }
+mal()   { printf "  ${R}✗${X} %s\n" "$1"; }
+aviso() { printf "  ${A}!${X} %s\n" "$1"; }
+titulo(){ printf "\n${N}%s${X}\n" "$1"; }
+
+dc() { docker compose -f docker-compose.yml -f docker-compose.instalacion.yml "$@"; }
+valor_env() { grep -E "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2-; }
+
+exigir_root() {
+  [ "$(id -u)" -eq 0 ] || { echo "Este comando necesita sudo: sudo nspbx $*"; exit 1; }
+}
+
+esperar_sanos() {
+  local i estado todos
+  for i in $(seq 1 60); do
+    todos=1
+    for c in nspbx_postgres nspbx_backend nspbx_freeswitch nspbx_frontend; do
+      estado=$(docker inspect "$c" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null)
+      case "$estado" in healthy|running) ;; *) todos=0 ;; esac
+    done
+    [ "$todos" -eq 1 ] && return 0
+    sleep 5
+  done
+  return 1
+}
+
+cmd_estado() {
+  titulo "NSPBX $(cat VERSION 2>/dev/null) en $(valor_env PBX_HOST)"
+  titulo "Servicios"
+  for c in nspbx_traefik nspbx_postgres nspbx_backend nspbx_voicebot nspbx_freeswitch nspbx_frontend; do
+    e=$(docker inspect "$c" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || echo "ausente")
+    case "$e" in healthy|running) ok "${c#nspbx_}" ;; *) mal "${c#nspbx_}: $e" ;; esac
+  done
+  titulo "Licencia"
+  dc exec -T backend python -m app.cli.licencia estado 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("  ! No pude leer la licencia (¿está arrancando el backend?)"); sys.exit()
+if not d.get("activada"):
+    print("  ✗ Sin activar"); sys.exit()
+if not d.get("valida"):
+    print("  ✗ Licencia no válida: " + str(d.get("error"))); sys.exit()
+estados = {"active": "activa", "trial": "de prueba", "suspended": "SUSPENDIDA"}
+print(f"  Empresa:  {d[\"empresa\"]}")
+print(f"  Plan:     {d[\"plan\"]} ({estados.get(d[\"estado\"], d[\"estado\"])})")
+print(f"  Vence:    {d.get(\"vence\") or \"sin vencimiento\"}")
+print(f"  Central:  último contacto hace {d[\"horas_sin_contacto\"]} h (opera sin ella hasta {d[\"valida_hasta\"]})")
+if d.get("ultimo_error"):
+    print(f"  ! Último intento: {d[\"ultimo_error\"]}")
+if d.get("version_disponible") and d["version_disponible"] != d.get("version"):
+    print(f"  ↑ Hay una versión nueva: {d[\"version_disponible\"]}  →  sudo nspbx actualizar")
+'
+  echo
+}
+
+cmd_respaldo() {
+  exigir_root respaldo
+  local f="backups/manual-$(date +%Y%m%d-%H%M%S).sql.gz"
+  mkdir -p backups
+  printf "Respaldando la base en %s… " "$f"
+  if dc exec -T postgres pg_dump -U "$(valor_env POSTGRES_USER || echo nspbx)" "$(valor_env POSTGRES_DB || echo nspbx)" | gzip > "$f" \
+     && [ -s "$f" ]; then
+    echo -e "${V}listo${X} ($(du -h "$f" | cut -f1))"
+  else
+    rm -f "$f"; echo -e "${R}falló${X}"; return 1
+  fi
+}
+
+cmd_actualizar() {
+  exigir_root actualizar
+  local nueva="${1:-}" actual registro
+  actual="$(cat VERSION 2>/dev/null)"
+  registro="$(valor_env NSPBX_REGISTRO)"
+  if [ -z "$nueva" ]; then
+    nueva=$(dc exec -T backend python -m app.cli.licencia renovar 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version_disponible") or "")' 2>/dev/null)
+  fi
+  [ -n "$nueva" ] || { echo "La central no ofrece una versión nueva. Uso: sudo nspbx actualizar 1.2.3"; exit 1; }
+  [ "$nueva" != "$actual" ] || { echo "Ya está en la versión $actual."; exit 0; }
+  echo -e "${N}Actualizar de $actual a $nueva${X}"
+  cmd_respaldo || { echo "Sin respaldo no se actualiza."; exit 1; }
+  printf "Bajando el paquete %s… " "$nueva"
+  docker pull -q "$registro/nspbx-paquete:$nueva" >/dev/null || { echo -e "${R}no existe esa versión${X}"; exit 1; }
+  local tmp; tmp="$(mktemp -d)"
+  docker run --rm "$registro/nspbx-paquete:$nueva" > "$tmp/p.tgz" && tar -xzf "$tmp/p.tgz" -C "$tmp"
+  # Solo lo del paquete: .env, secretos, certificados, grabaciones y la
+  # configuración generada de FreeSWITCH no vienen en él y no se tocan.
+  cp -r "$tmp/nspbx/." "$DIR/"
+  rm -rf "$tmp"
+  echo -e "${V}listo${X}"
+  sed -i "s/^NSPBX_VERSION=.*/NSPBX_VERSION=$nueva/" .env
+  echo "Bajando las imágenes nuevas…"
+  dc pull -q || { echo "No se pudieron bajar las imágenes."; exit 1; }
+  dc up -d --remove-orphans
+  printf "Esperando que todo arranque… "
+  if esperar_sanos; then echo -e "${V}listo${X}"; else echo -e "${A}revisa con: nspbx estado${X}"; fi
+  ln -sf "$DIR/nspbx" /usr/local/bin/nspbx
+}
+
+cmd_soporte() {
+  local f="/tmp/nspbx-soporte-$(date +%Y%m%d-%H%M%S).tar.gz" t
+  t="$(mktemp -d)"
+  cmd_estado > "$t/estado.txt" 2>&1
+  bash scripts/verificar.sh > "$t/verificar.txt" 2>&1 || true
+  for s in backend voicebot freeswitch frontend traefik; do dc logs --tail 400 "$s" > "$t/log-$s.txt" 2>&1; done
+  docker ps -a > "$t/contenedores.txt" 2>&1
+  df -h > "$t/disco.txt"; free -m > "$t/memoria.txt"
+  # Los registros no llevan secretos (el backend los filtra), pero por si
+  # acaso se tapa todo lo que se parezca a una clave del .env.
+  while IFS='=' read -r k v; do
+    [ ${#v} -ge 8 ] && grep -rlF -- "$v" "$t" 2>/dev/null | xargs -r sed -i "s|$(printf '%s' "$v" | sed 's/[|&\\]/\\&/g')|[$k]|g"
+  done < <(grep -E '^[A-Z_]+=.' .env)
+  tar -czf "$f" -C "$t" . && rm -rf "$t"
+  echo "Paquete de diagnóstico: $f (sin el .env ni secretos). Envíalo a soporte."
+}
+
+cmd_desinstalar() {
+  exigir_root desinstalar
+  echo -e "${R}${N}Esto apaga la central y quita sus contenedores.${X}"
+  echo "Los datos (base, grabaciones, respaldos y el .env) QUEDAN en $DIR."
+  read -rp "Escribe DESINSTALAR para confirmar: " r
+  [ "$r" = "DESINSTALAR" ] || { echo "Cancelado."; exit 0; }
+  dc down --remove-orphans
+  rm -f /usr/local/bin/nspbx
+  echo "Listo. Para borrar también los datos: sudo rm -rf $DIR (no se puede deshacer)."
+}
+
+case "${1:-ayuda}" in
+  estado)      cmd_estado ;;
+  logs)        dc logs --tail 200 -f "${2:-backend}" ;;
+  reiniciar)   exigir_root reiniciar; dc restart && cmd_estado ;;
+  licencia)    dc exec -T backend python -m app.cli.licencia renovar >/dev/null 2>&1; cmd_estado ;;
+  respaldo)    cmd_respaldo ;;
+  actualizar)  cmd_actualizar "${2:-}" ;;
+  verificar)   bash scripts/verificar.sh ;;
+  soporte)     cmd_soporte ;;
+  desinstalar) cmd_desinstalar ;;
+  version)     cat VERSION ;;
+  *)           sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac

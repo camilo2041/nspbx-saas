@@ -1706,6 +1706,8 @@ class LicenciaLocal(Base):
     recibida_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     ultimo_intento_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ultimo_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # La versión que la central ofrece instalar (`nspbx actualizar`).
+    version_disponible: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
 class ErrorCliente(Base):
