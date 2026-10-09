@@ -22,7 +22,6 @@ _GLOBALES = [
     ("GET", "/api/system/diagnostics", None),
     ("GET", "/api/system/maintenance", None),
     ("POST", "/api/system/maintenance/backup-now", None),
-    ("GET", "/api/system/recursos", None),
     ("GET", "/api/plataforma/salientes", None),
     ("PUT", "/api/plataforma/salientes", {"outbound_blocked": True}),
     ("GET", "/api/plataforma/destinos-bloqueados", None),
@@ -63,6 +62,7 @@ _SOLO_ADMIN = [
     "/api/role-permissions",
     "/api/system/settings",
     "/api/security/bans",
+    "/api/system/recursos",
 ]
 
 

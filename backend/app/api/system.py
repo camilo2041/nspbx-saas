@@ -3,7 +3,9 @@ import socket
 from pathlib import Path
 
 import psutil
+from app.core import permissions
 from app.core.alcance import requiere_operador_global
+from app.core.auth import requiere
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -238,7 +240,7 @@ def _leer_recursos() -> dict:
     }
 
 
-@router.get("/recursos", dependencies=[Depends(requiere_operador_global)])
+@router.get("/recursos", dependencies=[Depends(requiere(permissions.AJUSTES_GESTIONAR))])
 async def recursos():
     """CPU, RAM, swap y disco de la máquina que hospeda todo esto — lo
     que antes había que revisar entrando al servidor a mano (o al
